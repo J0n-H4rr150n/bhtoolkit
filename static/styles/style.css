@@ -1,0 +1,293 @@
+/* --- Existing styles from ui_shell_css_v3_modal --- */
+/* Basic Reset */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background-color: #f4f7f9; font-size: 14px; }
+/* Top Navigation Bar */
+.top-nav { background-color: #2c3e50; color: white; padding: 0 20px; height: 50px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }
+.top-nav .logo { font-size: 1.4em; font-weight: bold; }
+.top-nav .nav-options { display: flex; align-items: center; }
+.top-nav .nav-item { margin-left: 15px; position: relative; }
+.top-nav .nav-item a, .top-nav .nav-item button { color: white; text-decoration: none; padding: 6px 10px; border-radius: 4px; transition: background-color 0.2s ease; background: none; border: none; cursor: pointer; font-size: 0.95em; }
+.top-nav .nav-item a:hover, .top-nav .nav-item button:hover { background-color: #34495e; }
+.top-nav .search-box input[type="search"] { padding: 6px 10px; border-radius: 4px; border: 1px solid #7f8c8d; background-color: #ecf0f1; color: #2c3e50; min-width: 200px; font-size: 0.9em; }
+.top-nav .search-box input[type="search"]::placeholder { color: #7f8c8d; }
+/* Main Content Area Layout */
+.main-layout { display: flex; flex-grow: 1; overflow: hidden; }
+/* Left Sidebar */
+.left-sidebar { background-color: #34495e; color: white; width: 220px; padding-top: 10px; transition: width 0.3s ease, padding-left 0.3s ease, padding-right 0.3s ease; overflow-y: auto; flex-shrink: 0; display: flex; flex-direction: column; scrollbar-width: thin; scrollbar-color: #7f8c8d #34495e; }
+.left-sidebar::-webkit-scrollbar { width: 8px; }
+.left-sidebar::-webkit-scrollbar-track { background: #34495e; }
+.left-sidebar::-webkit-scrollbar-thumb { background-color: #7f8c8d; border-radius: 4px; border: 2px solid #34495e; }
+.left-sidebar.collapsed { width: 50px; padding-left: 5px; padding-right: 5px; }
+.left-sidebar.collapsed .sidebar-item-text, .left-sidebar.collapsed .sidebar-category-title { display: none; }
+.left-sidebar.collapsed .sidebar-item .icon { margin-right: 0; display: block; text-align: center; width: 100%; }
+.left-sidebar.collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
+.left-sidebar.collapsed .sidebar-toggle { justify-content: center; }
+.sidebar-toggle { background-color: #2c3e50; color: white; border: none; padding: 10px; cursor: pointer; text-align: left; font-size: 1.1em; width: 100%; margin-bottom: 10px; display: flex; align-items: center; padding-left: 15px; }
+.left-sidebar.collapsed .sidebar-toggle { padding-left: 0; justify-content: center; }
+.sidebar-toggle:hover { background-color: #4a6178; }
+.sidebar-toggle .icon { margin-right: 10px; min-width: 20px; display: inline-block; }
+.left-sidebar.collapsed .sidebar-toggle .icon { margin-right: 0; }
+.sidebar-category { margin-bottom: 10px; }
+.sidebar-category-title { font-size: 0.75em; text-transform: uppercase; color: #bdc3c7; padding: 8px 15px; font-weight: bold; white-space: nowrap; overflow: hidden; }
+.sidebar-item { display: flex; align-items: center; padding: 10px 15px; color: #ecf0f1; text-decoration: none; transition: background-color 0.2s ease; white-space: nowrap; overflow: hidden; font-size: 0.95em; }
+.sidebar-item:hover, .sidebar-item.active { background-color: #4a6178; }
+.sidebar-item .icon { margin-right: 10px; font-size: 1.1em; min-width: 20px; text-align: center; }
+/* Main Content Area */
+.main-content { flex-grow: 1; padding: 15px; overflow-y: auto; background-color: #ffffff; scrollbar-width: thin; scrollbar-color: #bdc3c7 #f4f7f9; }
+.main-content::-webkit-scrollbar { width: 8px; }
+.main-content::-webkit-scrollbar-track { background: #f4f7f9; }
+.main-content::-webkit-scrollbar-thumb { background-color: #bdc3c7; border-radius: 4px; border: 2px solid #f4f7f9; }
+.main-content h1 { margin-bottom: 15px; color: #2c3e50; font-size: 1.6em; }
+.main-content h2 { margin-top: 20px; margin-bottom: 10px; color: #34495e; font-size: 1.3em; border-bottom: 1px solid #ecf0f1; padding-bottom: 5px; }
+.main-content p { line-height: 1.6; color: #333; margin-bottom: 10px; }
+/* Simple table styling */
+table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #ecf0f1; }
+th { background-color: #ecf0f1; color: #34495e; font-size: 0.9em; text-transform: uppercase; }
+tr:nth-child(even) { background-color: #f9f9f9; }
+tr:hover { background-color: #e8f4fd; }
+/* Basic form styling */
+.form-group { margin-bottom: 15px; }
+.form-group label { display: block; margin-bottom: 5px; font-weight: bold; color: #34495e; }
+.form-group input[type="text"], .form-group input[type="url"], .form-group textarea { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 0.95em; }
+.form-group textarea { min-height: 80px; resize: vertical; }
+button.primary, input[type="submit"].primary { background-color: #3498db; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: background-color 0.2s ease; }
+button.primary:hover, input[type="submit"].primary:hover { background-color: #2980b9; }
+button.secondary { background-color: #95a5a6; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: background-color 0.2s ease; }
+button.secondary:hover { background-color: #7f8c8d; }
+button.danger { background-color: #e74c3c; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: background-color 0.2s ease; }
+button.danger:hover { background-color: #c0392b; }
+
+.message-area { margin-top: 10px; font-size: 0.9em; padding: 8px; border-radius: 4px; }
+.error-message { color: #c0392b; background-color: #fdd; border: 1px solid #fbb; }
+.success-message { color: #27ae60; background-color: #dfd; border: 1px solid #bfb; }
+/* Utility */
+.hidden { display: none; }
+
+/* Modal Styles */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 2000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s linear 0.3s; }
+.modal-overlay:not(.hidden) { opacity: 1; visibility: visible; transition: opacity 0.3s ease; }
+.modal-box { background-color: white; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2); width: 90%; max-width: 450px; text-align: center; transform: scale(0.9); transition: transform 0.3s ease; }
+.modal-overlay:not(.hidden) .modal-box { transform: scale(1); }
+.modal-box h2 { margin-top: 0; margin-bottom: 15px; color: #34495e; }
+.modal-box p { margin-bottom: 20px; color: #555; line-height: 1.5; }
+.modal-buttons { display: flex; justify-content: center; gap: 10px; }
+.modal-buttons button { min-width: 80px; }
+
+/* --- NEW INLINE FORM STYLES --- */
+.inline-form {
+    display: flex;
+    gap: 10px; /* Space between elements */
+    align-items: center; /* Vertically align items */
+    margin-bottom: 20px; /* Space below the form */
+    padding: 10px;
+    background-color: #ecf0f1; /* Light background */
+    border-radius: 4px;
+}
+
+.inline-form .form-group {
+    margin-bottom: 0; /* Remove bottom margin */
+    flex-grow: 1; /* Allow input to take available space */
+}
+
+.inline-form label {
+    display: none; /* Hide label in inline form */
+}
+
+.inline-form input[type="text"] {
+    width: 100%; /* Ensure input takes full width of its container */
+}
+
+.inline-form button {
+    /* Make button height match input */
+    padding: 8px 15px; 
+    font-size: 0.95em;
+    flex-shrink: 0; /* Prevent button from shrinking */
+}
+/* --- END INLINE FORM STYLES --- */
+
+/* Action Buttons in Tables */
+.action-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1em; /* Make icons slightly larger */
+    padding: 2px 4px;
+    margin: 0 2px;
+    vertical-align: middle;
+}
+.action-button:hover {
+    opacity: 0.7;
+}
+td.platform-actions-cell, td.target-actions-cell { /* Add class for target actions too */
+    white-space: nowrap; /* Prevent action buttons from wrapping */
+}
+
+/* --- BREADCRUMB STYLES --- */
+.breadcrumb-container {
+    padding-bottom: 10px; /* Space below breadcrumbs */
+    margin-bottom: 15px; /* Space before main content h1 */
+    border-bottom: 1px solid #e0e0e0; /* Separator line */
+    font-size: 0.9em;
+    color: #555;
+}
+
+.breadcrumb-container a {
+    text-decoration: none;
+    color: #3498db;
+    margin-right: 5px;
+}
+
+.breadcrumb-container a:hover {
+    text-decoration: underline;
+}
+
+.breadcrumb-container span.separator {
+    margin-right: 5px;
+    color: #7f8c8d;
+}
+
+.breadcrumb-container span.current-page {
+    color: #2c3e50;
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+/* Scope Rule Forms specific styling */
+.scope-rule-form h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+    color: #34495e;
+}
+.scope-rule-form .form-group {
+    margin-bottom: 10px;
+}
+.scope-rule-form select { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 0.95em; background-color: white;}
+
+/* --- END BREADCRUMB STYLES --- */
+
+/* --- TABS STYLING (for Proxy Log Detail) --- */
+.tabs {
+    display: flex;
+    border-bottom: 2px solid #dee2e6;
+    margin-bottom: 15px;
+}
+
+.tab-button {
+    padding: 10px 15px;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    color: #495057;
+    border-bottom: 2px solid transparent; /* For active state */
+    margin-bottom: -2px; /* Align with container's border */
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.tab-button:hover {
+    color: #007bff;
+}
+
+.tab-button.active {
+    color: #007bff;
+    border-color: #007bff;
+    font-weight: bold;
+}
+
+.tab-content {
+    display: none; /* Hide tab content by default */
+}
+
+.tab-content.active {
+    display: block; /* Show active tab content */
+}
+
+/* Styling for headers and body boxes in log detail */
+.headers-box, .body-box {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    padding: 10px;
+    border-radius: 4px;
+    white-space: pre-wrap; /* Allow wrapping but preserve whitespace */
+    word-break: break-all; /* Break long words/strings */
+    max-height: 400px; /* Limit height and make scrollable if needed */
+    overflow-y: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.85em;
+    margin-bottom: 10px;
+}
+
+.notes-section textarea {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.9em;
+}
+
+/* Favorite Toggle Star */
+.favorite-toggle {
+    cursor: pointer;
+    color: #ccc; /* Default empty star color */
+}
+
+.favorite-toggle.favorited {
+    color: #ffc107; /* Gold color for filled star */
+}
+
+/* Proxy Log Table URL Cell Styling */
+.proxy-log-url-cell {
+    word-break: break-all; /* Allows long URLs to break and wrap */
+    white-space: normal;   /* Ensures wrapping respects spaces if any, but break-all handles no-space case */
+}
+
+/* Sortable Table Headers */
+th.sortable {
+    cursor: pointer;
+    position: relative; /* For positioning the arrow if using absolute positioning */
+}
+th.sortable:hover {
+    background-color: #e0e6eb; /* Slightly darker than default th */
+}
+th.sorted-asc::after,
+th.sorted-desc::after {
+    margin-left: 5px;
+}
+th.sorted-asc::after  { content: "▲"; font-size: 0.8em; }
+th.sorted-desc::after { content: "▼"; font-size: 0.8em; }
+
+/* Apply to TH elements within any THEAD that has an ID ending with 'TableHead' */
+thead[id$="TableHead"] th {
+    position: relative; /* Needed for absolute positioning of the resizer */
+    overflow: visible; /* Ensure resizer isn't clipped if th has overflow:hidden */
+}
+
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px; /* Position slightly outside to grab, adjust as needed */
+    width: 6px;  /* Width of the draggable area */
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10; /* Ensure it's on top */
+    /* background-color: rgba(0, 0, 255, 0.1); */ /* Optional: for debugging visibility */
+}
+
+/* Optional: Style when resizing */
+th.resizing {
+    /* Add any visual feedback during resize, e.g., border */
+    user-select: none; /* Prevent text selection during drag */
+}
+
+.small-button { /* If you don't have this already for the save layout button */
+    padding: 4px 8px;
+    font-size: 0.9em;
+}
+
+/* Styles for the command text in checklist tables to allow wrapping */
+td.checklist-item-command-text pre.command-text {
+    white-space: pre-wrap;   /* Allows wrapping while preserving whitespace like newlines */
+    word-wrap: break-word;   /* Breaks long words if necessary to prevent overflow */
+    overflow-wrap: break-word; /* Standardized version of word-wrap */
+    word-break: break-all;   /* Ensures very long strings without spaces also wrap */
+}

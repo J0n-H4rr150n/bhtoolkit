@@ -1,0 +1,264 @@
+package handlers
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"toolkit/database"
+	"toolkit/logger"
+	"toolkit/models"
+)
+
+// GetCurrentTargetSettingHandler retrieves the currently set target ID.
+func GetCurrentTargetSettingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		logger.Error("GetCurrentTargetSettingHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	targetIDStr, err := database.GetSetting(models.CurrentTargetIDKey)
+	if err != nil {
+		logger.Error("GetCurrentTargetSettingHandler: Error getting current target setting: %v", err)
+		http.Error(w, "Failed to retrieve current target setting", http.StatusInternalServerError)
+		return
+	}
+
+	var response struct {
+		TargetID *int64 `json:"target_id"`
+	}
+
+	if targetIDStr != "" {
+		targetID, convErr := strconv.ParseInt(targetIDStr, 10, 64)
+		if convErr == nil {
+			response.TargetID = &targetID
+		} else {
+			logger.Error("GetCurrentTargetSettingHandler: Error converting stored target_id '%s' to int: %v", targetIDStr, convErr)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// SetCurrentTargetSettingHandler sets the current target ID.
+func SetCurrentTargetSettingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		logger.Error("SetCurrentTargetSettingHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TargetID *int64 `json:"target_id"` // Pointer to handle null/unset
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("SetCurrentTargetSettingHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var targetIDStr string
+	if req.TargetID != nil {
+		targetIDStr = strconv.FormatInt(*req.TargetID, 10)
+		// Optional: Validate if the target ID actually exists in the database
+		var exists bool
+		err := database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM targets WHERE id = ?)", *req.TargetID).Scan(&exists)
+		if err != nil || !exists {
+			logger.Error("SetCurrentTargetSettingHandler: Target ID %d does not exist or DB error: %v", *req.TargetID, err)
+			http.Error(w, fmt.Sprintf("Target ID %d not found or invalid.", *req.TargetID), http.StatusBadRequest)
+			return
+		}
+	} else {
+		targetIDStr = "" // Explicitly set to empty string to clear the setting
+	}
+
+	if err := database.SetSetting(models.CurrentTargetIDKey, targetIDStr); err != nil {
+		logger.Error("SetCurrentTargetSettingHandler: Error saving current target setting: %v", err)
+		http.Error(w, "Failed to save current target setting", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Current target updated successfully."})
+}
+
+// GetCustomHeadersSettingHandler retrieves the custom HTTP headers setting.
+func GetCustomHeadersSettingHandler(w http.ResponseWriter, r *http.Request) {
+	headersJSON, err := database.GetSetting(models.CustomHTTPHeadersKey)
+	if err != nil {
+		logger.Error("GetCustomHeadersSettingHandler: Error getting custom headers setting: %v", err)
+		http.Error(w, "Failed to retrieve custom headers setting", http.StatusInternalServerError)
+		return
+	}
+
+	var headersMap map[string]string
+	if headersJSON == "" {
+		headersMap = make(map[string]string)
+	} else {
+		if err := json.Unmarshal([]byte(headersJSON), &headersMap); err != nil {
+			logger.Error("GetCustomHeadersSettingHandler: Error unmarshalling custom headers JSON: %v. Stored value: %s", err, headersJSON)
+			headersMap = make(map[string]string) // Fallback to empty map
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(headersMap)
+}
+
+// SetCustomHeadersSettingHandler saves the custom HTTP headers setting.
+func SetCustomHeadersSettingHandler(w http.ResponseWriter, r *http.Request) {
+	var headersMap map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&headersMap); err != nil {
+		logger.Error("SetCustomHeadersSettingHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	headersJSON, err := json.Marshal(headersMap)
+	if err != nil {
+		logger.Error("SetCustomHeadersSettingHandler: Error marshalling custom headers to JSON: %v", err)
+		http.Error(w, "Failed to process custom headers", http.StatusInternalServerError)
+		return
+	}
+
+	if err := database.SetSetting(models.CustomHTTPHeadersKey, string(headersJSON)); err != nil {
+		logger.Error("SetCustomHeadersSettingHandler: Error saving custom headers setting: %v", err)
+		http.Error(w, "Failed to save custom headers setting", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Custom HTTP headers saved successfully."})
+}
+
+// TableColumnWidthsPayload defines the structure for storing column widths for multiple tables.
+type TableColumnWidthsPayload map[string]map[string]string
+
+// GetTableColumnWidthsHandler retrieves the custom table column widths settings.
+func GetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
+	widthsJSON, err := database.GetSetting(models.TableColumnWidthsKey)
+	if err != nil {
+		logger.Error("GetTableColumnWidthsHandler: Error getting column widths: %v", err)
+		http.Error(w, "Failed to retrieve column widths", http.StatusInternalServerError)
+		return
+	}
+
+	var payload TableColumnWidthsPayload
+	if widthsJSON == "" {
+		payload = make(TableColumnWidthsPayload)
+	} else {
+		if err := json.Unmarshal([]byte(widthsJSON), &payload); err != nil {
+			logger.Error("GetTableColumnWidthsHandler: Error unmarshalling column widths JSON: %v. Stored value: %s", err, widthsJSON)
+			payload = make(TableColumnWidthsPayload) // Fallback
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(payload)
+}
+
+// SetTableColumnWidthsHandler saves the custom table column widths settings.
+func SetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
+	var payload TableColumnWidthsPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		logger.Error("SetTableColumnWidthsHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	widthsJSON, err := json.Marshal(payload)
+	if err != nil {
+		logger.Error("SetTableColumnWidthsHandler: Error marshalling column widths to JSON: %v", err)
+		http.Error(w, "Failed to process column widths", http.StatusInternalServerError)
+		return
+	}
+
+	if err := database.SetSetting(models.TableColumnWidthsKey, string(widthsJSON)); err != nil {
+		logger.Error("SetTableColumnWidthsHandler: Error saving column widths: %v", err)
+		http.Error(w, "Failed to save column widths", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Table column widths saved successfully."})
+}
+
+// GetUISettingsHandler retrieves all UI-related settings.
+func GetUISettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		logger.Error("GetUISettingsHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	settings := make(map[string]interface{})
+	var errs []string
+
+	// Current Target ID
+	targetIDStr, err := database.GetSetting(models.CurrentTargetIDKey)
+	if err != nil {
+		logger.Error("GetUISettingsHandler: Error getting current_target_id: %v", err)
+		errs = append(errs, "current_target_id")
+		settings[models.CurrentTargetIDKey] = nil // Explicitly set to null on error
+	} else if targetIDStr == "" {
+		settings[models.CurrentTargetIDKey] = nil // Explicitly set to null if empty
+	} else {
+		targetID, convErr := strconv.ParseInt(targetIDStr, 10, 64)
+		if convErr != nil {
+			logger.Error("GetUISettingsHandler: Error converting current_target_id '%s': %v", targetIDStr, convErr)
+			errs = append(errs, "current_target_id_conversion")
+			settings[models.CurrentTargetIDKey] = nil
+		} else {
+			settings[models.CurrentTargetIDKey] = targetID
+		}
+	}
+
+	// Custom HTTP Headers
+	headersJSON, err := database.GetSetting(models.CustomHTTPHeadersKey)
+	var headersMap map[string]string
+	if err != nil {
+		logger.Error("GetUISettingsHandler: Error getting custom_http_headers: %v", err)
+		errs = append(errs, "custom_http_headers")
+		headersMap = make(map[string]string) // Default to empty
+	} else if headersJSON == "" {
+		headersMap = make(map[string]string) // Default to empty
+	} else {
+		if err := json.Unmarshal([]byte(headersJSON), &headersMap); err != nil {
+			logger.Error("GetUISettingsHandler: Error unmarshalling custom_http_headers: %v", err)
+			errs = append(errs, "custom_http_headers_unmarshal")
+			headersMap = make(map[string]string) // Default to empty
+		}
+	}
+	settings[models.CustomHTTPHeadersKey] = headersMap
+
+	// Table Column Widths
+	widthsJSON, err := database.GetSetting(models.TableColumnWidthsKey)
+	var widthsMap TableColumnWidthsPayload
+	if err != nil {
+		logger.Error("GetUISettingsHandler: Error getting table_column_widths: %v", err)
+		errs = append(errs, "table_column_widths")
+		widthsMap = make(TableColumnWidthsPayload) // Default to empty
+	} else if widthsJSON == "" {
+		widthsMap = make(TableColumnWidthsPayload) // Default to empty
+	} else {
+		if err := json.Unmarshal([]byte(widthsJSON), &widthsMap); err != nil {
+			logger.Error("GetUISettingsHandler: Error unmarshalling table_column_widths: %v", err)
+			errs = append(errs, "table_column_widths_unmarshal")
+			widthsMap = make(TableColumnWidthsPayload) // Default to empty
+		}
+	}
+	settings[models.TableColumnWidthsKey] = widthsMap
+
+	if len(errs) > 0 {
+		logger.Info("GetUISettingsHandler: WARN: Encountered errors fetching some UI settings: %v", errs)
+		// Decide if you want to return a partial success or an error.
+		// For UI settings, often partial success is acceptable.
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(settings)
+}

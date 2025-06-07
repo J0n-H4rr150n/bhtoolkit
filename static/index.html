@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Toolkit Web UI</title>
+    <link rel="stylesheet" href="styles/style.css"> </head>
+<body>
+
+    <nav class="top-nav">
+        <div class="logo">Toolkit</div>
+        <div class="nav-options">
+            <div class="search-box nav-item">
+                <input type="search" id="globalSearchInput" placeholder="Global Search...">
+            </div>
+            <div class="nav-item">
+                 <span id="currentPlatformTarget" style="font-size: 0.9em; color: #bdc3c7;">Target: None</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-layout">
+        <aside class="left-sidebar" id="leftSidebar">
+            <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Menu">
+                <span class="icon icon-menu">☰</span>
+                <span class="sidebar-item-text">Collapse Menu</span>
+            </button>
+
+            <div class="sidebar-category">
+                <div class="sidebar-category-title">Manage</div>
+                <a href="#platforms" class="sidebar-item" data-view="platforms">
+                    <span class="icon">🏭</span> <span class="sidebar-item-text">Platforms</span>
+                </a>
+                <a href="#targets" class="sidebar-item" data-view="targets">
+                    <span class="icon">🎯</span>
+                    <span class="sidebar-item-text">Targets</span>
+                </a>
+                 <a href="#current-target" class="sidebar-item" data-view="current-target">
+                    <span class="icon">📍</span>
+                    <span class="sidebar-item-text">Current Target</span>
+                </a>
+                <a href="#checklist-templates" class="sidebar-item" data-view="checklist-templates">
+                    <span class="icon">📋</span> <!-- Or your preferred icon -->
+                    <span class="sidebar-item-text">Checklists</span>
+                </a>
+            </div>
+
+            <div class="sidebar-category">
+                <div class="sidebar-category-title">Traffic</div>
+                 <a href="#proxy-log" class="sidebar-item" data-view="proxy-log">
+                    <span class="icon">📡</span>
+                    <span class="sidebar-item-text">Proxy Log</span>
+                </a>
+                <a href="#sitemap" class="sidebar-item" data-view="sitemap">
+                    <span class="icon">🗺️</span>
+                    <span class="sidebar-item-text">Sitemap</span>
+                </a>
+                 <a href="#discovered-urls" class="sidebar-item" data-view="discovered-urls">
+                    <span class="icon">🔗</span>
+                    <span class="sidebar-item-text">Discovered URLs</span>
+                </a>
+            </div>
+
+             <div class="sidebar-category">
+                <div class="sidebar-category-title" id="synack-sidebar-header">Synack</div>
+                 <a href="#synack-targets" class="sidebar-item" data-view="synack-targets">
+                    <span class="icon">🦅</span> <span class="sidebar-item-text">Synack Targets</span>
+                </a>
+                <a href="#synack-analytics" class="sidebar-item" data-view="synack-analytics">
+                    <span class="icon">📊</span>
+                    <span class="sidebar-item-text">Synack Analytics</span>
+                </a>
+            </div>
+
+
+            <div class="sidebar-category">
+                <div class="sidebar-category-title">Analysis</div>
+                 <a href="#visualizer" class="sidebar-item" data-view="visualizer">
+                    <span class="icon">📈</span>
+                    <span class="sidebar-item-text">Visualizer</span>
+                </a>
+                </div>
+
+             <div class="sidebar-category">
+                <div class="sidebar-category-title">Configuration</div>
+                <a href="#settings" class="sidebar-item" data-view="settings">
+                    <span class="icon">⚙️</span>
+                    <span class="sidebar-item-text">Settings</span>
+                </a>
+            </div>
+        </aside>
+
+        <main class="main-content" id="mainContent">
+            <div id="breadcrumbContainer" class="breadcrumb-container"></div>
+            <div id="viewContentContainer">
+                <h1>Welcome</h1>
+                <p>Select an option from the sidebar.</p>
+            </div>
+        </main>
+    </div>
+
+    <div id="customModal" class="modal-overlay hidden">
+        <div class="modal-box">
+            <h2 id="modalTitle">Modal Title</h2>
+            <p id="modalMessage">Modal message goes here.</p>
+            <div class="modal-buttons">
+                <button id="modalConfirmBtn" class="primary">Confirm</button>
+                <button id="modalCancelBtn" class="secondary">Cancel</button>
+                <button id="modalOkBtn" class="primary">OK</button>
+            </div>
+        </div>
+    </div>
+    <script src="app.js" type="module"></script> </body>
+</html>
