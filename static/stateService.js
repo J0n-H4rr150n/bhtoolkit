@@ -16,12 +16,13 @@ let state = {
     paginationState: {
         synackTargets: { currentPage: 1, limit: 20, totalPages: 1, totalRecords: 0, sortBy: 'last_seen_timestamp', sortOrder: 'DESC' },
         proxyLog: {
-            currentPage: 1, limit: 20, totalPages: 1, totalRecords: 0,
+            currentPage: 1, limit: 15, totalPages: 1, totalRecords: 0,
             sortBy: 'timestamp', sortOrder: 'DESC', filterFavoritesOnly: false,
             filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: ''
         },
         checklistTemplateItems: {
-            currentPage: 1, limit: 20,
+            currentPage: 1,
+            limit: 20,
             totalPages: 1, totalRecords: 0
         },
         proxyLogTableLayout: {
@@ -33,6 +34,27 @@ let state = {
             type: { default: '15%', id: 'col-proxylog-type' },
             size: { default: '7%', id: 'col-proxylog-size' },
             actions: { default: '8%', id: 'col-proxylog-actions' }
+        },
+        parameterizedUrlsView: { // New state for this view
+            currentPage: 1,
+            limit: 50, // Default limit
+            totalPages: 1,
+            totalRecords: 0,
+            sortBy: 'discovered_at', // Default sort
+            sortOrder: 'DESC',
+            filterRequestMethod: '',
+            filterPathSearch: '',
+            filterParamKeysSearch: '',
+        },
+        parameterizedUrlsTableLayout: { // Default column widths/visibility
+            id: { default: '50px', visible: true, id: 'col-paramurl-id' },
+            method: { default: '80px', visible: true, id: 'col-paramurl-method' },
+            path: { default: '3fr', visible: true, id: 'col-paramurl-path' },
+            param_keys: { default: '2fr', visible: true, id: 'col-paramurl-paramkeys' },
+            example_url: { default: '3fr', visible: true, id: 'col-paramurl-exampleurl' },
+            discovered: { default: '150px', visible: true, id: 'col-paramurl-discovered' },
+            last_seen: { default: '150px', visible: true, id: 'col-paramurl-lastseen' },
+            actions: { default: '100px', visible: true, id: 'col-paramurl-actions' },
         },
         synackAnalytics: { currentPage: 1, limit: 20, totalPages: 1, totalRecords: 0, targetDbId: null, sortBy: 'category_name', sortOrder: 'ASC' },
     }

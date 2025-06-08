@@ -595,3 +595,30 @@ export async function createTargetFinding(findingData) {
     }
     return await response.json(); // Or handle no content if API returns 201/204
 }
+
+/**
+ * Triggers the backend analysis of parameterized URLs for a target.
+ * @param {number|string} targetId - The ID of the target to analyze.
+ * @returns {Promise<Object>} - A promise that resolves with the analysis summary.
+ */
+export async function analyzeTargetParameters(targetId) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/analyze-parameters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches stored parameterized URLs for a target with pagination, sorting, and filtering.
+ * @param {Object} params - Query parameters (target_id, page, limit, sort_by, sort_order, filters...).
+ * @returns {Promise<Object>} - A promise that resolves with the paginated list of parameterized URLs.
+ */
+export async function getParameterizedURLs(params) {
+    const query = new URLSearchParams(params);
+    // Ensure target_id is part of the query string
+    if (!params.target_id) throw new Error("target_id is required for getParameterizedURLs");
+
+    const response = await fetch(`${API_BASE}/parameterized-urls?${query.toString()}`);
+    return handleResponse(response);
+}

@@ -186,8 +186,8 @@ function handleViewLogDetail(event) {
 }
 
 async function fetchAndDisplayProxyLogs(passedParams = null) {
-    const listDiv = document.getElementById('proxyLogList');
-    const paginationControlsDiv = document.getElementById('proxyLogPaginationControls');
+    const listDiv = document.getElementById('proxyLogListContainer');
+    const paginationControlsDiv = document.getElementById('proxyLogPaginationControlsContainer');
     if (!listDiv || !paginationControlsDiv) {
         console.error("Proxy log list or pagination container not found.");
         return;
@@ -540,6 +540,239 @@ async function handleRefreshProxyLog() {
     // For now, assuming a short-lived message.
 }
 
+
+async function triggerAndFetchParamAnalysis(targetId, targetName) {
+    const paramAnalysisContentDiv = document.getElementById('paramAnalysisContent');
+    if (!paramAnalysisContentDiv) {
+        console.error("Parameter analysis content div not found.");
+        return;
+    }
+    paramAnalysisContentDiv.innerHTML = `<p>Running analysis for target ${escapeHtml(targetName)} (ID: ${targetId}). This may take a moment...</p>`;
+
+    try {
+        const analysisSummary = await apiService.analyzeTargetParameters(targetId);
+        uiService.showModalMessage("Analysis Complete", 
+            `Scanned: ${analysisSummary.total_logs_scanned} logs.<br>
+             Processed: ${analysisSummary.parameterized_urls_processed} URLs with params.<br>
+             New Unique Entries: ${analysisSummary.new_unique_entries_found}.<br>
+             Now fetching results...`, true);
+        
+        // Reset pagination for this view and fetch the first page
+        const appState = stateService.getState();
+        const currentParamAnalysisState = appState.paginationState.parameterizedUrlsView;
+        const newState = {
+            ...currentParamAnalysisState,
+            currentPage: 1, // Reset to page 1 after analysis
+        };
+        stateService.updateState({ paginationState: { ...appState.paginationState, parameterizedUrlsView: newState } });
+        await displayParameterizedURLs(); // New function to display results
+
+    } catch (error) {
+        paramAnalysisContentDiv.innerHTML = `<p class="error-message">Error running or fetching parameter analysis: ${escapeHtml(error.message)}</p>`;
+        console.error('Error in triggerAndFetchParamAnalysis:', error);
+    }
+}
+
+async function displayParameterizedURLs() {
+    const paramAnalysisContentDiv = document.getElementById('paramAnalysisContent');
+    if (!paramAnalysisContentDiv) return;
+
+    const appState = stateService.getState();
+    const { currentTargetId, currentTargetName } = appState;
+    const { currentPage, limit, sortBy, sortOrder, filterRequestMethod, filterPathSearch, filterParamKeysSearch } = appState.paginationState.parameterizedUrlsView;
+    const tableKey = 'parameterizedUrlsTable'; // For column layouts
+    const columnConfig = appState.paginationState.parameterizedUrlsTableLayout;
+    const globalTableLayouts = appState.globalTableLayouts || {};
+    const savedTableWidths = globalTableLayouts[tableKey] || {};
+
+    paramAnalysisContentDiv.innerHTML = `<p>Loading analyzed parameters for target ${escapeHtml(currentTargetName)}...</p>`;
+
+    try {
+        const params = {
+            target_id: currentTargetId,
+            page: currentPage,
+            limit: limit,
+            sort_by: sortBy,
+            sort_order: sortOrder,
+            request_method: filterRequestMethod,
+            path_search: filterPathSearch,
+            param_keys_search: filterParamKeysSearch,
+        };
+        const response = await apiService.getParameterizedURLs(params);
+        const pUrls = response.records || [];
+
+        stateService.updateState({
+            paginationState: {
+                ...appState.paginationState,
+                parameterizedUrlsView: {
+                    ...appState.paginationState.parameterizedUrlsView,
+                    currentPage: response.page || 1,
+                    totalPages: response.total_pages || 1,
+                    totalRecords: response.total_records || 0,
+                }
+            }
+        });
+
+        if (pUrls.length > 0) {
+            // Add filter controls here (similar to proxy log, but for path, method, param_keys)
+            // For brevity, I'll skip adding full filter input HTML here, but it would be similar to proxyLogView's search/dropdowns.
+            let tableHTML = `<div style="margin-bottom:10px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <input type="text" id="paramUrlPathSearch" placeholder="Search Path..." value="${escapeHtmlAttribute(filterPathSearch)}" style="margin-right:10px;">
+                    <input type="text" id="paramUrlKeysSearch" placeholder="Search Param Keys..." value="${escapeHtmlAttribute(filterParamKeysSearch)}" style="margin-right:10px;">
+                    <select id="paramUrlMethodFilter" style="margin-right:10px;">
+                        <option value="">All Methods</option>
+                        <option value="GET" ${filterRequestMethod === 'GET' ? 'selected' : ''}>GET</option>
+                        <option value="POST" ${filterRequestMethod === 'POST' ? 'selected' : ''}>POST</option>
+                        <option value="PUT" ${filterRequestMethod === 'PUT' ? 'selected' : ''}>PUT</option>
+                        <option value="DELETE" ${filterRequestMethod === 'DELETE' ? 'selected' : ''}>DELETE</option>
+                    </select>
+                    <button id="applyParamUrlFiltersBtn" class="secondary small-button">Apply Filters</button>
+                </div>
+                <div>
+                    <button id="saveParamUrlsLayoutBtn" class="secondary small-button">Save Column Layout</button>
+                </div>
+            </div>
+            <table style="table-layout: fixed;"><thead id="parameterizedUrlsTableHead"><tr>
+                <th style="width: ${savedTableWidths.id || columnConfig.id.default};" class="sortable" data-sort-key="id" data-col-key="id">ID</th>
+                <th style="width: ${savedTableWidths.method || columnConfig.method.default};" class="sortable" data-sort-key="request_method" data-col-key="method">Method</th>
+                <th style="width: ${savedTableWidths.path || columnConfig.path.default};" class="sortable" data-sort-key="request_path" data-col-key="path">Path</th>
+                <th style="width: ${savedTableWidths.param_keys || columnConfig.param_keys.default};" class="sortable" data-sort-key="param_keys" data-col-key="param_keys">Param Keys</th>
+                <th style="width: ${savedTableWidths.example_url || columnConfig.example_url.default};" data-col-key="example_url">Example URL</th>
+                <th style="width: ${savedTableWidths.discovered || columnConfig.discovered.default};" class="sortable" data-sort-key="discovered_at" data-col-key="discovered">Discovered</th>
+                <th style="width: ${savedTableWidths.last_seen || columnConfig.last_seen.default};" class="sortable" data-sort-key="last_seen_at" data-col-key="last_seen">Last Seen</th>
+                <th style="width: ${savedTableWidths.actions || columnConfig.actions.default};" data-col-key="actions">Actions</th>
+            </tr></thead><tbody>`;
+
+            pUrls.forEach(pUrl => {
+                const discovered = new Date(pUrl.discovered_at).toLocaleString();
+                const lastSeen = new Date(pUrl.last_seen_at).toLocaleString();
+                tableHTML += `<tr>
+                    <td>${pUrl.id}</td>
+                    <td>${escapeHtml(pUrl.request_method)}</td>
+                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.request_path)}">${escapeHtml(pUrl.request_path)}</td>
+                    <td title="${escapeHtmlAttribute(pUrl.param_keys)}">${escapeHtml(pUrl.param_keys)}</td>
+                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.example_full_url)}">${escapeHtml(pUrl.example_full_url)}</td>
+                    <td>${discovered}</td>
+                    <td>${lastSeen}</td>
+                    <td class="actions-cell">
+                        <button class="action-button view-log-detail" data-log-id="${pUrl.http_traffic_log_id}" title="View Example Log">👁️</button>
+                    </td></tr>`;
+            });
+            tableHTML += `</tbody></table>`;
+            paramAnalysisContentDiv.innerHTML = tableHTML; // Replace previous content
+
+            // Add event listeners for table
+            const tableHead = document.getElementById('parameterizedUrlsTableHead');
+            if (tableHead) {
+                tableHead.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', handleParamUrlSort));
+                if (tableService) tableService.makeTableColumnsResizable('parameterizedUrlsTableHead');
+            }
+            paramAnalysisContentDiv.querySelectorAll('.view-log-detail').forEach(btn => {
+                btn.addEventListener('click', handleViewLogDetail); // Reuse existing detail view handler
+            });
+            document.getElementById('applyParamUrlFiltersBtn')?.addEventListener('click', applyParamUrlFilters);
+            document.getElementById('saveParamUrlsLayoutBtn')?.addEventListener('click', () => {
+                if (tableService) {
+                    tableService.saveCurrentTableLayout('parameterizedUrlsTable', 'parameterizedUrlsTableHead');
+                }
+            });
+            renderParamUrlPagination(document.getElementById('paramUrlPaginationControls')); // Need a container for this
+            paramAnalysisContentDiv.insertAdjacentHTML('beforeend', '<div id="paramUrlPaginationControls" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>');
+            renderParamUrlPagination(document.getElementById('paramUrlPaginationControls'));
+        } else {
+            paramAnalysisContentDiv.innerHTML = `<p>No parameterized URLs found for target ${escapeHtml(currentTargetName)} with current filters.</p>`;
+        }
+    } catch (error) {
+        paramAnalysisContentDiv.innerHTML = `<p class="error-message">Error displaying parameterized URLs: ${escapeHtml(error.message)}</p>`;
+        console.error('Error in displayParameterizedURLs:', error);
+    }
+}
+
+function handleParamUrlSort(event) {
+    if (tableService && typeof tableService.getIsResizing === 'function' && tableService.getIsResizing()) return;
+    const newSortBy = event.target.closest('th').getAttribute('data-sort-key');
+    if (!newSortBy) return;
+
+    const appState = stateService.getState();
+    const currentParamViewState = appState.paginationState.parameterizedUrlsView;
+    let newSortOrder = 'ASC';
+    if (currentParamViewState.sortBy === newSortBy) {
+        newSortOrder = currentParamViewState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+    }
+    stateService.updateState({
+        paginationState: {
+            ...appState.paginationState,
+            parameterizedUrlsView: { ...currentParamViewState, sortBy: newSortBy, sortOrder: newSortOrder, currentPage: 1 }
+        }
+    });
+    displayParameterizedURLs();
+}
+
+function applyParamUrlFilters() {
+    const appState = stateService.getState();
+    const currentParamViewState = appState.paginationState.parameterizedUrlsView;
+    const newFilterPath = document.getElementById('paramUrlPathSearch')?.value || '';
+    const newFilterKeys = document.getElementById('paramUrlKeysSearch')?.value || '';
+    const newFilterMethod = document.getElementById('paramUrlMethodFilter')?.value || '';
+
+    stateService.updateState({
+        paginationState: {
+            ...appState.paginationState,
+            parameterizedUrlsView: {
+                ...currentParamViewState,
+                filterPathSearch: newFilterPath,
+                filterParamKeysSearch: newFilterKeys,
+                filterRequestMethod: newFilterMethod,
+                currentPage: 1
+            }
+        }
+    });
+    displayParameterizedURLs();
+}
+
+function renderParamUrlPagination(container) {
+    if (!container) return;
+    const appState = stateService.getState();
+    const { currentPage, totalPages, totalRecords } = appState.paginationState.parameterizedUrlsView;
+
+    let paginationHTML = '';
+    if (totalPages <= 1) {
+        container.innerHTML = totalRecords > 0 ? `<p>${totalRecords} total unique parameterized URL(s) found.</p>` : '';
+        return;
+    }
+    paginationHTML += `<p>Page ${currentPage} of ${totalPages} (${totalRecords} total entries)</p>`;
+
+    const prevButton = document.createElement('button');
+    prevButton.className = 'secondary'; prevButton.style.marginRight = '5px';
+    prevButton.innerHTML = '&laquo; Previous';
+    if (currentPage <= 1) prevButton.disabled = true;
+    prevButton.addEventListener('click', () => {
+        if (currentPage > 1) {
+            const s = stateService.getState();
+            stateService.updateState({ paginationState: { ...s.paginationState, parameterizedUrlsView: {...s.paginationState.parameterizedUrlsView, currentPage: currentPage - 1}}});
+            displayParameterizedURLs();
+        }
+    });
+
+    const nextButton = document.createElement('button');
+    nextButton.className = 'secondary';
+    nextButton.innerHTML = 'Next &raquo;';
+    if (currentPage >= totalPages) nextButton.disabled = true;
+    nextButton.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+            const s = stateService.getState();
+            stateService.updateState({ paginationState: { ...s.paginationState, parameterizedUrlsView: {...s.paginationState.parameterizedUrlsView, currentPage: currentPage + 1}}});
+            displayParameterizedURLs();
+        }
+    });
+
+    container.innerHTML = '';
+    container.appendChild(document.createRange().createContextualFragment(paginationHTML));
+    if (currentPage > 1) container.appendChild(prevButton);
+    if (currentPage < totalPages) container.appendChild(nextButton);
+}
+
 /**
  * Loads the main proxy log view.
  * @param {HTMLElement} mainViewContainer - The main container element for the view.
@@ -560,41 +793,108 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
     const appState = stateService.getState();
     const { currentTargetId, currentTargetName } = appState;
     // Use passed params for initial render of controls if available, else global state
-    const initialControlParams = proxyLogParams || appState.paginationState.proxyLog;
-    const { filterFavoritesOnly, filterSearchText } = initialControlParams;
+    const activeParams = proxyLogParams || appState.paginationState.proxyLog;
+    const { filterFavoritesOnly, filterSearchText, analysis_type } = activeParams;
     const tableKey = 'proxyLogTable';
 
     const targetInfo = currentTargetId ? `for Target: ${escapeHtml(currentTargetName)} (ID: ${currentTargetId})` : '(No Target Selected)';
     viewContentContainer.innerHTML = `
         <h1>Proxy Log ${targetInfo}</h1>
-        <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 20px;">
-            <div class="form-group" style="display: flex; align-items: center; margin-bottom: 0;">
-                <input type="checkbox" id="filterFavoritesToggle" style="margin-right: 5px;" ${filterFavoritesOnly ? 'checked' : ''}>
-                <label for="filterFavoritesToggle" style="font-weight: normal;">Favorites Only</label>
-            </div>
-            <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
-                <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
-            </div>
+
+        <div class="tabs">
+            <button class="tab-button" data-tab="allLogsTab">All Logs</button>
+            <button class="tab-button" data-tab="paramAnalysisTab">Parameter Analysis</button>
         </div>
-        <div style="margin-bottom: 10px;">
-            <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs" style="margin-right: 10px;">🔄</button>
-            <button id="saveProxyLogLayoutBtn" class="secondary small-button" style="margin-right: 10px;">Save Column Layout</button>
-            <button id="deleteAllTargetLogsBtn" class="secondary small-button" ${!currentTargetId ? 'disabled title="No target selected"' : `title="Delete all logs for ${escapeHtml(currentTargetName)}"`}>
-                Delete All Logs for Target
-            </button>
+
+        <div id="allLogsTab" class="tab-content">
+            <div style="margin-top:15px; margin-bottom: 15px; display: flex; align-items: center; gap: 20px;">
+                <div class="form-group" style="display: flex; align-items: center; margin-bottom: 0;">
+                    <input type="checkbox" id="filterFavoritesToggle" style="margin-right: 5px;" ${filterFavoritesOnly ? 'checked' : ''}>
+                    <label for="filterFavoritesToggle" style="font-weight: normal;">Favorites Only</label>
+                </div>
+                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
+                    <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
+                </div>
+            </div>
+            <div style="margin-bottom: 10px;">
+                <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs" style="margin-right: 10px;">🔄</button>
+                <button id="saveProxyLogLayoutBtn" class="secondary small-button" style="margin-right: 10px;">Save Column Layout</button>
+                <button id="deleteAllTargetLogsBtn" class="secondary small-button" ${!currentTargetId ? 'disabled title="No target selected"' : `title="Delete all logs for ${escapeHtml(currentTargetName)}"`}>
+                    Delete All Logs for Target
+                </button>
+            </div>
+            <div id="proxyLogListContainer">Loading proxy logs...</div>
+            <div id="proxyLogPaginationControlsContainer" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
         </div>
-        <div id="proxyLogList">Loading proxy logs...</div>
-        <div id="proxyLogPaginationControls" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
+
+        <div id="paramAnalysisTab" class="tab-content">
+            <h3 style="margin-top:15px;">Logs with URL Parameters</h3>
+            <div style="margin-bottom: 15px;">
+                <button id="runParamAnalysisBtn" class="primary">Run/Refresh Analysis</button>
+            </div>
+            <div id="paramAnalysisContent"><p>Loading parameter analysis...</p></div>
+        </div>
     `;
 
     if (!currentTargetId) {
-        document.getElementById('proxyLogList').innerHTML = '<p>Please set a current target to view its proxy log.</p>';
-        document.getElementById('proxyLogPaginationControls').innerHTML = '';
+        const allLogsContent = document.getElementById('allLogsTab');
+        if (allLogsContent) allLogsContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to view its proxy log.</p>';
+        
+        const paramAnalysisContent = document.getElementById('paramAnalysisTab');
+        if (paramAnalysisContent) paramAnalysisContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to perform analysis.</p>';
+        
+        // Also disable the run button if no target
+        const runBtn = document.getElementById('runParamAnalysisBtn');
+        if (runBtn) runBtn.disabled = true;
+        
         return;
     }
 
-    // Pass the specific params that triggered this load
-    fetchAndDisplayProxyLogs(proxyLogParams); 
+    // Tab switching logic
+    document.querySelectorAll('.tabs .tab-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const tabId = e.currentTarget.dataset.tab;
+            document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+
+            // Update hash without triggering full reload if only tab changes
+            const currentHash = window.location.hash.split('?')[0];
+            const currentParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+            currentParams.set('analysis_type', tabId === 'paramAnalysisTab' ? 'params' : '');
+            window.location.hash = `${currentHash}?${currentParams.toString().replace(/analysis_type=&|&analysis_type=$/, '')}`; // Clean up empty analysis_type
+        });
+    });
+
+    // Initial content load based on analysis_type.
+    // At this point, currentTargetId is guaranteed to be truthy due to the check above.
+    console.log("[ProxyLogView] loadProxyLogView - activeParams for tab decision:", JSON.parse(JSON.stringify(activeParams)));
+
+    // Deactivate all tabs first to ensure a clean state for initial load
+    document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+    if (analysis_type === 'params') {
+        console.log("[ProxyLogView] CONDITION MET: analysis_type IS 'params'. Activating 'Parameter Analysis' tab.");
+        document.querySelector('.tab-button[data-tab="paramAnalysisTab"]')?.classList.add('active');
+        document.getElementById('paramAnalysisTab')?.classList.add('active');
+        displayParameterizedURLs(); // Directly call, currentTargetId is confirmed
+    } else {
+        console.log(`[ProxyLogView] CONDITION NOT MET: analysis_type is "${analysis_type}" (type: ${typeof analysis_type}). Activating 'All Logs' tab.`);
+        document.querySelector('.tab-button[data-tab="allLogsTab"]')?.classList.add('active');
+        document.getElementById('allLogsTab')?.classList.add('active');
+        fetchAndDisplayProxyLogs(activeParams); // For "All Logs" tab, currentTargetId is confirmed
+    }
+
+    // Add event listener for the new "Run Parameter Analysis" button
+    const runParamAnalysisBtn = document.getElementById('runParamAnalysisBtn');
+    // currentTargetId is confirmed if we reach here, so no need to check it again for the listener
+    if (runParamAnalysisBtn) { 
+        runParamAnalysisBtn.addEventListener('click', () => {
+            triggerAndFetchParamAnalysis(currentTargetId, currentTargetName);
+        });
+    }
     document.getElementById('filterFavoritesToggle')?.addEventListener('change', handleProxyLogFavoriteFilterChange);
     document.getElementById('proxyLogSearchInput')?.addEventListener('input', debounce(handleProxyLogSearch, 300));
     document.getElementById('saveProxyLogLayoutBtn')?.addEventListener('click', () => {

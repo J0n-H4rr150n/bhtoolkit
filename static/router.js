@@ -203,7 +203,8 @@ async function loadView(viewId, params = {}) {
                 filterMethod: params.method || '', // Use parsed 'method' from hash
                 filterStatus: params.status || '', // Use parsed 'status' from hash
                 filterContentType: params.type || '', // Use parsed 'type' from hash
-                filterSearchText: params.search || '' // Use parsed 'search' from hash
+                filterSearchText: params.search || '', // Use parsed 'search' from hash
+                analysis_type: params.analysis_type || null // Ensure analysis_type is carried over
             };
             // The block below that resets filters if no '?' was in the hash might be problematic.
             if (!window.location.hash.includes('?')) {
@@ -212,6 +213,7 @@ async function loadView(viewId, params = {}) {
                  newPaginationState.proxyLog.filterContentType = '';
                  newPaginationState.proxyLog.filterSearchText = '';
                  newPaginationState.proxyLog.filterFavoritesOnly = false;
+                 newPaginationState.proxyLog.analysis_type = null; // Reset analysis_type if no query params
             }
             setState({ paginationState: newPaginationState });
             console.log('[Router] loadView for "proxy-log", about to call viewLoader.loadProxyLogView with params:', newPaginationState.proxyLog);

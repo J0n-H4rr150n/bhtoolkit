@@ -759,7 +759,7 @@ td.checklist-item-command-text pre.command-text {
 .flyout-menu {
     display: none;
     position: absolute;
-    left: 20px;  /* Indent from the left edge of the sidebar */
+    left: 60px;  /* Indent from the left edge of the sidebar */
     top: 100%;   /* Position below the .sidebar-item-container */
     background-color: #4a6178; /* Similar to sidebar item hover */
     border: 1px solid #2c3e50;
