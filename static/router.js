@@ -116,6 +116,10 @@ async function loadView(viewId, params = {}) {
             pageTitle = "Checklist Templates";
             breadcrumbSegments = [{ name: "Checklist Templates" }];
             break;
+        case 'modifier':
+            pageTitle = "Request Modifier";
+            breadcrumbSegments = [{ name: "Modifier" }];
+            break;
         default:
             if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Page Not Found</h1><p>The view '${viewId}' is not implemented or the path is incorrect. Please select an option from the sidebar.</p>`;
             if (updateBreadcrumbs) updateBreadcrumbs([{ name: "Page Not Found" }]);
@@ -245,6 +249,10 @@ async function loadView(viewId, params = {}) {
         case 'settings': 
             if (viewLoaders.loadSettingsView) viewLoaders.loadSettingsView(); // Use the loader
             else console.error("loadSettingsView not found in viewLoaders");
+            break;
+        case 'modifier':
+            if (viewLoaders.loadModifierView) viewLoaders.loadModifierView(params);
+            else console.error("loadModifierView not found in viewLoaders");
             break;
     }
 }

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -105,4 +106,30 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 		logs = append(logs, u)
 	}
 	return logs, totalRecords, rows.Err()
+}
+
+// GetHTTPTrafficLogEntryByID retrieves a single HTTP traffic log entry by its ID.
+func GetHTTPTrafficLogEntryByID(id int64) (models.HTTPTrafficLog, error) {
+	var log models.HTTPTrafficLog
+	// Select all fields that might be needed for the modifier's base request
+	query := `SELECT id, target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body,
+	                 response_status_code, response_content_type, response_body_size, response_http_version, response_headers, response_body,
+	                 duration_ms, is_favorite, notes
+	          FROM http_traffic_log WHERE id = ?`
+	var timestampStr string
+	err := DB.QueryRow(query, id).Scan(
+		&log.ID, &log.TargetID, &timestampStr, &log.RequestMethod, &log.RequestURL, &log.RequestHTTPVersion, &log.RequestHeaders, &log.RequestBody,
+		&log.ResponseStatusCode, &log.ResponseContentType, &log.ResponseBodySize, &log.ResponseHTTPVersion, &log.ResponseHeaders, &log.ResponseBody,
+		&log.DurationMs, &log.IsFavorite, &log.Notes,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return log, fmt.Errorf("HTTP traffic log entry with ID %d not found", id)
+		}
+		logger.Error("GetHTTPTrafficLogEntryByID: Error scanning log ID %d: %v", id, err)
+		return log, err
+	}
+	parsedTime, _ := time.Parse(time.RFC3339, timestampStr)
+	log.Timestamp = parsedTime
+	return log, nil
 }

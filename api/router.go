@@ -25,6 +25,7 @@ func NewRouter() http.Handler {
 	handlers.RegisterChecklistTemplateRoutes(router)
 	handlers.RegisterFindingRoutes(router) // Add this line
 	handlers.RegisterNoteRoutes(router)
+	handlers.RegisterModifierRoutes(router)
 
 	// Placeholder/Not Implemented Yet routes
 	handlers.RegisterRelationshipRoutes(router)

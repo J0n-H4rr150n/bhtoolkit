@@ -54,7 +54,7 @@ let state = {
             example_url: { default: '3fr', visible: true, id: 'col-paramurl-exampleurl' },
             discovered: { default: '150px', visible: true, id: 'col-paramurl-discovered' },
             last_seen: { default: '150px', visible: true, id: 'col-paramurl-lastseen' },
-            actions: { default: '100px', visible: true, id: 'col-paramurl-actions' },
+            actions: { default: '130px', visible: true, id: 'col-paramurl-actions' }, // Increased width
         },
         synackAnalytics: { currentPage: 1, limit: 20, totalPages: 1, totalRecords: 0, targetDbId: null, sortBy: 'category_name', sortOrder: 'ASC' },
     }
@@ -143,6 +143,14 @@ export function updateState(newStateUpdates) {
 // Example of specific getters if needed, though getState() is often sufficient.
 /**
  * Gets the current target ID.
+ */
+state.modifierTasks = []; // Array to hold tasks sent to the modifier
+state.currentModifierTask = null; // Details of the task currently being worked on
+state.modifierViewConfig = {
+    // any specific view configurations for modifier page
+};
+
+/**
  * @returns {number|null} The current target ID.
  */
 export function getCurrentTargetId() {

@@ -1,0 +1,223 @@
+/* static/styles/modifierView.css */
+
+/* Modifier View Specific Styles */
+.modifier-layout {
+    display: flex;
+    height: calc(100vh - 50px); /* Adjust 50px based on your header/nav height */
+}
+
+.modifier-sidebar {
+    width: 250px; /* Default width */
+    min-width: 150px; /* Minimum width before collapsing or hiding */
+    background-color: #2c3e50; /* Dark sidebar */
+    color: #ecf0f1;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s ease;
+    overflow-y: auto;
+}
+
+.modifier-sidebar.collapsed {
+    width: 40px; /* Give enough space for the toggle button */
+    padding: 0;
+    min-width: 40px; /* Match the width */
+    overflow: hidden;
+}
+
+.modifier-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #34495e; /* Slightly different header bg */
+    border-bottom: 1px solid #2c3e50;
+}
+
+.modifier-sidebar.collapsed .modifier-sidebar-header {
+    justify-content: center; /* Center the toggle button when collapsed */
+    border-bottom: none;
+    margin-bottom: 0;
+    padding: 10px 0; /* Adjust padding for collapsed state if toggle is visible */
+}
+
+.modifier-sidebar-header h2 {
+    margin: 0;
+    font-size: 1.2em;
+}
+
+.modifier-sidebar.collapsed .modifier-sidebar-header h2 {
+    display: none;
+}
+
+.modifier-sidebar.collapsed .task-list {
+    display: none; /* Ensure task list content is hidden when collapsed */
+}
+
+#modifierSidebarToggle {
+    background: none;
+    border: none;
+    color: #ecf0f1;
+    font-size: 1.5em;
+    cursor: pointer;
+    padding: 0 5px; /* Give it some clickable area */
+}
+
+.task-list { /* This is the div container for the UL */
+    padding: 10px;
+    flex-grow: 1;
+    overflow-y: auto; /* Ensure task list itself can scroll if sidebar has fixed header */
+}
+
+.task-list ul { /* This targets the UL inside #modifierTaskList */
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.modifier-task-item { /* This is the LI class */
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    background-color: #34495e;
+    border-radius: 3px;
+    cursor: grab;
+    transition: background-color 0.2s ease;
+    color: #ecf0f1; /* Ensure text is visible */
+}
+
+.modifier-task-item:hover {
+    background-color: #4a6179;
+}
+
+.modifier-task-item.active {
+    background-color: #1abc9c; /* Highlight color */
+    color: #2c3e50; /* Darker text for contrast on light active bg */
+}
+
+.modifier-task-item.dragging {
+    opacity: 0.5;
+    background-color: #56708a; /* Slightly different color when dragging */
+}
+
+.drop-indicator {
+    height: 2px;
+    background-color: #1abc9c; /* Or your theme's highlight color */
+    margin: 2px 0; /* Space around the indicator */
+    border-radius: 1px;
+}
+
+.modifier-main-content {
+    flex-grow: 1;
+    padding: 20px;
+    overflow-y: auto;
+    background-color: #ecf0f1; /* Light background for content */
+    transition: padding-left 0.3s ease; /* Smooth transition when sidebar collapses */
+}
+
+.modifier-main-content.sidebar-collapsed-sibling {
+    /* Adjust padding or margin if needed when sidebar is collapsed */
+    /* For example, if the sidebar had a margin, you might remove it here */
+}
+
+.modifier-resizer {
+    width: 5px;
+    background-color: #7f8c8d; /* Neutral resizer color */
+    cursor: col-resize;
+    display: flex; /* To make it visible if sidebar is not collapsed */
+    align-items: center;
+    justify-content: center;
+}
+
+.modifier-resizer:hover {
+    background-color: #95a5a6; /* Darker on hover */
+}
+
+.modifier-section {
+    flex: 1;
+}
+
+.modifier-input,
+.modifier-textarea {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.modifier-textarea {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.9em;
+    white-space: pre; /* Preserve whitespace for headers/body */
+}
+
+.status-message-area {
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    margin-bottom: 10px;
+    border: 1px solid transparent;
+}
+
+.status-message-area.info {
+    background-color: #e7f3fe;
+    border-color: #d0eaff;
+    color: #0c5460;
+}
+.status-message-area.success {
+    background-color: #d4edda;
+    border-color: #c3e6cb;
+    color: #155724;
+}
+.status-message-area.error {
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+    color: #721c24;
+}
+
+.modifier-task-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.modifier-task-header h2 {
+    margin: 0;
+    margin-right: 10px; /* Space between title and edit button */
+}
+
+.modifier-tabs {
+    display: flex;
+    border-bottom: 2px solid #ccc; /* Similar to other tabs in the app */
+    margin-bottom: 15px;
+}
+
+.modifier-tab-button {
+    padding: 10px 15px;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    color: #555;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px; /* Align with the container's border */
+}
+
+.modifier-tab-button.active {
+    color: #007bff; /* Or your theme's active tab color */
+    border-bottom-color: #007bff;
+    font-weight: bold;
+}
+
+.modifier-tab-content {
+    display: none; /* Hide inactive tabs */
+}
+.modifier-tab-content.active {
+    display: block; /* Show active tab */
+}
+
+.request-details {
+    display: flex;
+    gap: 20px; /* Space between request and response sections if they were side-by-side */
+}

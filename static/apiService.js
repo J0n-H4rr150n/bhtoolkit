@@ -622,3 +622,95 @@ export async function getParameterizedURLs(params) {
     const response = await fetch(`${API_BASE}/parameterized-urls?${query.toString()}`);
     return handleResponse(response);
 }
+
+/**
+ * Adds a new task to the Modifier.
+ * @param {Object} taskData - Data for the new modifier task (e.g., { parameterized_url_id }).
+ * @returns {Promise<Object>} - A promise that resolves with the created task details.
+ */
+export async function addModifierTask(taskData) {
+    const response = await fetch(`${API_BASE}/modifier/tasks`, { // Endpoint to be created
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(taskData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches all tasks currently in the Modifier.
+ * @param {Object} params - Optional query parameters (e.g., for pagination, filtering by target_id).
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of modifier tasks.
+ */
+export async function getModifierTasks(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${API_BASE}/modifier/tasks?${query}`);
+    return handleResponse(response);
+}
+
+/**
+ * Fetches the full details for a specific modifier task.
+ * @param {number|string} taskId - The ID of the modifier task.
+ * @returns {Promise<Object>} - A promise that resolves with the task details.
+ */
+export async function getModifierTaskDetails(taskId) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/${taskId}`);
+    return handleResponse(response);
+}
+
+/**
+ * Executes a modified request via the backend.
+ * @param {Object} requestData - The modified request details.
+ *                               Expected: { taskId (optional), method, url, headers (string), body (string) }
+ * @returns {Promise<Object>} - A promise that resolves with the response from the executed request.
+ */
+export async function executeModifiedRequest(requestData) {
+    const response = await fetch(`${API_BASE}/modifier/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Updates a modifier task (e.g., its name).
+ * @param {number|string} taskId - The ID of the task to update.
+ * @param {Object} updateData - An object containing the data to update (e.g., { name: "New Name" }).
+ * @returns {Promise<Object>} - A promise that resolves with the updated task details.
+ */
+export async function updateModifierTask(taskId, updateData) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Clones an existing modifier task.
+ * @param {number|string} originalTaskId - The ID of the task to clone.
+ * @returns {Promise<Object>} - A promise that resolves with the newly created (cloned) task details.
+ */
+export async function cloneModifierTask(originalTaskId) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/${originalTaskId}/clone`, {
+        method: 'POST', // Using POST as it creates a new resource
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Updates the display order of modifier tasks.
+ * @param {Object} taskOrders - A map where keys are task IDs (string) and values are their new display order (number).
+ *                              Example: { "1": 0, "5": 1, "2": 2 }
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response message.
+ */
+export async function updateModifierTasksOrder(taskOrders) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(taskOrders),
+    });
+    return handleResponse(response);
+}

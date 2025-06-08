@@ -144,3 +144,23 @@ func GetParameterizedURLs(params models.ParameterizedURLFilters) ([]models.Param
 	}
 	return urls, totalRecords, nil
 }
+
+// GetParameterizedURLByID retrieves a single parameterized URL by its ID.
+func GetParameterizedURLByID(id int64) (models.ParameterizedURL, error) {
+	var pUrl models.ParameterizedURL
+	query := `SELECT id, target_id, http_traffic_log_id, request_method, request_path, param_keys, example_full_url, notes, discovered_at, last_seen_at
+	          FROM parameterized_urls WHERE id = ?`
+	err := DB.QueryRow(query, id).Scan(
+		&pUrl.ID, &pUrl.TargetID, &pUrl.HTTPTrafficLogID, &pUrl.RequestMethod,
+		&pUrl.RequestPath, &pUrl.ParamKeys, &pUrl.ExampleFullURL, &pUrl.Notes,
+		&pUrl.DiscoveredAt, &pUrl.LastSeenAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return pUrl, fmt.Errorf("parameterized URL with ID %d not found", id)
+		}
+		logger.Error("GetParameterizedURLByID: Error scanning pURL ID %d: %v", id, err)
+		return pUrl, err
+	}
+	return pUrl, nil
+}

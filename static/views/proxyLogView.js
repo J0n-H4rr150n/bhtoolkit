@@ -657,6 +657,7 @@ async function displayParameterizedURLs() {
                     <td>${lastSeen}</td>
                     <td class="actions-cell">
                         <button class="action-button view-log-detail" data-log-id="${pUrl.http_traffic_log_id}" title="View Example Log">👁️</button>
+                        <button class="action-button send-to-modifier" data-purl-id="${pUrl.id}" title="Send to Modifier">🔧</button>
                     </td></tr>`;
             });
             tableHTML += `</tbody></table>`;
@@ -670,6 +671,9 @@ async function displayParameterizedURLs() {
             }
             paramAnalysisContentDiv.querySelectorAll('.view-log-detail').forEach(btn => {
                 btn.addEventListener('click', handleViewLogDetail); // Reuse existing detail view handler
+            });
+            paramAnalysisContentDiv.querySelectorAll('.send-to-modifier').forEach(btn => {
+                btn.addEventListener('click', handleSendToModifier);
             });
             document.getElementById('applyParamUrlFiltersBtn')?.addEventListener('click', applyParamUrlFilters);
             document.getElementById('saveParamUrlsLayoutBtn')?.addEventListener('click', () => {
@@ -730,6 +734,34 @@ function applyParamUrlFilters() {
     });
     displayParameterizedURLs();
 }
+
+async function handleSendToModifier(event) {
+    const button = event.currentTarget;
+    const pUrlId = button.dataset.purlId;
+    if (!pUrlId) {
+        uiService.showModalMessage("Error", "Parameterized URL ID not found.");
+        return;
+    }
+
+    // Find the pUrl data from the currently displayed list (or re-fetch if necessary)
+    // For simplicity, we'll assume it's in the current view's data if the table was just rendered.
+    // A more robust way might be to fetch details by pUrlId if not readily available.
+    const appState = stateService.getState();
+    // This is a simplification. Ideally, you'd fetch the pURL details by its ID
+    // or have it stored in a way that's easily accessible.
+    // For now, we'll just send the ID and let the modifier view fetch details.
+
+    try {
+        // In the future, this would send more details like method, path, example_url
+        const newTask = await apiService.addModifierTask({ parameterized_url_id: parseInt(pUrlId, 10) });
+        uiService.showModalMessage("Sent to Modifier", `Task "${escapeHtml(newTask.name || `Task ${newTask.id}`)}" sent to Modifier. Navigating...`, true, 1500);
+        window.location.hash = `#modifier?task_id=${newTask.id}`;
+    } catch (error) {
+        console.error("Error sending item to modifier:", error);
+        uiService.showModalMessage("Error", `Failed to send to Modifier: ${error.message}`);
+    }
+}
+
 
 function renderParamUrlPagination(container) {
     if (!container) return;
