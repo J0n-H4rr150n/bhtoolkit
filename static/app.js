@@ -118,8 +118,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             loadPlatformsViewModule,
             handleAddPlatformModule,
             fetchAndDisplayPlatformsModule,
-            loadTargetsView: (platformId) => loadTargetsView(viewContentContainer, platformId),
-            loadCurrentTargetView: (targetId) => loadCurrentTargetView(targetId),
+            loadTargetsView: (platformId) => loadTargetsView(viewContentContainer, platformId), // This is in targetView.js
+            loadCurrentTargetView: (targetId, tab) => loadCurrentTargetView(targetId, tab), // Pass tab here
             loadSynackTargetsView: () => loadSynackTargetsView(viewContentContainer),
             loadSynackAnalyticsView: () => loadSynackAnalyticsView(viewContentContainer),
             loadProxyLogView: (proxyLogParams) => loadProxyLogView(viewContentContainer, proxyLogParams),
@@ -242,8 +242,28 @@ document.addEventListener('DOMContentLoaded', async function() {
                 document.getElementById('editTargetNotesBtn')?.addEventListener('click', handleEditTargetNotes);
                 document.getElementById('saveTargetNotesBtn')?.addEventListener('click', handleSaveTargetNotes);
                 document.getElementById('cancelTargetNotesBtn')?.addEventListener('click', cancelTargetNotesEdit);
+                
+                // Determine the actual tab ID to activate, normalizing the input
+                let tabIdForActivation = 'checklistTab'; // Default tab
+                const validTabHtmlIds = ['checklistTab', 'notesTab', 'findingsTab', 'scopeRulesTab'];
 
-                setActiveTab(tabToMakeActive || 'checklistTab'); // Use passed tab or default
+                if (tabToMakeActive && typeof tabToMakeActive === 'string' && tabToMakeActive.trim() !== '') {
+                    let matchedHtmlId = null;
+                    // First, check for an exact case-sensitive match
+                    if (validTabHtmlIds.includes(tabToMakeActive)) {
+                        matchedHtmlId = tabToMakeActive;
+                    } else {
+                        // If no exact match, try a case-insensitive match, also removing "Tab" suffix for flexibility
+                        const normalizedInput = tabToMakeActive.toLowerCase().replace(/tab$/, '');
+                        matchedHtmlId = validTabHtmlIds.find(validId =>
+                            validId.toLowerCase().replace(/tab$/, '') === normalizedInput
+                        );
+                    }
+                    if (matchedHtmlId) {
+                        tabIdForActivation = matchedHtmlId;
+                    }
+                }
+                setActiveTab(tabIdForActivation);
                 document.querySelectorAll('.tabs .tab-button').forEach(button => button.addEventListener('click', handleTabSwitch));
                 fetchAndDisplayChecklistItems(target.id);
                 fetchAndDisplayTargetFindings(target.id); // New function call
@@ -458,24 +478,350 @@ document.addEventListener('DOMContentLoaded', async function() {
                             <td>${escapeHtml(finding.title)}</td>
                             <td>${escapeHtml(finding.severity.String || 'N/A')}</td>
                             <td>${escapeHtml(finding.status)}</td>
-                            <td>${new Date(finding.discovered_at).toLocaleDateString()}</td>
-                            <td><button class="action-button view-finding-detail" data-finding-id="${finding.id}">👁️</button> <button class="action-button edit-finding" data-finding-id="${finding.id}">✏️</button> <button class="action-button delete-finding danger" data-finding-id="${finding.id}">🗑️</button></td>
+                            <td>${new Date(finding.discovered_at || Date.now()).toLocaleDateString()}</td>
+                            <td><button class="action-button view-finding-detail" data-finding-id="${finding.id}" title="View Finding">👁️</button> <button class="action-button edit-finding" data-finding-id="${finding.id}" data-target-id="${targetId}" title="Edit Finding">✏️</button> <button class="action-button delete-finding" data-finding-id="${finding.id}" data-target-id="${targetId}" title="Delete Finding">🗑️</button></td>
                         </tr>`;
                 });
                 findingsHTML += `</tbody></table>`;
                 findingsContentDiv.innerHTML = findingsHTML;
-                // Add event listeners for view/edit/delete finding buttons later
+                // TODO: Add event listeners for view/edit/delete finding buttons
             } else {
                 findingsContentDiv.innerHTML = '<p>No findings recorded for this target yet.</p> <button id="addNewFindingBtn" class="primary small-button">Add New Finding</button>';
             }
-            // Add event listener for "Add New Finding" button later
-        } catch (error) {
-            console.error("Error fetching target findings:", error);
-            findingsContentDiv.innerHTML = `<p class="error-message">Error loading findings: ${error.message}</p>`;
+            const addNewFindingBtn = document.getElementById('addNewFindingBtn');
+            if (addNewFindingBtn) {
+                addNewFindingBtn.addEventListener('click', () => displayAddFindingForm(targetId));
+            }
+            // Add event listeners for view/edit/delete finding buttons
+            findingsContentDiv.querySelectorAll('.view-finding-detail').forEach(btn => btn.addEventListener('click', (e) => handleViewFindingDetail(e.currentTarget.dataset.findingId)));
+            findingsContentDiv.querySelectorAll('.edit-finding').forEach(btn => btn.addEventListener('click', (e) => displayEditFindingForm(e.currentTarget.dataset.findingId, e.currentTarget.dataset.targetId)));
+            findingsContentDiv.querySelectorAll('.delete-finding').forEach(btn => btn.addEventListener('click', (e) => handleDeleteFinding(e.currentTarget.dataset.findingId, e.currentTarget.dataset.targetId)));
+            // The '}' on the line above closes the try block.
+        } catch (fetchFindingsError) { // Changed variable name for clarity
+            console.error("Error fetching target findings:", fetchFindingsError);
+            if (findingsContentDiv) { // Added a defensive check, though it's checked at the function start
+                findingsContentDiv.innerHTML = `<p class="error-message">Error loading findings: ${escapeHtml(fetchFindingsError.message)}</p>`;
+            }
         }
     }
 
     function applyUiSettings(settings) {
+        // ... (existing code)
+    }
+
+    function displayAddFindingForm(targetId) {
+        console.log("[App.js] displayAddFindingForm called with targetId:", targetId); // Log the targetId
+        const findingsContentDiv = document.getElementById('targetFindingsContent');
+        if (!findingsContentDiv) {
+            console.error("Cannot display add finding form: targetFindingsContent div not found!");
+            uiService.showModalMessage("Error", "UI element missing, cannot display form.");
+            return;
+        }
+
+        // Simple way to show form: replace content. A modal would be better for UX.
+        findingsContentDiv.innerHTML = `
+            <h3>Add New Finding</h3>
+            <form id="addFindingForm">
+                <input type="hidden" name="target_id" value="${targetId}">
+                <div class="form-group">
+                    <label for="findingTitle">Title:</label>
+                    <input type="text" id="findingTitle" name="title" required>
+                </div>
+                <div class="form-group">
+                    <label for="findingDescription">Description:</label>
+                    <textarea id="findingDescription" name="description" rows="5"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="findingPayload">Payload:</label>
+                    <textarea id="findingPayload" name="payload" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="findingSeverity">Severity:</label>
+                    <select id="findingSeverity" name="severity">
+                        <option value="Informational">Informational</option>
+                        <option value="Low">Low</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="findingStatus">Status:</label>
+                    <select id="findingStatus" name="status">
+                        <option value="Open" selected>Open</option>
+                        <option value="Closed">Closed</option>
+                        <option value="Remediated">Remediated</option>
+                        <option value="Accepted Risk">Accepted Risk</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="findingCvssScore">CVSS Score (e.g., 7.5):</label>
+                    <input type="number" id="findingCvssScore" name="cvss_score" step="0.1" min="0" max="10">
+                </div>
+                <div class="form-group">
+                    <label for="findingCweId">CWE ID (e.g., 79):</label>
+                    <input type="number" id="findingCweId" name="cwe_id">
+                </div>
+                <div class="form-group">
+                    <label for="findingReferences">References (URLs, one per line):</label>
+                    <textarea id="findingReferences" name="finding_references" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="findingHttpLogId">Associated HTTP Log ID (Optional):</label>
+                    <input type="number" id="findingHttpLogId" name="http_traffic_log_id">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="primary">Save Finding</button>
+                    <button type="button" id="cancelAddFindingBtn" class="secondary">Cancel</button>
+                </div>
+            </form>
+            <div id="addFindingMessage" class="message-area" style="margin-top:10px;"></div>
+        `;
+
+        document.getElementById('addFindingForm').addEventListener('submit', (event) => handleSaveNewFinding(event, targetId));
+        document.getElementById('cancelAddFindingBtn').addEventListener('click', () => fetchAndDisplayTargetFindings(targetId)); // Reload original view
+    }
+
+    async function handleSaveNewFinding(event, targetId) {
+        event.preventDefault();
+        const form = event.target;
+        const messageArea = document.getElementById('addFindingMessage');
+        messageArea.textContent = '';
+        messageArea.className = 'message-area';
+
+        const formData = new FormData(form);
+
+        // Helper to format strings for sql.NullString in Go
+        const formatNullableString = (value) => {
+            const trimmedValue = String(value || '').trim(); // Ensure value is a string before trim
+            return trimmedValue ? { String: trimmedValue, Valid: true } : null;
+        };
+
+        // Helper to format numbers for sql.NullInt64 or sql.NullFloat64 in Go
+        const formatNullableNumber = (value, isFloat = false) => {
+            const strValue = String(value || '').trim();
+            if (strValue === '') return null;
+
+            const numValue = isFloat ? parseFloat(strValue) : parseInt(strValue, 10);
+            if (isNaN(numValue)) return null; // Or handle error appropriately
+
+            return isFloat ? { Float64: numValue, Valid: true } : { Int64: numValue, Valid: true };
+        };
+
+
+        const findingData = {
+            target_id: parseInt(formData.get('target_id'), 10),
+            title: formData.get('title').trim(),
+            description: formatNullableString(formData.get('description')),
+            payload: formatNullableString(formData.get('payload')),
+            // Severity is sql.NullString in Go model. Status is plain string.
+            severity: formatNullableString(formData.get('severity')),
+            status: formData.get('status'),
+            // cvss_score: formData.get('cvss_score') ? parseFloat(formData.get('cvss_score')) : null,
+            // cwe_id: formData.get('cwe_id') ? parseInt(formData.get('cwe_id'), 10) : null,
+            cvss_score: formatNullableNumber(formData.get('cvss_score'), true),
+            cwe_id: formatNullableNumber(formData.get('cwe_id')),
+            finding_references: formatNullableString(formData.get('finding_references')),
+            http_traffic_log_id: formatNullableNumber(formData.get('http_traffic_log_id')),
+        };
+
+        if (!findingData.title) {
+            messageArea.textContent = "Title is required.";
+            messageArea.classList.add('error-message');
+            return;
+        }
+
+        console.log("[App.js] handleSaveNewFinding - constructed findingData:", JSON.parse(JSON.stringify(findingData))); // Log the data to be sent
+
+        try {
+            await apiService.createTargetFinding(findingData); // This function needs to exist in apiService.js
+            showModalMessage("Success", "New finding added successfully!");
+            fetchAndDisplayTargetFindings(targetId); // Refresh the findings list
+        } catch (error) {
+            messageArea.textContent = `Error saving finding: ${escapeHtml(error.message)}`;
+            messageArea.classList.add('error-message');
+            console.error("Error saving finding:", error);
+        }
+    }
+
+    async function handleViewFindingDetail(findingId) {
+        try {
+            const finding = await apiService.getFindingDetails(findingId); // Ensure this function exists and works
+            
+            let detailHTML = `
+                <div class="finding-details-grid">
+                    <div class="detail-item">Severity:</div><div class="detail-value">${escapeHtml(finding.severity.String || 'N/A')}</div>
+                    <div class="detail-item">Status:</div><div class="detail-value">${escapeHtml(finding.status)}</div>
+
+                    <div class="detail-item">ID:</div><div class="detail-value">${finding.id}</div>
+                    <div class="detail-item">Target ID:</div><div class="detail-value">${finding.target_id}</div>
+
+                    <div class="detail-item">CVSS Score:</div><div class="detail-value">${finding.cvss_score.Valid ? finding.cvss_score.Float64 : 'N/A'}</div>
+                    <div class="detail-item">CWE ID:</div><div class="detail-value">${finding.cwe_id.Valid ? finding.cwe_id.Int64 : 'N/A'}</div>
+
+                    <div class="detail-item">Discovered:</div><div class="detail-value">${new Date(finding.discovered_at).toLocaleString()}</div>
+                    <div class="detail-item">Last Updated:</div><div class="detail-value">${new Date(finding.updated_at).toLocaleString()}</div>
+
+                    <div class="detail-item">HTTP Log ID:</div><div class="detail-value">${finding.http_traffic_log_id.Valid ? finding.http_traffic_log_id.Int64 : 'N/A'}</div>
+                </div>
+
+                <div class="finding-detail-full-width">
+                    <p><strong>Description:</strong></p>
+                    <pre>${escapeHtml(finding.description.String || 'N/A')}</pre>
+                </div>
+                <div class="finding-detail-full-width">
+                    <p><strong>Payload:</strong></p>
+                    <pre>${escapeHtml(finding.payload.String || 'N/A')}</pre>
+                </div>
+                <div class="finding-detail-full-width">
+                    <p><strong>References:</strong></p>
+                    <pre>${escapeHtml(finding.finding_references.String || 'N/A')}</pre>
+                </div>
+            `;
+            showModalMessage(`Finding: ${escapeHtml(finding.title)}`, detailHTML);
+        } catch (error) {
+            console.error("Error fetching finding details:", error);
+            showModalMessage("Error", `Could not load details for finding ID ${findingId}: ${error.message}`);
+        }
+    }
+
+    function displayEditFindingForm(findingId, targetId) {
+        const findingsContentDiv = document.getElementById('targetFindingsContent');
+        if (!findingsContentDiv) {
+            console.error("Cannot display edit finding form: targetFindingsContent div not found!");
+            showModalMessage("Error", "UI element missing, cannot display form.");
+            return;
+        }
+
+        apiService.getFindingDetails(findingId).then(finding => {
+            findingsContentDiv.innerHTML = `
+                <h3>Edit Finding (ID: ${finding.id})</h3>
+                <form id="editFindingForm">
+                    <input type="hidden" name="target_id" value="${targetId}">
+                    <input type="hidden" name="finding_id" value="${finding.id}">
+                    <div class="form-group">
+                        <label for="findingTitle">Title:</label>
+                        <input type="text" id="findingTitle" name="title" value="${escapeHtmlAttribute(finding.title)}" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="findingDescription">Description:</label>
+                        <textarea id="findingDescription" name="description" rows="5">${escapeHtml(finding.description.String || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="findingPayload">Payload:</label>
+                        <textarea id="findingPayload" name="payload" rows="3">${escapeHtml(finding.payload.String || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="findingSeverity">Severity:</label>
+                        <select id="findingSeverity" name="severity">
+                            <option value="Informational" ${finding.severity.String === 'Informational' ? 'selected' : ''}>Informational</option>
+                            <option value="Low" ${finding.severity.String === 'Low' ? 'selected' : ''}>Low</option>
+                            <option value="Medium" ${finding.severity.String === 'Medium' ? 'selected' : ''}>Medium</option>
+                            <option value="High" ${finding.severity.String === 'High' ? 'selected' : ''}>High</option>
+                            <option value="Critical" ${finding.severity.String === 'Critical' ? 'selected' : ''}>Critical</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="findingStatus">Status:</label>
+                        <select id="findingStatus" name="status">
+                            <option value="Open" ${finding.status === 'Open' ? 'selected' : ''}>Open</option>
+                            <option value="Closed" ${finding.status === 'Closed' ? 'selected' : ''}>Closed</option>
+                            <option value="Remediated" ${finding.status === 'Remediated' ? 'selected' : ''}>Remediated</option>
+                            <option value="Accepted Risk" ${finding.status === 'Accepted Risk' ? 'selected' : ''}>Accepted Risk</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="findingCvssScore">CVSS Score:</label>
+                        <input type="number" id="findingCvssScore" name="cvss_score" step="0.1" min="0" max="10" value="${finding.cvss_score.Valid ? finding.cvss_score.Float64 : ''}">
+                    </div>
+                    <div class="form-group">
+                        <label for="findingCweId">CWE ID:</label>
+                        <input type="number" id="findingCweId" name="cwe_id" value="${finding.cwe_id.Valid ? finding.cwe_id.Int64 : ''}">
+                    </div>
+                    <div class="form-group">
+                        <label for="findingReferences">References:</label>
+                        <textarea id="findingReferences" name="finding_references" rows="3">${escapeHtml(finding.finding_references.String || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="findingHttpLogId">Associated HTTP Log ID:</label>
+                        <input type="number" id="findingHttpLogId" name="http_traffic_log_id" value="${finding.http_traffic_log_id.Valid ? finding.http_traffic_log_id.Int64 : ''}">
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="primary">Save Changes</button>
+                        <button type="button" id="cancelEditFindingBtn" class="secondary">Cancel</button>
+                    </div>
+                </form>
+                <div id="editFindingMessage" class="message-area" style="margin-top:10px;"></div>
+            `;
+            document.getElementById('editFindingForm').addEventListener('submit', (event) => handleSaveUpdatedFinding(event, findingId, targetId));
+            document.getElementById('cancelEditFindingBtn').addEventListener('click', () => fetchAndDisplayTargetFindings(targetId));
+        }).catch(error => {
+            console.error("Error fetching finding for edit:", error);
+            findingsContentDiv.innerHTML = `<p class="error-message">Error loading finding for editing: ${error.message}</p>`;
+        });
+    }
+
+    async function handleSaveUpdatedFinding(event, findingId, targetId) {
+        event.preventDefault();
+        const form = event.target;
+        const messageArea = document.getElementById('editFindingMessage');
+        messageArea.textContent = '';
+        messageArea.className = 'message-area';
+
+        const formData = new FormData(form);
+        const formatNullableString = (value) => (String(value || '').trim() ? { String: String(value).trim(), Valid: true } : null);
+        const formatNullableNumber = (value, isFloat = false) => {
+            const strValue = String(value || '').trim();
+            if (strValue === '') return null;
+            const numValue = isFloat ? parseFloat(strValue) : parseInt(strValue, 10);
+            return isNaN(numValue) ? null : (isFloat ? { Float64: numValue, Valid: true } : { Int64: numValue, Valid: true });
+        };
+
+        const findingData = {
+            // ID and TargetID are not directly updatable via this payload for safety,
+            // they are used by the API endpoint path and backend logic.
+            title: formData.get('title').trim(),
+            description: formatNullableString(formData.get('description')),
+            payload: formatNullableString(formData.get('payload')),
+            severity: formatNullableString(formData.get('severity')),
+            status: formData.get('status'),
+            cvss_score: formatNullableNumber(formData.get('cvss_score'), true),
+            cwe_id: formatNullableNumber(formData.get('cwe_id')),
+            finding_references: formatNullableString(formData.get('finding_references')),
+            http_traffic_log_id: formatNullableNumber(formData.get('http_traffic_log_id')),
+        };
+
+        if (!findingData.title) {
+            messageArea.textContent = "Title is required.";
+            messageArea.classList.add('error-message');
+            return;
+        }
+
+        try {
+            await apiService.updateTargetFinding(findingId, findingData);
+            showModalMessage("Success", "Finding updated successfully!");
+            fetchAndDisplayTargetFindings(targetId); // Refresh the list
+        } catch (error) {
+            messageArea.textContent = `Error updating finding: ${escapeHtml(error.message)}`;
+            messageArea.classList.add('error-message');
+            console.error("Error updating finding:", error);
+        }
+    }
+
+    async function handleDeleteFinding(findingId, targetId) {
+        showModalConfirm("Confirm Delete", `Are you sure you want to delete finding ID ${findingId}? This action cannot be undone.`, async () => {
+            try {
+                await apiService.deleteTargetFinding(findingId);
+                showModalMessage("Success", `Finding ID ${findingId} deleted successfully.`);
+                fetchAndDisplayTargetFindings(targetId); // Refresh the list
+            } catch (error) {
+                console.error("Error deleting finding:", error);
+                showModalMessage("Error", `Failed to delete finding ID ${findingId}: ${error.message}`);
+            }
+        });
+    }
+
+    async function fetchAndSetInitialCurrentTarget() {
         const showSynack = settings && settings.showSynackSection === true;
         const synackHeader = document.getElementById('synack-sidebar-header');
         const synackTargetsItem = document.querySelector('.sidebar-item[data-view="synack-targets"]');

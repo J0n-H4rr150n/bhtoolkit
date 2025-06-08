@@ -35,10 +35,19 @@
                     <span class="icon">🎯</span>
                     <span class="sidebar-item-text">Targets</span>
                 </a>
-                 <a href="#current-target" class="sidebar-item" data-view="current-target">
-                    <span class="icon">📍</span>
-                    <span class="sidebar-item-text">Current Target</span>
-                </a>
+                <div class="sidebar-item-container">
+                    <a href="#current-target" class="sidebar-item" data-view="current-target">
+                        <span class="icon">📍</span>
+                        <span class="sidebar-item-text">Current Target</span>
+                    </a>
+                    <ul class="flyout-menu">
+                        <li><a href="#current-target&tab=checklistTab" class="flyout-link"><span class="sidebar-item-text">Checklist</span></a></li>
+                        <li><a href="#current-target&tab=notesTab" class="flyout-link"><span class="sidebar-item-text">Notes</span></a></li>
+                        <li><a href="#current-target&tab=findingsTab" class="flyout-link"><span class="sidebar-item-text">Findings</span></a></li>
+                        <li><a href="#current-target&tab=scopeRulesTab" class="flyout-link"><span class="sidebar-item-text">Scope Rules</span></a></li>
+                    </ul>
+                </div>
+
                 <a href="#checklist-templates" class="sidebar-item" data-view="checklist-templates">
                     <span class="icon">📋</span> <!-- Or your preferred icon -->
                     <span class="sidebar-item-text">Checklists</span>
@@ -47,10 +56,16 @@
 
             <div class="sidebar-category">
                 <div class="sidebar-category-title">Traffic</div>
-                 <a href="#proxy-log" class="sidebar-item" data-view="proxy-log">
-                    <span class="icon">📡</span>
-                    <span class="sidebar-item-text">Proxy Log</span>
-                </a>
+                <div class="sidebar-item-container">
+                    <a href="#proxy-log" class="sidebar-item" data-view="proxy-log">
+                        <span class="icon">📡</span>
+                        <span class="sidebar-item-text">Proxy Log</span>
+                    </a>
+                    <ul class="flyout-menu">
+                        <li><a href="#proxy-log" class="flyout-link"><span class="sidebar-item-text">All Logs</span></a></li>
+                        <li><a href="#proxy-log?favorites_only=true" class="flyout-link"><span class="sidebar-item-text">Favorites</span></a></li>
+                    </ul>
+                </div>
                 <a href="#sitemap" class="sidebar-item" data-view="sitemap">
                     <span class="icon">🗺️</span>
                     <span class="sidebar-item-text">Sitemap</span>

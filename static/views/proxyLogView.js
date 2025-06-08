@@ -158,8 +158,31 @@ function renderProxyLogPagination(container) {
 
 function handleViewLogDetail(event) {
     const button = event.target.closest('button');
-    const logId = button.getAttribute('data-log-id');
-    window.location.hash = `#proxy-log-detail?id=${logId}`;
+    const logId = button.dataset.logId; // Use dataset for cleaner access
+
+    if (!logId) {
+        console.error('Log ID not found for view action.');
+        return;
+    }
+
+    const detailHashPath = `#proxy-log-detail?id=${logId}`;
+
+    if (event.ctrlKey || event.metaKey) { // Check for Ctrl or Command key
+        event.preventDefault(); // Prevent default click behavior
+
+        // Construct the full URL for the new tab
+        // window.location.origin gives http://localhost:8778
+        // window.location.pathname gives the path of the current page (e.g., /)
+        // .replace(/\/$/, '') removes a trailing slash from pathname if it exists,
+        // to prevent double slashes if detailHashPath already starts with one.
+        const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
+        const fullUrl = baseUrl + detailHashPath;
+        
+        window.open(fullUrl, '_blank'); // Open in new tab
+    } else {
+        // Default action: navigate in the current tab using hash change
+        window.location.hash = detailHashPath;
+    }
 }
 
 async function fetchAndDisplayProxyLogs(passedParams = null) {
@@ -756,8 +779,8 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                     <span id="favoriteToggleBtn" class="favorite-toggle ${logEntry.is_favorite ? 'favorited' : ''}" data-log-id="${logEntry.id}" data-is-favorite="${logEntry.is_favorite}" title="Toggle Favorite" style="margin-left: 10px; font-size: 1.2em; vertical-align: middle;">${logEntry.is_favorite ? '★' : '☆'}</span>
                 </h1>
                 <div class="log-navigation">
-                    <button id="prevLogBtn" class="secondary" ${logEntry.prev_log_id ? `data-log-id="${logEntry.prev_log_id}"` : 'disabled'} title="Previous Log Entry">&laquo; Previous</button>
-                    <button id="nextLogBtn" class="secondary" ${logEntry.next_log_id ? `data-log-id="${logEntry.next_log_id}"` : 'disabled'} title="Next Log Entry" style="margin-left: 5px;">Next &raquo;</button>
+                    ${logEntry.prev_log_id ? `<button id="prevLogBtn" class="secondary" data-log-id="${logEntry.prev_log_id}" title="Previous Log Entry">&laquo; Previous</button>` : ''}
+                    ${logEntry.next_log_id ? `<button id="nextLogBtn" class="secondary" data-log-id="${logEntry.next_log_id}" title="Next Log Entry" style="margin-left: ${logEntry.prev_log_id ? '5px' : '0'};">Next &raquo;</button>` : ''}
                 </div>
             </div>
             <div class="log-meta-info" style="margin-bottom: 15px; padding: 10px; background-color: #f9f9f9; border-radius: 4px;">
@@ -808,8 +831,8 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
         const prevBtn = document.getElementById('prevLogBtn');
         const nextBtn = document.getElementById('nextLogBtn');
         const currentFiltersAndSortQuery = new URLSearchParams(navParams).toString();
-        if (prevBtn && !prevBtn.disabled) prevBtn.addEventListener('click', () => window.location.hash = `#proxy-log-detail?id=${prevBtn.getAttribute('data-log-id')}&${currentFiltersAndSortQuery}`);
-        if (nextBtn && !nextBtn.disabled) nextBtn.addEventListener('click', () => window.location.hash = `#proxy-log-detail?id=${nextBtn.getAttribute('data-log-id')}&${currentFiltersAndSortQuery}`);
+        if (prevBtn) prevBtn.addEventListener('click', () => window.location.hash = `#proxy-log-detail?id=${prevBtn.getAttribute('data-log-id')}&${currentFiltersAndSortQuery}`);
+        if (nextBtn) nextBtn.addEventListener('click', () => window.location.hash = `#proxy-log-detail?id=${nextBtn.getAttribute('data-log-id')}&${currentFiltersAndSortQuery}`);
 
         document.getElementById('favoriteToggleBtn')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;

@@ -545,18 +545,12 @@ export async function getTargetFindings(targetId) {
 }
 
 /**
- * Creates a new finding for a specific target.
- * @param {number|string} targetId - The ID of the target.
- * @param {Object} findingData - The data for the new finding.
- *                               Expected: { title, description, payload, severity, status, http_traffic_log_id (optional), etc. }
- * @returns {Promise<Object>} - A promise that resolves with the created finding object.
+ * Fetches details for a specific finding.
+ * @param {number|string} findingId - The ID of the finding.
+ * @returns {Promise<Object>} - A promise that resolves with the finding details.
  */
-export async function createTargetFinding(targetId, findingData) {
-    const response = await fetch(`${API_BASE}/targets/${targetId}/findings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(findingData),
-    });
+export async function getFindingDetails(findingId) {
+    const response = await fetch(`${API_BASE}/findings/${findingId}`);
     return handleResponse(response);
 }
 
@@ -585,4 +579,19 @@ export async function deleteTargetFinding(findingId) {
         method: 'DELETE',
     });
     return handleResponse(response); // Will be an empty object on 204 No Content
+}
+
+export async function createTargetFinding(findingData) {
+    const response = await fetch(`${API_BASE}/findings`, { // Assuming /api/findings is your endpoint
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(findingData),
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+    }
+    return await response.json(); // Or handle no content if API returns 201/204
 }

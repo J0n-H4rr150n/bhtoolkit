@@ -6,11 +6,13 @@ import (
 
 func RegisterFindingRoutes(r chi.Router) {
 	// Assuming findings are often nested under targets
-	r.Post("/targets/{target_id}/findings", CreateTargetFindingHandler)
-	r.Get("/targets/{target_id}/findings", GetTargetFindingsHandler) // This is the one we need for GET
+	r.Post("/findings", CreateTargetFindingHandler)                  // Changed: Create finding, target_id in body
+	r.Get("/targets/{target_id}/findings", GetTargetFindingsHandler) // List findings for a specific target
 
-	// Routes for individual findings (update, delete)
-	r.Put("/findings/{finding_id}", UpdateTargetFindingHandler)
-	r.Delete("/findings/{finding_id}", DeleteTargetFindingHandler)
-	// GET /findings/{finding_id} could also be added if needed directly
+	// Routes for individual findings (get by ID, update, delete)
+	r.Route("/findings/{finding_id}", func(subRouter chi.Router) {
+		subRouter.Get("/", GetFindingByIDHandler) // Added: Get a specific finding by its ID
+		subRouter.Put("/", UpdateTargetFindingHandler)
+		subRouter.Delete("/", DeleteTargetFindingHandler)
+	})
 }

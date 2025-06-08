@@ -150,7 +150,7 @@ async function loadView(viewId, params = {}) {
             else console.error("loadTargetsView not found in viewLoaders");
             break;
         case 'current-target':
-            if (viewLoaders.loadCurrentTargetView) viewLoaders.loadCurrentTargetView(params.id);
+            if (viewLoaders.loadCurrentTargetView) viewLoaders.loadCurrentTargetView(params.id, params.tab); // Pass params.tab
             else console.error("loadCurrentTargetView not found in viewLoaders");
             break;
         case 'synack-targets':
@@ -252,17 +252,35 @@ async function loadView(viewId, params = {}) {
  */
 function handleHashChange() {
     console.log('[Router] handleHashChange CALLED. Current window.location.hash:', window.location.hash);
-    const hash = window.location.hash.substring(1);
+    const hash = window.location.hash.substring(1); // Remove leading '#'
     let viewId = 'platforms';
     let params = {};
-
+    let queryString = '';
 
     if (hash) {
-        const parts = hash.split('?');
-        viewId = parts[0] || 'platforms';
-        if (parts[1]) {
-            const queryParams = new URLSearchParams(parts[1]);
-            console.log('[Router] handleHashChange: Raw query string from hash:', parts[1]);
+        const indexOfQM = hash.indexOf('?');
+        const indexOfAmp = hash.indexOf('&'); // Check for '&' as the first separator too
+
+        let queryStartIndex = -1;
+
+        // Determine the actual start of the query string
+        if (indexOfQM !== -1 && (indexOfAmp === -1 || indexOfQM < indexOfAmp)) {
+            queryStartIndex = indexOfQM;
+        } else if (indexOfAmp !== -1) {
+            queryStartIndex = indexOfAmp;
+        }
+
+        if (queryStartIndex !== -1) {
+            viewId = hash.substring(0, queryStartIndex);
+            queryString = hash.substring(queryStartIndex + 1); // Get the part after '?' or '&'
+        } else {
+            viewId = hash; // No query parameters
+        }
+        viewId = viewId || 'platforms'; // Ensure viewId is not empty if hash was just '?' or '&'
+
+        if (queryString) {
+            const queryParams = new URLSearchParams(queryString);
+            console.log('[Router] handleHashChange: Raw query string from hash:', queryString);
             
             for (const [key, value] of queryParams.entries()) {
                 console.log(`[Router] handleHashChange: Parsing queryParam - Key: "${key}", Value: "${value}"`);
@@ -289,6 +307,8 @@ function handleHashChange() {
                     params.favorites_only = value; // Keep as string, loadView handles conversion
                 } else {
                     params[key] = value; // Catch-all for any other parameters
+                    // Specifically capture 'tab' if it's not handled above
+                    if (key === 'tab') params.tab = value;
                 }
             }
         }

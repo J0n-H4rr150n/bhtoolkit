@@ -14,14 +14,6 @@ import (
 
 // CreateTargetFindingHandler handles POST requests to create a new finding for a target.
 func CreateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
-	targetIDStr := chi.URLParam(r, "target_id")
-	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
-	if err != nil {
-		logger.Error("CreateTargetFindingHandler: Invalid target_id format: %s", targetIDStr)
-		http.Error(w, "Invalid target ID format", http.StatusBadRequest)
-		return
-	}
-
 	var findingReq models.TargetFinding // Use TargetFinding directly, ID will be ignored by DB on insert
 	if err := json.NewDecoder(r.Body).Decode(&findingReq); err != nil {
 		logger.Error("CreateTargetFindingHandler: Error decoding request body: %v", err)
@@ -30,16 +22,20 @@ func CreateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	if findingReq.TargetID == 0 {
+		logger.Error("CreateTargetFindingHandler: target_id is required in the request body")
+		http.Error(w, "target_id is required in the request body", http.StatusBadRequest)
+		return
+	}
 	if strings.TrimSpace(findingReq.Title) == "" {
+		logger.Error("CreateTargetFindingHandler: Finding title cannot be empty for target_id %d", findingReq.TargetID)
 		http.Error(w, "Finding title cannot be empty", http.StatusBadRequest)
 		return
 	}
 
-	findingReq.TargetID = targetID // Ensure target_id from URL is used
-
 	id, err := database.CreateTargetFinding(findingReq)
 	if err != nil {
-		logger.Error("CreateTargetFindingHandler: Error creating finding for target %d: %v", targetID, err)
+		logger.Error("CreateTargetFindingHandler: Error creating finding for target %d: %v", findingReq.TargetID, err)
 		http.Error(w, "Failed to create finding", http.StatusInternalServerError)
 		return
 	}
@@ -47,10 +43,11 @@ func CreateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 	createdFinding, err := database.GetTargetFindingByID(id)
 	if err != nil {
 		logger.Error("CreateTargetFindingHandler: Error fetching newly created finding %d: %v", id, err)
-		// Still return 201, but log the issue
+		// The finding was created, so return 201 with the ID.
+		// Provide a clear message about the situation.
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "message": "Finding created, but error fetching full details."})
+		w.WriteHeader(http.StatusCreated) // Respond with 201 Created
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "target_id": findingReq.TargetID, "message": "Finding created successfully. However, there was an error retrieving the full details of the created finding."})
 		return
 	}
 
@@ -82,6 +79,32 @@ func GetTargetFindingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(findings)
+}
+
+// GetFindingByIDHandler handles GET requests for a single finding by its ID.
+func GetFindingByIDHandler(w http.ResponseWriter, r *http.Request) {
+	findingIDStr := chi.URLParam(r, "finding_id")
+	findingID, err := strconv.ParseInt(findingIDStr, 10, 64)
+	if err != nil {
+		logger.Error("GetFindingByIDHandler: Invalid finding_id format: %s", findingIDStr)
+		http.Error(w, "Invalid finding ID format", http.StatusBadRequest)
+		return
+	}
+
+	finding, err := database.GetTargetFindingByID(findingID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			logger.Error("GetFindingByIDHandler: Finding %d not found: %v", findingID, err)
+			http.Error(w, "Finding not found", http.StatusNotFound)
+		} else {
+			logger.Error("GetFindingByIDHandler: Error fetching finding %d: %v", findingID, err)
+			http.Error(w, "Failed to retrieve finding", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(finding)
 }
 
 // UpdateTargetFindingHandler handles PUT requests to update an existing finding.
@@ -127,9 +150,11 @@ func UpdateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 	updatedFinding, err := database.GetTargetFindingByID(findingID)
 	if err != nil {
 		logger.Error("UpdateTargetFindingHandler: Error fetching updated finding %d: %v", findingID, err)
-		// Still return 200, but log the issue
+		// The finding was updated, so return 200.
+		// Provide a clear message.
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Finding updated, but error fetching full details."})
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": findingID, "target_id": existingFinding.TargetID, "message": "Finding updated successfully. However, there was an error retrieving the full details of the updated finding."})
 		return
 	}
 
