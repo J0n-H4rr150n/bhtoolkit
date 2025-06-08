@@ -11,78 +11,16 @@ import (
 	"toolkit/database"
 	"toolkit/logger"
 	"toolkit/models"
+
+	"github.com/go-chi/chi/v5"
 )
-
-// PlatformsCollectionHandler handles requests for the /platforms collection path.
-// It dispatches to getPlatforms for GET and createPlatform for POST.
-func PlatformsCollectionHandler(w http.ResponseWriter, r *http.Request) {
-	logger.Info("PlatformsCollectionHandler: Method=%s, Received Path (relative to /api)='%s'", r.Method, r.URL.Path)
-
-	if r.URL.Path == "/platforms" {
-		switch r.Method {
-		case http.MethodGet:
-			logger.Debug("PlatformsCollectionHandler: Routing to getPlatforms for path '%s'", r.URL.Path)
-			getPlatforms(w, r)
-		case http.MethodPost:
-			logger.Debug("PlatformsCollectionHandler: Routing to createPlatform for path '%s'", r.URL.Path)
-			createPlatform(w, r)
-		default:
-			logger.Error("PlatformsCollectionHandler: MethodNotAllowed: %s for /platforms", r.Method)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Method not allowed for platform collection"})
-		}
-	} else {
-		logger.Error("PlatformsCollectionHandler: Path mismatch or not an exact match for collection. Path received: '%s'. This should have been caught by a more specific item handler or the catch-all.", r.URL.Path)
-		http.NotFound(w, r)
-	}
-}
-
-// PlatformItemHandler handles requests for a specific platform item, e.g., /platforms/{id}
-func PlatformItemHandler(w http.ResponseWriter, r *http.Request) {
-	logger.Info("PlatformItemHandler: Method=%s, Received Path (relative to /api)='%s'", r.Method, r.URL.Path)
-
-	idStr := strings.TrimPrefix(r.URL.Path, "/platforms/")
-	idStr = strings.Trim(idStr, "/")
-
-	if idStr == "" {
-		logger.Error("PlatformItemHandler: Path was '/platforms/', which is ambiguous. Expected /platforms/{id}. This might indicate a routing issue or incorrect client request.")
-		http.NotFound(w, r)
-		return
-	}
-
-	platformID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		logger.Error("PlatformItemHandler: Invalid platform ID format '%s' in path: %v", idStr, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Invalid platform ID format. Must be numeric."})
-		return
-	}
-
-	logger.Info("PlatformItemHandler: Parsed PlatformID %d", platformID)
-
-	switch r.Method {
-	case http.MethodGet:
-		getPlatformByID(w, r, platformID)
-	case http.MethodPut:
-		updatePlatform(w, r, platformID)
-	case http.MethodDelete:
-		deletePlatform(w, r, platformID)
-	default:
-		logger.Error("PlatformItemHandler: MethodNotAllowed: %s for /platforms/%d", r.Method, platformID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Method not allowed for this platform resource"})
-	}
-}
 
 // createPlatform handles the creation of a new platform.
 func createPlatform(w http.ResponseWriter, r *http.Request) {
 	var p models.Platform
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		logger.Error("createPlatform: Error decoding request body: %v", err)
-		w.Header().Set("Content-Type", "application/json")
+		// w.Header().Set("Content-Type", "application/json") // http.Error sets this, or json.NewEncoder does
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Invalid request body: " + err.Error()})
 		return
@@ -92,99 +30,43 @@ func createPlatform(w http.ResponseWriter, r *http.Request) {
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
 		logger.Error("createPlatform: Platform name is required and was empty")
-		w.Header().Set("Content-Type", "application/json")
+		// w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Platform name is required"})
 		return
 	}
 
-	var existingID int64
-	err := database.DB.QueryRow("SELECT id FROM platforms WHERE LOWER(name) = LOWER(?)", p.Name).Scan(&existingID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		logger.Error("createPlatform: Error checking for existing platform '%s': %v", p.Name, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error while checking platform"})
-		return
-	}
-	if err == nil {
-		logger.Error("createPlatform: Platform '%s' already exists with ID %d", p.Name, existingID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: fmt.Sprintf("Platform '%s' already exists", p.Name)})
-		return
-	}
-
-	stmt, err := database.DB.Prepare("INSERT INTO platforms(name) VALUES(?)")
+	createdPlatform, err := database.CreatePlatform(p.Name)
 	if err != nil {
-		logger.Error("createPlatform: Error preparing statement for platform '%s': %v", p.Name, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error"})
-		return
-	}
-	defer stmt.Close()
-
-	res, err := stmt.Exec(p.Name)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
-			logger.Error("createPlatform: Platform name '%s' conflicts (UNIQUE constraint).", p.Name)
-			w.Header().Set("Content-Type", "application/json")
+		// database.CreatePlatform should handle checking for existing name / unique constraint
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") ||
+			strings.Contains(strings.ToLower(err.Error()), "already exists") { // More robust check
+			logger.Error("createPlatform: Platform name '%s' conflicts: %v", p.Name, err)
+			// w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(models.ErrorResponse{Message: fmt.Sprintf("Platform name '%s' already exists.", p.Name)})
 		} else {
 			logger.Error("createPlatform: Error inserting platform '%s': %v", p.Name, err)
-			w.Header().Set("Content-Type", "application/json")
+			// w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error while inserting platform"})
 		}
 		return
 	}
 
-	id, err := res.LastInsertId()
-	if err != nil {
-		logger.Error("createPlatform: Error getting last insert ID for platform '%s': %v", p.Name, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error after inserting platform"})
-		return
-	}
-	p.ID = id
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(p); err != nil {
-		logger.Error("createPlatform: Error encoding response for platform '%s': %v", p.Name, err)
+	if err := json.NewEncoder(w).Encode(createdPlatform); err != nil {
+		logger.Error("createPlatform: Error encoding response for platform '%s': %v", createdPlatform.Name, err)
 	}
-	logger.Info("Platform created: ID %d, Name '%s'", p.ID, p.Name)
+	logger.Info("Platform created: ID %d, Name '%s'", createdPlatform.ID, createdPlatform.Name)
 }
 
 // getPlatforms handles listing all platforms.
 func getPlatforms(w http.ResponseWriter, r *http.Request) {
-	rows, err := database.DB.Query("SELECT id, name FROM platforms ORDER BY name ASC")
+	platforms, err := database.GetAllPlatforms()
 	if err != nil {
 		logger.Error("getPlatforms: Error querying platforms: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error"})
-		return
-	}
-	defer rows.Close()
-
-	platforms := []models.Platform{}
-	for rows.Next() {
-		var p models.Platform
-		if err := rows.Scan(&p.ID, &p.Name); err != nil {
-			logger.Error("getPlatforms: Error scanning platform row: %v", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error"})
-			return
-		}
-		platforms = append(platforms, p)
-	}
-	if err = rows.Err(); err != nil {
-		logger.Error("getPlatforms: Error iterating platform rows: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error"})
@@ -198,14 +80,24 @@ func getPlatforms(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Fetched %d platforms", len(platforms))
 }
 
+// GetPlatformByIDChiHandler is the chi-compatible handler for getting a platform by ID.
+func GetPlatformByIDChiHandler(w http.ResponseWriter, r *http.Request) {
+	platformIDStr := chi.URLParam(r, "platformID")
+	platformID, err := strconv.ParseInt(platformIDStr, 10, 64)
+	if err != nil {
+		logger.Error("GetPlatformByIDChiHandler: Invalid platform ID format '%s': %v", platformIDStr, err)
+		http.Error(w, "Invalid platform ID", http.StatusBadRequest)
+		return
+	}
+	getPlatformByID(w, r, platformID)
+}
+
 // getPlatformByID handles fetching a single platform by its ID.
 func getPlatformByID(w http.ResponseWriter, r *http.Request, platformID int64) {
-	var p models.Platform
-	query := `SELECT id, name FROM platforms WHERE id = ?`
-	err := database.DB.QueryRow(query, platformID).Scan(&p.ID, &p.Name)
-
+	p, err := database.GetPlatformByID(platformID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// Check if the error message indicates "not found" as our db function now returns a specific error for that
+		if strings.Contains(err.Error(), "not found") || errors.Is(err, sql.ErrNoRows) {
 			logger.Error("getPlatformByID: Platform with ID %d not found", platformID)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -224,6 +116,18 @@ func getPlatformByID(w http.ResponseWriter, r *http.Request, platformID int64) {
 		logger.Error("getPlatformByID: Error encoding response for platform ID %d: %v", platformID, err)
 	}
 	logger.Info("Successfully retrieved platform ID %d", platformID)
+}
+
+// UpdatePlatformChiHandler is the chi-compatible handler for updating a platform.
+func UpdatePlatformChiHandler(w http.ResponseWriter, r *http.Request) {
+	platformIDStr := chi.URLParam(r, "platformID")
+	platformID, err := strconv.ParseInt(platformIDStr, 10, 64)
+	if err != nil {
+		logger.Error("UpdatePlatformChiHandler: Invalid platform ID format '%s': %v", platformIDStr, err)
+		http.Error(w, "Invalid platform ID", http.StatusBadRequest)
+		return
+	}
+	updatePlatform(w, r, platformID)
 }
 
 // updatePlatform handles updating the name of an existing platform.
@@ -247,36 +151,15 @@ func updatePlatform(w http.ResponseWriter, r *http.Request, platformID int64) {
 		return
 	}
 
-	var existingID int64
-	err := database.DB.QueryRow("SELECT id FROM platforms WHERE LOWER(name) = LOWER(?) AND id != ?", p.Name, platformID).Scan(&existingID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		logger.Error("updatePlatform: Error checking for conflicting new name '%s' (for ID %d): %v", p.Name, platformID, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error checking name conflict"})
-		return
-	}
-	if err == nil {
-		logger.Error("updatePlatform: New name '%s' conflicts with existing platform ID %d (while updating ID %d)", p.Name, existingID, platformID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: fmt.Sprintf("Another platform already exists with the name '%s'", p.Name)})
-		return
-	}
-
-	stmt, err := database.DB.Prepare("UPDATE platforms SET name = ? WHERE id = ?")
+	updatedPlatform, err := database.UpdatePlatform(platformID, p.Name)
 	if err != nil {
-		logger.Error("updatePlatform: Error preparing update statement for ID %d: %v", platformID, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error"})
-		return
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(p.Name, platformID)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+		if strings.Contains(err.Error(), "not found") {
+			logger.Error("updatePlatform: Platform with ID %d not found for update", platformID)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(models.ErrorResponse{Message: fmt.Sprintf("Platform with ID %d not found", platformID)})
+		} else if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") ||
+			strings.Contains(strings.ToLower(err.Error()), "already exists") {
 			logger.Error("updatePlatform: Update for ID %d failed due to UNIQUE constraint (name '%s'): %v", platformID, p.Name, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
@@ -290,16 +173,6 @@ func updatePlatform(w http.ResponseWriter, r *http.Request, platformID int64) {
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		logger.Error("updatePlatform: Platform with ID %d not found for update", platformID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: fmt.Sprintf("Platform with ID %d not found", platformID)})
-		return
-	}
-
-	updatedPlatform := models.Platform{ID: platformID, Name: p.Name}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(updatedPlatform); err != nil {
@@ -308,41 +181,30 @@ func updatePlatform(w http.ResponseWriter, r *http.Request, platformID int64) {
 	logger.Info("Platform updated: ID %d, New Name '%s'", platformID, p.Name)
 }
 
+// DeletePlatformChiHandler is the chi-compatible handler for deleting a platform.
+func DeletePlatformChiHandler(w http.ResponseWriter, r *http.Request) {
+	platformIDStr := chi.URLParam(r, "platformID")
+	platformID, err := strconv.ParseInt(platformIDStr, 10, 64)
+	if err != nil {
+		logger.Error("DeletePlatformChiHandler: Invalid platform ID format '%s': %v", platformIDStr, err)
+		http.Error(w, "Invalid platform ID", http.StatusBadRequest)
+		return
+	}
+	deletePlatform(w, r, platformID)
+}
+
 // deletePlatform handles deleting a specific platform by its ID.
 func deletePlatform(w http.ResponseWriter, r *http.Request, platformID int64) {
 	logger.Info("Attempting to delete platform with ID %d", platformID)
-
-	stmt, err := database.DB.Prepare("DELETE FROM platforms WHERE id = ?")
+	err := database.DeletePlatform(platformID)
 	if err != nil {
-		logger.Error("deletePlatform: Error preparing delete statement for ID %d: %v", platformID, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error"})
-		return
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(platformID)
-	if err != nil {
-		logger.Error("deletePlatform: Error executing delete for ID %d: %v", platformID, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Internal server error during delete"})
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		logger.Error("deletePlatform: Error getting rows affected for ID %d: %v", platformID, err)
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	if rowsAffected == 0 {
-		logger.Error("deletePlatform: Platform with ID %d not found for deletion", platformID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Message: fmt.Sprintf("Platform with ID %d not found", platformID)})
+		if strings.Contains(err.Error(), "not found") {
+			logger.Error("deletePlatform: Platform with ID %d not found for deletion", platformID)
+			http.Error(w, fmt.Sprintf("Platform with ID %d not found", platformID), http.StatusNotFound)
+		} else {
+			logger.Error("deletePlatform: Error deleting platform ID %d: %v", platformID, err)
+			http.Error(w, "Internal server error during delete", http.StatusInternalServerError)
+		}
 		return
 	}
 

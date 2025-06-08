@@ -107,6 +107,11 @@ function handleProxyLogFilterChange(event) {
 }
 
 function handleProxyLogSort(event) {
+    // Prevent sorting if a column resize was just completed
+    if (tableService && typeof tableService.getIsResizing === 'function' && tableService.getIsResizing()) {
+        console.log('[ProxyLogView] Sort prevented due to active resize operation.');
+        return;
+    }
     const newSortBy = event.target.closest('th').getAttribute('data-sort-key');
     console.log('[ProxyLogView] handleProxyLogSort triggered for key:', newSortBy);
     if (!newSortBy) return;
@@ -212,7 +217,7 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
 
         const savedTableWidths = globalTableLayouts[tableKey] || {};
         const sortableHeaders = [
-            { key: '#', label: '#', sortKey: 'id', filter: false },
+            { key: 'index', label: '#', sortKey: 'id', filter: false }, // Changed key from '#' to 'index'
             { key: 'timestamp', label: 'Timestamp', sortKey: 'timestamp', filter: false },
             { key: 'method', label: 'Method', sortKey: 'request_method', filter: true },
             { key: 'url', label: 'URL', sortKey: 'request_url', filter: false },
@@ -221,6 +226,12 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
             { key: 'size', label: 'Size (B)', sortKey: 'response_body_size', filter: false },
             { key: 'actions', label: 'Actions', sortKey: null, filter: false }
         ];
+        
+        // For debugging, let's log what layouts are available when rendering
+        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - globalTableLayouts:", JSON.parse(JSON.stringify(globalTableLayouts)));
+        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - tableKey:", tableKey);
+        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - savedTableWidths for this tableKey:", JSON.parse(JSON.stringify(savedTableWidths)));
+        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - columnConfig (defaults from state):", JSON.parse(JSON.stringify(columnConfig)));
 
         if (logs.length > 0) {
             let tableHTML = `<table style="table-layout: fixed;"><thead id="proxyLogTableHead"><tr>`;
@@ -228,8 +239,13 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                 let classes = h.sortKey ? 'sortable' : '';
                 if (h.sortKey === sortBy) classes += sortOrder === 'ASC' ? ' sorted-asc' : ' sorted-desc';
                 let filterDropdownHTML = '';
-                const colKeyForWidth = h.key.toLowerCase().replace(/[^a-z0-9]/gi, '');
-                const thStyleWidth = savedTableWidths[colKeyForWidth] || columnConfig[colKeyForWidth]?.default || 'auto';
+                const colKey = h.key; // Use the key directly
+                let thStyleWidth;
+                if (colKey === 'actions') {
+                    thStyleWidth = '110px'; // Fixed width for the Actions column
+                } else {
+                    thStyleWidth = savedTableWidths[colKey] || columnConfig[colKey]?.default || 'auto';
+                }
 
                 if (h.filter) {
                     let options = [];
@@ -242,11 +258,20 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                     options.unshift('');
                     filterDropdownHTML = `<br><select class="proxy-log-filter" data-filter-key="${h.key}" style="margin-top: 5px; width: 90%;">${options.map(opt => `<option value="${escapeHtmlAttribute(String(opt))}" ${String(opt) === String(currentFilterValue) ? 'selected' : ''}>${opt === '' ? 'All' : escapeHtmlAttribute(String(opt))}</option>`).join('')}</select>`;
                 }
-                tableHTML += `<th style="width: ${thStyleWidth};" class="${classes}" ${h.sortKey ? `data-sort-key="${h.sortKey}"` : ''} data-col-key="${colKeyForWidth}" id="${columnConfig[colKeyForWidth]?.id || 'col-proxylog-' + colKeyForWidth}">${h.label}${filterDropdownHTML}</th>`;
+                // Log the width calculation for each header
+                console.log(`[ProxyLogView] Header: ${h.label}, colKey: '${colKey}', savedWidth: '${savedTableWidths[colKey]}', defaultWidth: '${columnConfig[colKey]?.default}', finalWidth: '${thStyleWidth}'`);
+
+                tableHTML += `<th style="width: ${thStyleWidth};" class="${classes}" ${h.sortKey ? `data-sort-key="${h.sortKey}"` : ''} data-col-key="${colKey}" id="${columnConfig[colKey]?.id || 'col-proxylog-' + colKey}">${h.label}${filterDropdownHTML}</th>`;
             });
             tableHTML += `</tr></thead><tbody>`;
             logs.forEach((log, index) => {
-                const itemIndex = (appState.paginationState.proxyLog.currentPage - 1) * limit + index + 1;
+                let itemIndex;
+                const { totalRecords: currentTotalRecords, currentPage: currentDisplayPage } = appState.paginationState.proxyLog;
+                if (sortBy === 'id' && sortOrder === 'DESC') {
+                    itemIndex = currentTotalRecords - ((currentDisplayPage - 1) * limit) - index;
+                } else {
+                    itemIndex = (currentDisplayPage - 1) * limit + index + 1;
+                }
                 const safeURL = escapeHtml(log.request_url);
                 const ts = log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A';
                 tableHTML += `<tr>
@@ -257,7 +282,9 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                     <td>${log.response_body_size || 0}</td>
                     <td class="actions-cell">
                         <span class="favorite-toggle table-row-favorite-toggle ${log.is_favorite ? 'favorited' : ''}" data-log-id="${log.id}" data-is-favorite="${log.is_favorite ? 'true' : 'false'}" title="Toggle Favorite" style="cursor: pointer; margin-right: 8px; font-size: 1.2em; vertical-align: middle;">${log.is_favorite ? '★' : '☆'}</span>
-                        <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button>
+                        <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button>                        
+                        <button class="action-button add-to-sitemap" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method)}" data-log-path="${escapeHtmlAttribute(log.request_url.split('?')[0])}" title="Add to Sitemap">🗺️</button>
+                        <button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method)}" data-log-path="${escapeHtmlAttribute(log.request_url.split('?')[0])}" title="More Actions">⋮</button>
                     </td></tr>`;
             });
             tableHTML += `</tbody></table>`;
@@ -293,6 +320,8 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
 
             listDiv.querySelectorAll('.view-log-detail').forEach(button => button.addEventListener('click', handleViewLogDetail));
             listDiv.querySelectorAll('.table-row-favorite-toggle').forEach(starBtn => starBtn.addEventListener('click', handleProxyLogFavoriteToggle));
+            listDiv.querySelectorAll('.add-to-sitemap').forEach(button => button.addEventListener('click', openAddToSitemapModal));
+            listDiv.querySelectorAll('.more-actions').forEach(button => button.addEventListener('click', openMoreActionsDropdown));
         }, 0);
 
     } catch (error) {
@@ -300,6 +329,192 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
         console.error('Error fetching proxy logs:', error);
         paginationControlsDiv.innerHTML = '';
     }
+}
+
+function closeMoreActionsDropdown() {
+    const existingDropdown = document.getElementById('proxyLogMoreActionsDropdown');
+    if (existingDropdown) {
+        existingDropdown.remove();
+    }
+    document.removeEventListener('click', closeMoreActionsDropdownOnClickOutside);
+}
+
+function closeMoreActionsDropdownOnClickOutside(event) {
+    const dropdown = document.getElementById('proxyLogMoreActionsDropdown');
+    const moreActionsButton = event.target.closest('.more-actions');
+    if (dropdown && !dropdown.contains(event.target) && !moreActionsButton) {
+        closeMoreActionsDropdown();
+    }
+}
+
+function openMoreActionsDropdown(event) {
+    event.stopPropagation(); // Prevent click from immediately closing due to document listener
+    closeMoreActionsDropdown(); // Close any existing dropdown
+
+    const button = event.currentTarget;
+    const logId = button.getAttribute('data-log-id');
+    // const logMethod = button.getAttribute('data-log-method'); // For future use if needed
+    // const logPath = button.getAttribute('data-log-path');   // For future use if needed
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'proxyLogMoreActionsDropdown';
+    dropdown.className = 'actions-dropdown-menu'; // Add a class for styling
+
+    const rect = button.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + window.scrollY}px`;
+    dropdown.style.left = `${rect.left + window.scrollX - (dropdown.offsetWidth > button.offsetWidth ? dropdown.offsetWidth - button.offsetWidth : 0)}px`; // Adjust left position
+
+    dropdown.innerHTML = `
+        <ul>
+            <li><a href="#proxy-log-detail?id=${logId}" data-action="view-detail">View Details</a></li>
+            <li><a href="#proxy-log-detail?id=${logId}&tab=jsAnalysisTab" data-action="analyze-js">Analyze JS</a></li>
+            <li><a href="#" data-action="add-to-sitemap-dropdown" data-log-id="${logId}">Add to Sitemap</a></li>
+            <li><a href="#" data-action="send-to-findings" data-log-id="${logId}">Send to Findings (TBD)</a></li>
+            <li><a href="#" data-action="send-to-repeater">Send to Repeater (TBD)</a></li>
+            <li><a href="#" data-action="run-gf">Run GF Patterns (TBD)</a></li>
+        </ul>
+    `;
+
+    document.body.appendChild(dropdown);
+
+    // Adjust left position after rendering to get actual width
+    dropdown.style.left = `${rect.left + window.scrollX - (dropdown.offsetWidth > button.offsetWidth ? dropdown.offsetWidth - button.offsetWidth : 0) + (button.offsetWidth / 2) - (dropdown.offsetWidth / 2)}px`;
+    if ((rect.left + window.scrollX + dropdown.offsetWidth) > window.innerWidth) {
+        dropdown.style.left = `${window.innerWidth - dropdown.offsetWidth - 5}px`; // Adjust if it overflows right
+    }
+    if (rect.left + window.scrollX - dropdown.offsetWidth < 0 && (rect.left + window.scrollX - (dropdown.offsetWidth > button.offsetWidth ? dropdown.offsetWidth - button.offsetWidth : 0) + (button.offsetWidth / 2) - (dropdown.offsetWidth / 2)) < 0) {
+         dropdown.style.left = '5px'; // Adjust if it overflows left
+    }
+
+
+    dropdown.querySelector('a[data-action="add-to-sitemap-dropdown"]').addEventListener('click', (e) => {
+        e.preventDefault();
+        openAddToSitemapModal({ currentTarget: button }); // Reuse existing modal logic, pass original button as target
+        closeMoreActionsDropdown();
+    });
+    // Placeholder for "Send to Findings"
+    dropdown.querySelector('a[data-action="send-to-findings"]').addEventListener('click', (e) => {
+        e.preventDefault();
+        uiService.showModalMessage("Not Implemented", `Sending log ID ${logId} to Findings is not yet implemented.`);
+        closeMoreActionsDropdown();
+    });
+
+    // Add a slight delay before attaching the outside click listener
+    // to prevent it from firing immediately from the same click that opened it.
+    setTimeout(() => document.addEventListener('click', closeMoreActionsDropdownOnClickOutside), 0);
+}
+
+function openAddToSitemapModal(event) {
+    const button = event.currentTarget;
+    const logId = button.getAttribute('data-log-id');
+    const logMethod = button.getAttribute('data-log-method');
+    const logPath = button.getAttribute('data-log-path');
+
+    // Create modal HTML
+    const modalHTML = `
+        <div id="addToSitemapModal" class="modal-overlay" style="display:flex;">
+            <div class="modal-content" style="width: 500px;">
+                <div class="modal-header">
+                    <h2>Add to Sitemap</h2>
+                    <span class="modal-close-btn" id="closeAddToSitemapModalBtn">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Log Entry:</strong> ${escapeHtml(logMethod)} ${escapeHtml(logPath)}</p>
+                    <input type="hidden" id="sitemapLogId" value="${logId}">
+                    <div class="form-group">
+                        <label for="sitemapFolderPath">Folder Path:</label>
+                        <input type="text" id="sitemapFolderPath" name="sitemapFolderPath" value="/" required>
+                        <small>Define a hierarchical path (e.g., /api/v1/users/). The actual endpoint will be listed under this.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="sitemapNotes">Notes (Optional):</label>
+                        <textarea id="sitemapNotes" name="sitemapNotes" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="cancelAddToSitemapBtn" class="secondary">Cancel</button>
+                    <button id="saveToSitemapBtn" class="primary">Save to Sitemap</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Append modal to body (or a dedicated modal container if you have one)
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    // Add event listeners
+    document.getElementById('closeAddToSitemapModalBtn').addEventListener('click', closeAddToSitemapModal);
+    document.getElementById('cancelAddToSitemapBtn').addEventListener('click', closeAddToSitemapModal);
+    document.getElementById('saveToSitemapBtn').addEventListener('click', handleSaveSitemapEntry);
+    document.getElementById('addToSitemapModal').addEventListener('click', (e) => {
+        if (e.target.id === 'addToSitemapModal') { // Click on overlay
+            closeAddToSitemapModal();
+        }
+    });
+}
+
+function closeAddToSitemapModal() {
+    const modal = document.getElementById('addToSitemapModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+async function handleSaveSitemapEntry() {
+    const logId = document.getElementById('sitemapLogId').value;
+    const folderPath = document.getElementById('sitemapFolderPath').value.trim();
+    const notes = document.getElementById('sitemapNotes').value.trim();
+
+    if (!folderPath) {
+        uiService.showModalMessage("Validation Error", "Folder Path cannot be empty.");
+        return;
+    }
+
+    try {
+        // This function will be created in apiService.js in the next step
+        await apiService.addSitemapManualEntry(logId, folderPath, notes);
+        uiService.showModalMessage("Success", "Entry added to sitemap.");
+        closeAddToSitemapModal();
+    } catch (error) {
+        uiService.showModalMessage("Error", `Failed to add to sitemap: ${escapeHtml(error.message)}`);
+    }
+}
+
+async function handleDeleteAllTargetLogs() {
+    const appState = stateService.getState();
+    const { currentTargetId, currentTargetName } = appState;
+
+    if (!currentTargetId) {
+        uiService.showModalMessage("Error", "No current target selected to delete logs for.");
+        return;
+    }
+
+    uiService.showModalConfirm(
+        "Confirm Delete Logs",
+        `Are you sure you want to delete ALL proxy logs for target "${escapeHtml(currentTargetName)}" (ID: ${currentTargetId})? This action cannot be undone.`,
+        async () => {
+            try {
+                await apiService.deleteProxyLogsForTarget(currentTargetId);
+                uiService.showModalMessage("Success", `All proxy logs for target "${escapeHtml(currentTargetName)}" have been deleted.`);
+                // Refresh the view - using the current filter/sort params from state
+                const currentProxyLogParams = stateService.getState().paginationState.proxyLog;
+                fetchAndDisplayProxyLogs(currentProxyLogParams);
+            } catch (error) {
+                console.error("Error deleting all target logs:", error);
+                uiService.showModalMessage("Error", `Failed to delete logs: ${escapeHtml(error.message)}`);
+            }
+        }
+    );
+}
+
+async function handleRefreshProxyLog() {
+    console.log("[ProxyLogView] Refresh button clicked.");
+    uiService.showModalMessage("Refreshing...", "Reloading proxy logs with current filters...", true); // true for auto-hide
+    const currentProxyLogParams = stateService.getState().paginationState.proxyLog;
+    await fetchAndDisplayProxyLogs(currentProxyLogParams);
+    // The modal will auto-hide if uiService is set up for it,
+    // otherwise, you might need a uiService.hideModal() or similar if fetchAndDisplayProxyLogs doesn't handle it.
+    // For now, assuming a short-lived message.
 }
 
 /**
@@ -339,7 +554,11 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
             </div>
         </div>
         <div style="margin-bottom: 10px;">
-            <button id="saveProxyLogLayoutBtn" class="secondary small-button">Save Column Layout</button>
+            <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs" style="margin-right: 10px;">🔄</button>
+            <button id="saveProxyLogLayoutBtn" class="secondary small-button" style="margin-right: 10px;">Save Column Layout</button>
+            <button id="deleteAllTargetLogsBtn" class="secondary small-button" ${!currentTargetId ? 'disabled title="No target selected"' : `title="Delete all logs for ${escapeHtml(currentTargetName)}"`}>
+                Delete All Logs for Target
+            </button>
         </div>
         <div id="proxyLogList">Loading proxy logs...</div>
         <div id="proxyLogPaginationControls" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
@@ -360,6 +579,14 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
             tableService.saveCurrentTableLayout(tableKey, 'proxyLogTableHead');
         }
     });
+    const deleteAllBtn = document.getElementById('deleteAllTargetLogsBtn');
+    if (deleteAllBtn) {
+        deleteAllBtn.addEventListener('click', handleDeleteAllTargetLogs);
+    }
+    const refreshBtn = document.getElementById('refreshProxyLogBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', handleRefreshProxyLog); // Listener remains the same
+    }
 }
 
 async function handleAnalyzeJS(event) {
@@ -511,7 +738,12 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
     const appState = stateService.getState();
     const { sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = appState.paginationState.proxyLog;
     const navParams = { sortBy, sortOrder, favorites_only: filterFavoritesOnly, method: filterMethod, status: filterStatus, type: filterContentType, search: filterSearchText };
-
+    
+    // Check for tab parameter from hash
+    const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const requestedTab = hashParams.get('tab');
+    console.log("[ProxyLogDetailView] Requested tab from hash:", requestedTab);
+    
     try {
         const logEntry = await apiService.getProxyLogDetail(logId, navParams);
         let reqHeaders = {}; try { reqHeaders = JSON.parse(logEntry.request_headers || '{}'); } catch(e) { console.warn("Error parsing request headers JSON", e); }
@@ -537,11 +769,11 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 ${logEntry.target_id ? `<p><strong>Target ID:</strong> ${logEntry.target_id}</p>` : ''}
             </div>
             <div class="tabs">
-                <button class="tab-button active" data-tab="requestTab">Request</button>
+                <button class="tab-button" data-tab="requestTab">Request</button>
                 <button class="tab-button" data-tab="responseTab">Response</button>
                 <button class="tab-button" data-tab="jsAnalysisTab">JS Analysis</button>
             </div>
-            <div id="requestTab" class="tab-content active"><h3>Request Details</h3><p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.request_http_version)}</p><h4>Headers:</h4><pre class="headers-box">${formatHeaders(reqHeaders)}</pre><h4>Body:</h4><pre class="body-box">${formatBody(logEntry.request_body, reqHeaders['Content-Type']?.[0])}</pre></div>
+            <div id="requestTab" class="tab-content"><h3>Request Details</h3><p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.request_http_version)}</p><h4>Headers:</h4><pre class="headers-box">${formatHeaders(reqHeaders)}</pre><h4>Body:</h4><pre class="body-box">${formatBody(logEntry.request_body, reqHeaders['Content-Type']?.[0])}</pre></div>
             <div id="responseTab" class="tab-content"><h3>Response Details</h3><p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.response_http_version)}</p><h4>Headers:</h4><pre class="headers-box">${formatHeaders(resHeaders)}</pre><h4>Body: (${logEntry.response_body_size} bytes)</h4><pre class="body-box">${formatBody(logEntry.response_body, logEntry.response_content_type)}</pre></div>
             <div id="jsAnalysisTab" class="tab-content"><h3>JavaScript Analysis Results</h3><div style="margin-bottom: 10px;"><button id="exportJsAnalysisCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button></div><div id="jsAnalysisResultsContent"><p>Click "Analyze JS" to perform analysis.</p></div></div>
             <div class="notes-section" style="margin-top: 20px;"><h3>Notes:</h3><textarea id="logEntryNotes" rows="5" style="width: 100%;">${escapeHtml(logEntry.notes || '')}</textarea><button id="saveLogEntryNotesBtn" class="primary" data-log-id="${logEntry.id}" style="margin-top: 10px;">Save Notes</button><div id="saveNotesMessage" class="message-area" style="margin-top: 5px;"></div></div>`;
@@ -552,6 +784,10 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
                 button.classList.add('active');
                 document.getElementById(button.getAttribute('data-tab')).classList.add('active');
+                // If JS Analysis tab is clicked, and no data, trigger analysis
+                if (button.getAttribute('data-tab') === 'jsAnalysisTab' && !appState.jsAnalysisDataCache[String(logId)]) {
+                    document.getElementById('analyzeJsBtn')?.click();
+                }
             });
         });
         document.getElementById('analyzeJsBtn')?.addEventListener('click', handleAnalyzeJS);
@@ -593,6 +829,16 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
         const logIdString = String(logId);
         if (appState.jsAnalysisDataCache[logIdString] && appState.jsAnalysisDataCache[logIdString].length > 0) {
             renderJsAnalysisTable(logIdString);
+        }
+
+        // Activate tab based on hash parameter
+        const tabToActivate = requestedTab || 'requestTab';
+        const tabButtonToActivate = document.querySelector(`.tab-button[data-tab="${tabToActivate}"]`);
+        if (tabButtonToActivate) {
+            tabButtonToActivate.click(); // This will also trigger analysis if it's the JS tab and no data
+        } else {
+            // Default to requestTab if specified tab is invalid
+            document.querySelector('.tab-button[data-tab="requestTab"]')?.click();
         }
     } catch (error) {
         viewContentContainer.innerHTML = `<h1>Log Entry Detail</h1><p class="error-message">Error loading details for Log ID ${logId}: ${escapeHtml(error.message)}</p>`;

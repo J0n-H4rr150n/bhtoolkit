@@ -3,27 +3,28 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"strings"
+
+	"toolkit/logger" // Assuming logger is used or might be useful
+
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterChecklistTemplateRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /checklist-templates", ListChecklistTemplatesHandler)
-	mux.HandleFunc("/checklist-templates/", func(w http.ResponseWriter, r *http.Request) {
-		trimmedPath := strings.TrimPrefix(r.URL.Path, "/checklist-templates/")
-		parts := strings.SplitN(trimmedPath, "/", 2)
-		templateIDStr := parts[0]
+func RegisterChecklistTemplateRoutes(r chi.Router) {
+	// GET /checklist-templates
+	r.Get("/checklist-templates", ListChecklistTemplatesHandler) // Existing handler
 
+	// GET /checklist-templates/{templateID}/items
+	r.Get("/checklist-templates/{templateID}/items", func(w http.ResponseWriter, req *http.Request) {
+		templateIDStr := chi.URLParam(req, "templateID")
 		templateID, err := strconv.ParseInt(templateIDStr, 10, 64)
 		if err != nil {
+			logger.Error("RegisterChecklistTemplateRoutes: Invalid templateID format '%s': %v", templateIDStr, err)
 			http.Error(w, "Invalid checklist template ID format", http.StatusBadRequest)
 			return
 		}
-
-		if len(parts) == 2 && parts[1] == "items" && r.Method == http.MethodGet {
-			GetChecklistTemplateItemsHandler(w, r, templateID)
-		} else {
-			http.NotFound(w, r)
-		}
+		GetChecklistTemplateItemsHandler(w, req, templateID) // Existing handler
 	})
-	mux.HandleFunc("POST /checklist-templates/copy-to-target", CopyTemplateItemsToTargetHandler)
+
+	// POST /checklist-templates/copy-to-target
+	r.Post("/checklist-templates/copy-to-target", CopyTemplateItemsToTargetHandler) // Existing handler
 }

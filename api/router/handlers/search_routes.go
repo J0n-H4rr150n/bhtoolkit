@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"net/http"
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterSearchRoutes(mux *http.ServeMux) {
+func RegisterSearchRoutes(r chi.Router) {
 	// Placeholder
-	mux.HandleFunc("GET /search/traffic", SearchTrafficHandler)
+	r.Get("/search/traffic", SearchTrafficHandler)
 }

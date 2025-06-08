@@ -23,7 +23,9 @@ async function handleResponse(response) {
         // Handle cases where response might be empty (e.g., 204 No Content)
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.indexOf("application/json") !== -1) {
-            return response.json();
+            const responseJson = await response.json();
+            console.log("[ApiService] handleResponse:", responseJson);
+            return responseJson;
         }
         return {}; // Return empty object for non-JSON or empty successful responses
     }
@@ -92,6 +94,21 @@ export async function getUISettings() {
     const response = await fetch(`${API_BASE}/ui-settings`);
     return handleResponse(response);
 }
+
+/**
+ * Saves UI settings.
+ * @param {Object} settings - The UI settings to save (e.g., { showSynackSection: true }).
+ * @returns {Promise<Object>}
+ */
+export async function saveUISettings(settings) {
+    const response = await fetch(`${API_BASE}/ui-settings`, {
+        method: 'PUT', // Or POST, depending on your backend implementation
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+    });
+    return handleResponse(response);
+}
+
 
 /**
  * Fetches all platforms.
@@ -408,6 +425,18 @@ export async function saveProxyLogNotes(logId, notes) {
 }
 
 /**
+ * Deletes all proxy log entries for a specific target.
+ * @param {number|string} targetId - The ID of the target whose logs are to be deleted.
+ * @returns {Promise<Object>}
+ */
+export async function deleteProxyLogsForTarget(targetId) {
+    const response = await fetch(`${API_BASE}/traffic-log/target/${targetId}`, {
+        method: 'DELETE'
+    });
+    return handleResponse(response);
+}
+
+/**
  * Analyzes JavaScript links from a proxy log entry.
  * @param {number} httpLogId - The ID of the HTTP log entry.
  * @returns {Promise<Object>}
@@ -454,4 +483,106 @@ export async function copyChecklistTemplateItemsToTarget(payload) {
         body: JSON.stringify(payload)
     });
     return handleResponse(response);
+}
+
+/**
+ * Adds a manual entry to the sitemap.
+ * @param {string|number} httpLogId - The ID of the original HTTP log entry.
+ * @param {string} folderPath - The user-defined folder path for the sitemap.
+ * @param {string} notes - Optional notes for the sitemap entry.
+ * @returns {Promise<Object>}
+ */
+export async function addSitemapManualEntry(httpLogId, folderPath, notes) {
+    const response = await fetch(`${API_BASE}/sitemap/manual-entry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ http_log_id: parseInt(httpLogId, 10), folder_path: folderPath, notes })
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches manual sitemap entries for a given target.
+ * @param {string|number} targetId - The ID of the target.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of sitemap entries.
+ */
+export async function getSitemapManualEntries(targetId) {
+    const response = await fetch(`${API_BASE}/sitemap/manual-entries?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
+
+export async function getProxyExclusionRules() {
+    const response = await fetch(`${API_BASE}/settings/proxy-exclusions`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    return handleResponse(response);
+}
+
+export async function setProxyExclusionRules(rules) {
+    const response = await fetch(`${API_BASE}/settings/proxy-exclusions`, {
+        method: 'POST', // Or PUT, backend supports both
+        headers: {
+            'Content-Type': 'application/json',
+            // Add any auth headers if needed
+        },
+        body: JSON.stringify(rules),
+    });
+    return handleResponse(response);
+}
+
+// --- Findings API ---
+
+/**
+ * Fetches all findings for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of findings.
+ */
+export async function getTargetFindings(targetId) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/findings`);
+    return handleResponse(response);
+}
+
+/**
+ * Creates a new finding for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {Object} findingData - The data for the new finding.
+ *                               Expected: { title, description, payload, severity, status, http_traffic_log_id (optional), etc. }
+ * @returns {Promise<Object>} - A promise that resolves with the created finding object.
+ */
+export async function createTargetFinding(targetId, findingData) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/findings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(findingData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Updates an existing finding.
+ * @param {number|string} findingId - The ID of the finding to update.
+ * @param {Object} findingData - The data to update the finding with.
+ * @returns {Promise<Object>} - A promise that resolves with the updated finding object.
+ */
+export async function updateTargetFinding(findingId, findingData) {
+    const response = await fetch(`${API_BASE}/findings/${findingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(findingData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes a finding.
+ * @param {number|string} findingId - The ID of the finding to delete.
+ * @returns {Promise<Object>} - A promise that resolves (usually with an empty object on success).
+ */
+export async function deleteTargetFinding(findingId) {
+    const response = await fetch(`${API_BASE}/findings/${findingId}`, {
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Will be an empty object on 204 No Content
 }

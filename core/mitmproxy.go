@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+
 	//"errors" // ADDED for os.ErrNotExist
 	"fmt"
 	"io"
@@ -17,9 +18,11 @@ import (
 	"net" // ADDED for CIDR and IP parsing
 	"net/http"
 	"net/url" // ADDED: For URL parsing
-	"os"
+	"os"      // ADDED for os.ErrNotExist
+
 	//"path/filepath" // ADDED for state file path
 	// "regexp"        // ADDED for scope matching - Commented out as not currently used
+	"regexp" // ADDED for regex matching in global exclusions
 	"strings"
 	"sync"
 	"time"
@@ -28,23 +31,25 @@ import (
 	"toolkit/logger"
 	"toolkit/models"
 
+	"strconv" // For parsing target ID from string
+
 	"github.com/elazarl/goproxy"
 	"github.com/tidwall/gjson"
-	"strconv" // For parsing target ID from string
 )
 
 var (
-	caCert         *x509.Certificate
-	caKey          *rsa.PrivateKey
-	sessionIsHTTPS = make(map[int64]bool)
-	muSession      sync.Mutex
+	caCert                *x509.Certificate
+	caKey                 *rsa.PrivateKey
+	sessionIsHTTPS        = make(map[int64]bool)
+	muSession             sync.Mutex
 	parsedSynackTargetURL *url.URL // Cache the parsed config URL
-	parseURLErr    error      // Store any error during parsing
+	parseURLErr           error    // Store any error during parsing
 
 	// For scoped logging
-	activeTargetID   *int64
-	activeScopeRules []models.ScopeRule
-	scopeMu          sync.RWMutex
+	activeTargetID       *int64
+	allActiveScopeRules  []models.ScopeRule // Renamed from activeScopeRules
+	scopeMu              sync.RWMutex
+	globalExclusionRules []models.ProxyExclusionRule
 	analyticsFetchTicker *time.Ticker // Added for rate limiting analytics calls
 )
 
@@ -222,59 +227,148 @@ func generateCA(commonName string) (*x509.Certificate, *rsa.PrivateKey, error) {
 	return cert, privKey, nil
 }
 
-func isRequestInScope(requestURL *url.URL, rules []models.ScopeRule) bool {
-	if requestURL == nil {
+// matchesRule is a helper to check if a request matches a single scope rule.
+func matchesRule(requestURL *url.URL, hostname, path string, rule models.ScopeRule) bool {
+	pattern := rule.Pattern
+	match := false
+
+	switch rule.ItemType {
+	case "domain":
+		if hostname == pattern {
+			match = true
+		}
+	case "subdomain":
+		if strings.HasPrefix(pattern, "*.") {
+			domainPart := strings.TrimPrefix(pattern, "*.")
+			if hostname == domainPart || strings.HasSuffix(hostname, "."+domainPart) {
+				match = true
+			}
+		} else if hostname == pattern {
+			match = true
+		}
+	case "url_path":
+		rulePatternPath := rule.Pattern
+		// Normalize rulePatternPath: ensure it starts with a slash
+		if rulePatternPath != "" && !strings.HasPrefix(rulePatternPath, "/") {
+			rulePatternPath = "/" + rulePatternPath
+		}
+
+		// Normalize requestPathNormalized: ensure it starts with a slash
+		requestPathNormalized := path
+		if requestPathNormalized != "" && !strings.HasPrefix(requestPathNormalized, "/") {
+			requestPathNormalized = "/" + requestPathNormalized
+		}
+
+		// Ensure rulePatternPath ends with a slash if it's meant to match a directory-like path
+		// and the request path also has a slash there or is an exact match.
+		if strings.HasSuffix(rulePatternPath, "/") {
+			if strings.HasPrefix(requestPathNormalized, rulePatternPath) {
+				match = true
+			}
+		} else {
+			// If rule pattern doesn't end with a slash, it should match exactly that path segment
+			// or that path segment followed by a slash.
+			if requestPathNormalized == rulePatternPath || strings.HasPrefix(requestPathNormalized, rulePatternPath+"/") {
+				match = true
+			}
+		}
+	case "ip_address":
+		if hostname == pattern { // IP addresses are often used as hostnames
+			match = true
+		}
+	case "cidr":
+		_, cidrNet, err := net.ParseCIDR(pattern)
+		if err == nil {
+			ip := net.ParseIP(hostname) // Hostname can be an IP
+			if ip != nil && cidrNet.Contains(ip) {
+				match = true
+			}
+		}
+	}
+	return match
+}
+
+// matchesGlobalExclusionRule checks if a request URL matches a global exclusion rule.
+func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionRule) bool {
+	if !rule.IsEnabled || requestURL == nil {
 		return false
 	}
-	// If a target is active but has no explicit scope rules, log everything for it.
-	if len(rules) == 0 {
-		return true
+
+	pattern := rule.Pattern
+	hostname := requestURL.Hostname()
+	path := requestURL.Path
+	fullURL := requestURL.String()
+
+	switch rule.RuleType {
+	case "file_extension":
+		// Ensure pattern starts with a dot if it's meant to be an extension
+		if !strings.HasPrefix(pattern, ".") {
+			pattern = "." + pattern
+		}
+		if strings.HasSuffix(strings.ToLower(path), strings.ToLower(pattern)) {
+			return true
+		}
+	case "url_regex":
+		// Consider compiling regexes once at startup if performance becomes an issue
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			logger.ProxyError("Invalid regex pattern in global exclusion rule ID %s: %s", rule.ID, pattern)
+			return false // Invalid regex shouldn't match anything
+		}
+		if re.MatchString(fullURL) {
+			return true
+		}
+	case "domain":
+		return strings.ToLower(hostname) == strings.ToLower(pattern)
+	}
+	return false
+}
+
+// isRequestEffectivelyInScope evaluates if a request URL is effectively in scope
+// considering both IN and OUT OF SCOPE rules.
+// OUT OF SCOPE rules take precedence.
+func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRule) bool {
+	if requestURL == nil {
+		return false
 	}
 
 	hostname := requestURL.Hostname()
 	path := requestURL.Path
 
-	for _, rule := range rules {
+	for _, rule := range allRules {
 		// Already filtered for is_in_scope by GetInScopeRulesForTarget
 		pattern := rule.Pattern
-		match := false
+		match := matchesRule(requestURL, hostname, path, rule)
 
-		switch rule.ItemType {
-		case "domain", "subdomain":
-			if strings.HasPrefix(pattern, "*.") {
-				domainPart := strings.TrimPrefix(pattern, "*.")
-				if hostname == domainPart || strings.HasSuffix(hostname, "."+domainPart) {
-					match = true
-				}
-			} else if hostname == pattern {
-				match = true
-			}
-		case "url_path":
-			// Simple prefix match for paths, can be extended with filepath.Match or regex
-			if strings.HasPrefix(path, pattern) { // If pattern is /api/ and path is /api/users, it matches
-				match = true
-			} else if path == pattern { // Exact match
-				match = true
-			}
-		case "ip_address":
-			if hostname == pattern {
-				match = true
-			}
-		case "cidr":
-			_, cidrNet, err := net.ParseCIDR(pattern)
-			if err == nil {
-				ip := net.ParseIP(hostname)
-				if ip != nil && cidrNet.Contains(ip) {
-					match = true
-				}
-			}
+		if match && !rule.IsInScope { // Matched an OUT OF SCOPE rule
+			logger.ProxyDebug("Request URL '%s' matched OUT OF SCOPE rule: Type=%s, Pattern='%s'", requestURL.String(), rule.ItemType, pattern)
+			return false // Explicitly out of scope
 		}
-		if match {
-			logger.ProxyDebug("Request URL '%s' matched scope rule: Type=%s, Pattern='%s'", requestURL.String(), rule.ItemType, rule.Pattern)
+	}
+
+	// If no OUT OF SCOPE rules matched, check IN SCOPE rules
+	// Separate IN_SCOPE rules for clarity in logic below
+	var inScopeRules []models.ScopeRule
+	for _, rule := range allRules {
+		if rule.IsInScope {
+			inScopeRules = append(inScopeRules, rule)
+		}
+	}
+
+	// If there are no IN SCOPE rules defined for the target, consider everything in scope (default allow)
+	if len(inScopeRules) == 0 {
+		logger.ProxyDebug("Request URL '%s' is IN SCOPE by default (no specific IN_SCOPE rules defined and no OUT_OF_SCOPE match).", requestURL.String())
+		return true
+	}
+
+	// If IN SCOPE rules exist, at least one must match
+	for _, rule := range inScopeRules {
+		if matchesRule(requestURL, hostname, path, rule) {
+			logger.ProxyDebug("Request URL '%s' matched IN SCOPE rule: Type=%s, Pattern='%s'", requestURL.String(), rule.ItemType, rule.Pattern)
 			return true
 		}
 	}
-	logger.ProxyDebug("Request URL '%s' did not match any in-scope rules.", requestURL.String())
+	logger.ProxyDebug("Request URL '%s' did not match any IN_SCOPE rules (and no OUT_OF_SCOPE match). Effectively OUT OF SCOPE.", requestURL.String())
 	return false
 }
 
@@ -316,14 +410,24 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 
 	if activeTargetID != nil && *activeTargetID != 0 {
 		var err error
-		activeScopeRules, err = database.GetInScopeRulesForTarget(*activeTargetID)
+		allActiveScopeRules, err = database.GetAllScopeRulesForTarget(*activeTargetID) // Use new function
 		if err != nil {
-			logger.ProxyError("Failed to load scope rules for target %d: %v. Logging for this target might be affected.", *activeTargetID, err)
+			logger.ProxyError("Failed to load all scope rules for target %d: %v. Logging for this target might be affected.", *activeTargetID, err)
 		} else {
-			logger.ProxyInfo("Loaded %d in-scope rules for target %d.", len(activeScopeRules), *activeTargetID)
+			logger.ProxyInfo("Loaded %d total scope rules for target %d.", len(allActiveScopeRules), *activeTargetID)
 		}
 	}
 	scopeMu.Unlock()
+
+	// Load global exclusion rules
+	var errLoadExclusions error
+	globalExclusionRules, errLoadExclusions = database.GetProxyExclusionRules()
+	if errLoadExclusions != nil {
+		logger.ProxyError("Failed to load global proxy exclusion rules: %v. Proxy will not apply global exclusions.", errLoadExclusions)
+		globalExclusionRules = []models.ProxyExclusionRule{} // Ensure it's an empty slice
+	} else {
+		logger.ProxyInfo("Loaded %d global proxy exclusion rules.", len(globalExclusionRules))
+	}
 
 	// Parse the configured Synack URL once on startup
 	if config.AppConfig.Synack.TargetsURL != "" {
@@ -353,6 +457,14 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 		func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 			startTime := time.Now()
 
+			// Check global exclusion rules first
+			for _, rule := range globalExclusionRules {
+				if matchesGlobalExclusionRule(r.URL, rule) {
+					logger.ProxyInfo("REQ: %s %s - GLOBALLY EXCLUDED by rule ID %s (Type: %s, Pattern: %s). Skipping.", r.Method, r.URL.String(), rule.ID, rule.RuleType, rule.Pattern)
+					return r, nil // Pass through without logging or further processing by our handlers
+				}
+			}
+
 			scopeMu.RLock()
 			// Determine if the current request URL matches the configured Synack target list URL
 			isSynackTargetListURL := false
@@ -366,14 +478,13 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				}
 			}
 
-
-			currentTargetIDForLog := activeTargetID // Use the snapshot
-			currentScopeRules := activeScopeRules
+			currentTargetIDForLog := activeTargetID     // Use the snapshot
+			currentAllScopeRules := allActiveScopeRules // Use the renamed variable
 			scopeMu.RUnlock()
 
 			// If there's an active target context, check scope
 			if currentTargetIDForLog != nil && *currentTargetIDForLog != 0 {
-				if !isRequestInScope(r.URL, currentScopeRules) {
+				if !isRequestEffectivelyInScope(r.URL, currentAllScopeRules) { // Call updated function
 					logger.ProxyDebug("REQ: %s %s (HTTPS: %t) - OUT OF SCOPE for active target %d.", r.Method, r.URL.String(), sessionIsHTTPS[ctx.Session], *currentTargetIDForLog)
 					// If it's the Synack target list URL, we still want to process it for token capture and list data,
 					// but we won't associate its http_traffic_log entry with the currently active (and mismatched) target.
@@ -513,9 +624,9 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				go processSynackTargetList(respBodyBytes, authTokenForAnalytics)
 			}
 			//	} else if parsedSynackTargetURL != nil && ctx.Req != nil && ctx.Req.URL != nil && !isSynackTargetListResp { // Log only if it wasn't a match but conditions were met
-				//logger.ProxyDebug("URL did not match Synack target list: ReqPathNorm=[%s], ConfigPathNorm=[%s], ReqFull=[%s], Status=%d, ContentType=%s",
-				//	reqPathNorm, configPathNorm, ctx.Req.URL.String(),
-				//	resp.StatusCode, requestData.ResponseContentType)
+			//logger.ProxyDebug("URL did not match Synack target list: ReqPathNorm=[%s], ConfigPathNorm=[%s], ReqFull=[%s], Status=%d, ContentType=%s",
+			//	reqPathNorm, configPathNorm, ctx.Req.URL.String(),
+			//	resp.StatusCode, requestData.ResponseContentType)
 			//}
 
 			logger.ProxyInfo("RESP: %d %s for %s %s (Size: %d, Duration: %s)", resp.StatusCode, requestData.ResponseContentType, ctx.Req.Method, ctx.Req.URL.String(), requestData.ResponseBodySize, duration)
@@ -557,19 +668,19 @@ func logHttpTraffic(logEntry *models.HTTPTrafficLog) {
 // Example structure for an individual finding from a hypothetical Synack API
 type rawSynackFindingItem struct {
 	// Fields from "exploitable_locations"
-	Type             string `json:"type"`       // e.g., "url"
-	Value            string `json:"value"`      // This will be our VulnerabilityURL
-	CreatedAt        int64  `json:"created_at"` // Unix timestamp
-	Status           string `json:"status"`     // e.g., "fixed"
-	OutOfScope       *bool  `json:"outOfScope"` // Pointer to handle null
+	Type       string `json:"type"`       // e.g., "url"
+	Value      string `json:"value"`      // This will be our VulnerabilityURL
+	CreatedAt  int64  `json:"created_at"` // Unix timestamp
+	Status     string `json:"status"`     // e.g., "fixed"
+	OutOfScope *bool  `json:"outOfScope"` // Pointer to handle null
 
 	// Fields that might not be present in exploitable_locations, but are in models.SynackFinding
 	// These will likely remain empty/zero unless mapped from elsewhere or if the actual structure is richer.
-	ID       string          `json:"id"`    // If Synack provides a unique finding ID here
-	Title    string          `json:"title"` // If a title is provided
-	Category string          `json:"category"` // If a category is provided
-	Severity string          `json:"severity"` // If severity is provided
-	FullDetails json.RawMessage `json:"-"` // To store the whole finding JSON, we'll marshal the item itself
+	ID          string          `json:"id"`       // If Synack provides a unique finding ID here
+	Title       string          `json:"title"`    // If a title is provided
+	Category    string          `json:"category"` // If a category is provided
+	Severity    string          `json:"severity"` // If severity is provided
+	FullDetails json.RawMessage `json:"-"`        // To store the whole finding JSON, we'll marshal the item itself
 }
 
 // processSynackTargetList function now accepts authToken
@@ -644,181 +755,180 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 		}
 
 		// --- Analytics Category Processing (Current Logic - may need adjustment/removal) ---
-			// Successfully upserted (dbID is valid), now try to fetch analytics if enabled
-			if config.AppConfig.Synack.AnalyticsEnabled && config.AppConfig.Synack.AnalyticsBaseURL != "" && config.AppConfig.Synack.AnalyticsPathPattern != "" {
-				analyticsURL := fmt.Sprintf(config.AppConfig.Synack.AnalyticsBaseURL+config.AppConfig.Synack.AnalyticsPathPattern, synackID)
-				logger.ProxyInfo("Fetching analytics for Synack target '%s' from URL: %s", synackID, analyticsURL)
+		// Successfully upserted (dbID is valid), now try to fetch analytics if enabled
+		if config.AppConfig.Synack.AnalyticsEnabled && config.AppConfig.Synack.AnalyticsBaseURL != "" && config.AppConfig.Synack.AnalyticsPathPattern != "" {
+			analyticsURL := fmt.Sprintf(config.AppConfig.Synack.AnalyticsBaseURL+config.AppConfig.Synack.AnalyticsPathPattern, synackID)
+			logger.ProxyInfo("Fetching analytics for Synack target '%s' from URL: %s", synackID, analyticsURL)
 
-				req, err := http.NewRequest("GET", analyticsURL, nil)
-				if err != nil {
-					logger.ProxyError("Synack Analytics: Error creating request for target '%s': %v", synackID, err)
-					// continue // Don't skip findings processing if analytics categories fail
+			req, err := http.NewRequest("GET", analyticsURL, nil)
+			if err != nil {
+				logger.ProxyError("Synack Analytics: Error creating request for target '%s': %v", synackID, err)
+				// continue // Don't skip findings processing if analytics categories fail
+			}
+			if authToken != "" {
+				req.Header.Set("Authorization", authToken)
+				logger.ProxyDebug("Synack Analytics: Added Authorization header to request for target '%s'", synackID)
+			}
+
+			// Check if analytics already exist and are "fresh" (for now, just exist)
+			lastFetchTime, errCheck := database.GetSynackTargetAnalyticsFetchTime(dbID)
+			if errCheck != nil {
+				logger.ProxyError("Synack Analytics: Error checking existing analytics for target DB_ID %d (Synack ID %s): %v", dbID, synackID, errCheck)
+				// Decide if we should proceed. For now, let's try to fetch if checking failed.
+			}
+
+			// For now, if analytics exist at all (lastFetchTime is not nil), don't refetch.
+			// Later, a freshness check can be added: e.g., if lastFetchTime != nil && time.Since(*lastFetchTime) < 24*time.Hour
+			if lastFetchTime != nil {
+				logger.ProxyInfo("Synack Analytics: Analytics data already exists for target DB_ID %d (Synack ID %s), fetched at %s. Skipping fetch.", dbID, synackID, lastFetchTime.Format(time.RFC3339))
+			} else {
+				// Rate limit the API calls using the ticker.
+				// This will also space out the subsequent database operations for each target.
+				logger.ProxyDebug("Synack Analytics: Waiting for analyticsFetchTicker for target DB_ID %d (Synack ID %s)...", dbID, synackID)
+				<-analyticsFetchTicker.C
+				logger.ProxyInfo("Synack Analytics: No existing analytics found for target DB_ID %d (Synack ID %s) or fetch time is nil. Proceeding to fetch.", dbID, synackID)
+				resp, errDo := httpClient.Do(req)
+				if errDo != nil {
+					logger.ProxyError("Synack Analytics: Error fetching analytics for target DB_ID %d (Synack ID %s) from %s: %v", dbID, synackID, analyticsURL, errDo)
+					// continue
 				}
-				if authToken != "" {
-					req.Header.Set("Authorization", authToken)
-					logger.ProxyDebug("Synack Analytics: Added Authorization header to request for target '%s'", synackID)
+				defer resp.Body.Close()
+
+				body, errRead := io.ReadAll(resp.Body)
+				if errRead != nil {
+					logger.ProxyError("Synack Analytics: Error reading analytics response body for target DB_ID %d (Synack ID %s) (status %d): %v", dbID, synackID, resp.StatusCode, errRead)
+					// continue
 				}
+				logger.ProxyInfo("Synack Analytics: Received status %d for target DB_ID %d (Synack ID %s). Response (first 500 chars): %s", resp.StatusCode, dbID, synackID, string(body[:min(len(body), 500)]))
 
-				// Check if analytics already exist and are "fresh" (for now, just exist)
-				lastFetchTime, errCheck := database.GetSynackTargetAnalyticsFetchTime(dbID)
-				if errCheck != nil {
-					logger.ProxyError("Synack Analytics: Error checking existing analytics for target DB_ID %d (Synack ID %s): %v", dbID, synackID, errCheck)
-					// Decide if we should proceed. For now, let's try to fetch if checking failed.
-				}
+				// Attempt to extract the array of categories, assuming it's nested.
+				// Common key names are "categories", "data", "results". We'll try "categories".
+				// Based on new info, the key is "value"
+				analyticsArrayPath := "value"
+				categoriesResult := gjson.GetBytes(body, analyticsArrayPath)
 
-
-				// For now, if analytics exist at all (lastFetchTime is not nil), don't refetch.
-				// Later, a freshness check can be added: e.g., if lastFetchTime != nil && time.Since(*lastFetchTime) < 24*time.Hour
-				if lastFetchTime != nil {
-					logger.ProxyInfo("Synack Analytics: Analytics data already exists for target DB_ID %d (Synack ID %s), fetched at %s. Skipping fetch.", dbID, synackID, lastFetchTime.Format(time.RFC3339))
+				if !categoriesResult.Exists() {
+					logger.ProxyError("Synack Analytics: Expected key '%s' not found in analytics JSON response for target DB_ID %d (Synack ID %s). The response might be a direct array or use a different key. Response (first 500 chars): %s", analyticsArrayPath, dbID, synackID, string(body[:min(len(body), 500)]))
+				} else if !categoriesResult.IsArray() {
+					logger.ProxyError("Synack Analytics: Value at key '%s' in analytics JSON is not an array (type: %s) for target DB_ID %d (Synack ID %s). Response (first 500 chars): %s", analyticsArrayPath, categoriesResult.Type.String(), dbID, synackID, string(body[:min(len(body), 500)]))
 				} else {
-					// Rate limit the API calls using the ticker.
-					// This will also space out the subsequent database operations for each target.
-					logger.ProxyDebug("Synack Analytics: Waiting for analyticsFetchTicker for target DB_ID %d (Synack ID %s)...", dbID, synackID)
-					<-analyticsFetchTicker.C
-					logger.ProxyInfo("Synack Analytics: No existing analytics found for target DB_ID %d (Synack ID %s) or fetch time is nil. Proceeding to fetch.", dbID, synackID)
-					resp, errDo := httpClient.Do(req)
-					if errDo != nil {
-						logger.ProxyError("Synack Analytics: Error fetching analytics for target DB_ID %d (Synack ID %s) from %s: %v", dbID, synackID, analyticsURL, errDo)
-						// continue
+					// Define an intermediate struct to match the JSON structure of items in the "value" array
+					var rawAnalyticsItems []struct {
+						Categories           []string        `json:"categories"`
+						ExploitableLocations json.RawMessage `json:"exploitable_locations"` // We need to count items here
+						// Other fields like count, total_amount_paid, average_amount_paid from the old structure are not in the new example.
+						// If they exist in other responses, this struct might need to be more flexible or have more fields.
 					}
-					defer resp.Body.Close()
 
-					body, errRead := io.ReadAll(resp.Body)
-					if errRead != nil {
-						logger.ProxyError("Synack Analytics: Error reading analytics response body for target DB_ID %d (Synack ID %s) (status %d): %v", dbID, synackID, resp.StatusCode, errRead)
-						// continue
-					}
-					logger.ProxyInfo("Synack Analytics: Received status %d for target DB_ID %d (Synack ID %s). Response (first 500 chars): %s", resp.StatusCode, dbID, synackID, string(body[:min(len(body), 500)]))
-					
-					// Attempt to extract the array of categories, assuming it's nested.
-					// Common key names are "categories", "data", "results". We'll try "categories".
-					// Based on new info, the key is "value"
-					analyticsArrayPath := "value"
-					categoriesResult := gjson.GetBytes(body, analyticsArrayPath)
-					
-					if !categoriesResult.Exists() {
-						logger.ProxyError("Synack Analytics: Expected key '%s' not found in analytics JSON response for target DB_ID %d (Synack ID %s). The response might be a direct array or use a different key. Response (first 500 chars): %s", analyticsArrayPath, dbID, synackID, string(body[:min(len(body), 500)]))
-					} else if !categoriesResult.IsArray() {
-						logger.ProxyError("Synack Analytics: Value at key '%s' in analytics JSON is not an array (type: %s) for target DB_ID %d (Synack ID %s). Response (first 500 chars): %s", analyticsArrayPath, categoriesResult.Type.String(), dbID, synackID, string(body[:min(len(body), 500)]))
+					if errUnmarshal := json.Unmarshal([]byte(categoriesResult.Raw), &rawAnalyticsItems); errUnmarshal != nil {
+						logger.ProxyError("Synack Analytics: Error unmarshalling analytics items from key '%s' for target DB_ID %d (Synack ID %s): %v", analyticsArrayPath, dbID, synackID, errUnmarshal)
 					} else {
-						// Define an intermediate struct to match the JSON structure of items in the "value" array
-						var rawAnalyticsItems []struct {
-							Categories           []string        `json:"categories"`
-							ExploitableLocations json.RawMessage `json:"exploitable_locations"` // We need to count items here
-							// Other fields like count, total_amount_paid, average_amount_paid from the old structure are not in the new example.
-							// If they exist in other responses, this struct might need to be more flexible or have more fields.
-						}
+						aggregatedCategories := make(map[string]int64) // Map to store aggregated counts
+						for _, rawItem := range rawAnalyticsItems {
 
-						if errUnmarshal := json.Unmarshal([]byte(categoriesResult.Raw), &rawAnalyticsItems); errUnmarshal != nil {
-							logger.ProxyError("Synack Analytics: Error unmarshalling analytics items from key '%s' for target DB_ID %d (Synack ID %s): %v", analyticsArrayPath, dbID, synackID, errUnmarshal)
-						} else {
-							aggregatedCategories := make(map[string]int64) // Map to store aggregated counts
-							for _, rawItem := range rawAnalyticsItems {
-
-								// Count items in exploitable_locations for this category group
-								var exploitableLocationsArray []interface{}
-								if rawItem.ExploitableLocations != nil {
-									if errParseEL := json.Unmarshal(rawItem.ExploitableLocations, &exploitableLocationsArray); errParseEL != nil {
-										logger.Error("Synack Analytics (Proxy): Could not parse exploitable_locations for category group (target DB_ID %d): %v", dbID, errParseEL)
-									}
+							// Count items in exploitable_locations for this category group
+							var exploitableLocationsArray []interface{}
+							if rawItem.ExploitableLocations != nil {
+								if errParseEL := json.Unmarshal(rawItem.ExploitableLocations, &exploitableLocationsArray); errParseEL != nil {
+									logger.Error("Synack Analytics (Proxy): Could not parse exploitable_locations for category group (target DB_ID %d): %v", dbID, errParseEL)
 								}
-								findingCountInGroup := int64(len(exploitableLocationsArray))
+							}
+							findingCountInGroup := int64(len(exploitableLocationsArray))
 
-								if len(rawItem.Categories) > 0 {
-									for _, categoryName := range rawItem.Categories {
-										aggregatedCategories[categoryName] += findingCountInGroup
-									}
-								} // No "else" needed, if no categories, we just don't add anything for this rawItem.
+							if len(rawItem.Categories) > 0 {
+								for _, categoryName := range rawItem.Categories {
+									aggregatedCategories[categoryName] += findingCountInGroup
+								}
+							} // No "else" needed, if no categories, we just don't add anything for this rawItem.
 
-								// --- Individual Findings Processing for THIS rawItem ---
-								if config.AppConfig.Synack.FindingsEnabled {
-									logger.ProxyInfo("Synack Findings: Processing 'exploitable_locations' for target DB_ID %d, category group with categories: %v", dbID, rawItem.Categories)
-									if config.AppConfig.Synack.FindingsArrayPathInAnalyticsJson != "" {
-										logger.ProxyInfo("Warning: Synack Findings: Config key 'findings_array_path_in_analytics_json' is set but currently ignored. Findings are sourced from 'exploitable_locations' within each category group.")
-									}
+							// --- Individual Findings Processing for THIS rawItem ---
+							if config.AppConfig.Synack.FindingsEnabled {
+								logger.ProxyInfo("Synack Findings: Processing 'exploitable_locations' for target DB_ID %d, category group with categories: %v", dbID, rawItem.Categories)
+								if config.AppConfig.Synack.FindingsArrayPathInAnalyticsJson != "" {
+									logger.ProxyInfo("Warning: Synack Findings: Config key 'findings_array_path_in_analytics_json' is set but currently ignored. Findings are sourced from 'exploitable_locations' within each category group.")
+								}
 
-									if rawItem.ExploitableLocations != nil {
-										var exploitableLocationsList []rawSynackFindingItem // This struct should match the items in exploitable_locations
-										
-										// Log the raw JSON of exploitable_locations before attempting to unmarshal
-										logger.ProxyDebug("Synack Findings: Raw exploitable_locations JSON for target DB_ID %d (first 500 chars): %s", dbID, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 500)]))
-										
-										if errUnmarshalEL := json.Unmarshal(rawItem.ExploitableLocations, &exploitableLocationsList); errUnmarshalEL != nil {
-											logger.ProxyError("Synack Findings: Error unmarshalling exploitable_locations for category group (target DB_ID %d): %v. Raw JSON: %s", dbID, errUnmarshalEL, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 200)]))
-										} else {
-											logger.ProxyInfo("Synack Findings: Found %d exploitable_locations for this category group (target DB_ID %d).", len(exploitableLocationsList), dbID) // Corrected line
-											if len(exploitableLocationsList) == 0 && len(rawItem.ExploitableLocations) > 2 { // >2 to avoid logging for empty array "[]"
-												logger.ProxyInfo("Warning: Synack Findings: Unmarshalled 0 exploitable_locations, but raw JSON was not empty for target DB_ID %d. Check rawSynackFindingItem struct against API response.", dbID)
+								if rawItem.ExploitableLocations != nil {
+									var exploitableLocationsList []rawSynackFindingItem // This struct should match the items in exploitable_locations
+
+									// Log the raw JSON of exploitable_locations before attempting to unmarshal
+									logger.ProxyDebug("Synack Findings: Raw exploitable_locations JSON for target DB_ID %d (first 500 chars): %s", dbID, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 500)]))
+
+									if errUnmarshalEL := json.Unmarshal(rawItem.ExploitableLocations, &exploitableLocationsList); errUnmarshalEL != nil {
+										logger.ProxyError("Synack Findings: Error unmarshalling exploitable_locations for category group (target DB_ID %d): %v. Raw JSON: %s", dbID, errUnmarshalEL, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 200)]))
+									} else {
+										logger.ProxyInfo("Synack Findings: Found %d exploitable_locations for this category group (target DB_ID %d).", len(exploitableLocationsList), dbID) // Corrected line
+										if len(exploitableLocationsList) == 0 && len(rawItem.ExploitableLocations) > 2 {                                                                    // >2 to avoid logging for empty array "[]"
+											logger.ProxyInfo("Warning: Synack Findings: Unmarshalled 0 exploitable_locations, but raw JSON was not empty for target DB_ID %d. Check rawSynackFindingItem struct against API response.", dbID)
+										}
+										primaryCategoryName := ""
+										if len(rawItem.Categories) > 0 {
+											primaryCategoryName = rawItem.Categories[0]
+										}
+
+										for i, exploitableLocation := range exploitableLocationsList {
+											logger.ProxyDebug("Synack Findings: Processing exploitable_location #%d: URL='%s', Status='%s', CreatedAt=%d", i+1, exploitableLocation.Value, exploitableLocation.Status, exploitableLocation.CreatedAt)
+
+											findingToStore := models.SynackFinding{
+												SynackTargetDBID: dbID,
+												SynackFindingID:  exploitableLocation.Value,                               // Use URL as the finding ID
+												Title:            fmt.Sprintf("Finding at %s", exploitableLocation.Value), // Construct a title
+												CategoryName:     primaryCategoryName,
+												// Severity is not in the exploitable_locations example
+												Status:           exploitableLocation.Status,
+												VulnerabilityURL: exploitableLocation.Value,
+												// AmountPaid is not in the example
 											}
-											primaryCategoryName := ""
-											if len(rawItem.Categories) > 0 {
-												primaryCategoryName = rawItem.Categories[0]
+
+											// Marshal the exploitableLocation itself to store as JSON details
+											rawExploitableLocationJsonBytes, errJson := json.Marshal(exploitableLocation)
+											if errJson == nil {
+												findingToStore.RawJSONDetails = string(rawExploitableLocationJsonBytes)
+											} else {
+												logger.ProxyError("Synack Findings: Could not marshal exploitableLocation to JSON for finding URL '%s': %v", exploitableLocation.Value, errJson)
 											}
 
-											for i, exploitableLocation := range exploitableLocationsList {
-												logger.ProxyDebug("Synack Findings: Processing exploitable_location #%d: URL='%s', Status='%s', CreatedAt=%d", i+1, exploitableLocation.Value, exploitableLocation.Status, exploitableLocation.CreatedAt)
+											if exploitableLocation.CreatedAt > 0 {
+												t := time.Unix(exploitableLocation.CreatedAt, 0).UTC()
+												findingToStore.ReportedAt = &t
+											}
 
-												findingToStore := models.SynackFinding{
-													SynackTargetDBID: dbID,
-													SynackFindingID:  exploitableLocation.Value, // Use URL as the finding ID
-													Title:            fmt.Sprintf("Finding at %s", exploitableLocation.Value), // Construct a title
-													CategoryName:     primaryCategoryName,
-													// Severity is not in the exploitable_locations example
-													Status:           exploitableLocation.Status,
-													VulnerabilityURL: exploitableLocation.Value,
-													// AmountPaid is not in the example
-												}
+											logger.ProxyDebug("Synack Findings: Attempting to upsert finding: TargetDBID=%d, FindingID(URL)='%s', Category='%s', Status='%s'",
+												findingToStore.SynackTargetDBID, findingToStore.SynackFindingID, findingToStore.CategoryName, findingToStore.Status)
 
-												// Marshal the exploitableLocation itself to store as JSON details
-												rawExploitableLocationJsonBytes, errJson := json.Marshal(exploitableLocation)
-												if errJson == nil {
-													findingToStore.RawJSONDetails = string(rawExploitableLocationJsonBytes)
-												} else {
-													logger.ProxyError("Synack Findings: Could not marshal exploitableLocation to JSON for finding URL '%s': %v", exploitableLocation.Value, errJson)
-												}
-
-												if exploitableLocation.CreatedAt > 0 {
-													t := time.Unix(exploitableLocation.CreatedAt, 0).UTC()
-													findingToStore.ReportedAt = &t
-												}
-
-												logger.ProxyDebug("Synack Findings: Attempting to upsert finding: TargetDBID=%d, FindingID(URL)='%s', Category='%s', Status='%s'", 
-													findingToStore.SynackTargetDBID, findingToStore.SynackFindingID, findingToStore.CategoryName, findingToStore.Status)
-
-												insertedDBID, errStoreFinding := database.UpsertSynackFinding(findingToStore)
-												if errStoreFinding != nil {
-													logger.ProxyError("Synack Findings: Error upserting finding (URL: '%s') for target DB_ID %d: %v", exploitableLocation.Value, dbID, errStoreFinding)
-												} else {
-													logger.ProxyInfo("Synack Findings: Successfully upserted finding (URL: '%s'), DB ID: %d, for target DB_ID %d.", exploitableLocation.Value, insertedDBID, dbID)
-												}
+											insertedDBID, errStoreFinding := database.UpsertSynackFinding(findingToStore)
+											if errStoreFinding != nil {
+												logger.ProxyError("Synack Findings: Error upserting finding (URL: '%s') for target DB_ID %d: %v", exploitableLocation.Value, dbID, errStoreFinding)
+											} else {
+												logger.ProxyInfo("Synack Findings: Successfully upserted finding (URL: '%s'), DB ID: %d, for target DB_ID %d.", exploitableLocation.Value, insertedDBID, dbID)
 											}
 										}
-									} else { // rawItem.ExploitableLocations was nil
-										logger.ProxyDebug("Synack Findings: No 'exploitable_locations' data for this category group (target DB_ID %d).", dbID)
 									}
-								} else {
-									logger.ProxyInfo("Synack Findings: Individual findings processing is DISABLED in config for target DB_ID %d.", dbID)
+								} else { // rawItem.ExploitableLocations was nil
+									logger.ProxyDebug("Synack Findings: No 'exploitable_locations' data for this category group (target DB_ID %d).", dbID)
 								}
-								// --- End of Individual Findings Processing for this rawItem ---
-							} // End loop through rawAnalyticsItems
-
-							// Convert aggregated map to slice for storing
-							var finalAnalyticsCategories []models.SynackTargetAnalyticsCategory
-							// The following block was an erroneous comment and a leftover variable declaration.
-							for name, count := range aggregatedCategories {
-								finalAnalyticsCategories = append(finalAnalyticsCategories, models.SynackTargetAnalyticsCategory{CategoryName: name, Count: count})
-							}
-
-							if errStore := database.StoreSynackTargetAnalytics(dbID, finalAnalyticsCategories); errStore != nil {
-								logger.ProxyError("Synack Analytics: Error storing analytics for target DB_ID %d (Synack ID %s): %v", dbID, synackID, errStore)
 							} else {
-								logger.ProxyInfo("Synack Analytics: Successfully stored %d analytics categories for target DB_ID %d (Synack ID %s)", len(finalAnalyticsCategories), dbID, synackID)
+								logger.ProxyInfo("Synack Findings: Individual findings processing is DISABLED in config for target DB_ID %d.", dbID)
 							}
-						} // End else for categoriesResult.IsArray()
-					} // End if resp.StatusCode == http.StatusOK
-				} // End else for lastFetchTime != nil (meaning, proceed to fetch)
-			}
+							// --- End of Individual Findings Processing for this rawItem ---
+						} // End loop through rawAnalyticsItems
+
+						// Convert aggregated map to slice for storing
+						var finalAnalyticsCategories []models.SynackTargetAnalyticsCategory
+						// The following block was an erroneous comment and a leftover variable declaration.
+						for name, count := range aggregatedCategories {
+							finalAnalyticsCategories = append(finalAnalyticsCategories, models.SynackTargetAnalyticsCategory{CategoryName: name, Count: count})
+						}
+
+						if errStore := database.StoreSynackTargetAnalytics(dbID, finalAnalyticsCategories); errStore != nil {
+							logger.ProxyError("Synack Analytics: Error storing analytics for target DB_ID %d (Synack ID %s): %v", dbID, synackID, errStore)
+						} else {
+							logger.ProxyInfo("Synack Analytics: Successfully stored %d analytics categories for target DB_ID %d (Synack ID %s)", len(finalAnalyticsCategories), dbID, synackID)
+						}
+					} // End else for categoriesResult.IsArray()
+				} // End if resp.StatusCode == http.StatusOK
+			} // End else for lastFetchTime != nil (meaning, proceed to fetch)
+		}
 	} // End loop through rawTargets
 
 	if len(currentSeenIDs) > 0 {

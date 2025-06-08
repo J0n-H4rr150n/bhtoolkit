@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"net/http"
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterRelationshipRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /relationships/create", CreateRelationshipHandler)
+func RegisterRelationshipRoutes(r chi.Router) {
+	r.Post("/relationships/create", CreateRelationshipHandler)
 }

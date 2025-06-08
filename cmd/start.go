@@ -35,9 +35,9 @@ Press Ctrl+C to gracefully shut down all services.`,
 		actualServerPort := startServerPort
 		if !cmd.Flags().Changed("server-port") {
 			actualServerPort = config.AppConfig.Server.Port
-			logger.Info("Start Command: Server port flag not set, using config value: %s", actualServerPort)
+			logger.Debug("Start Command: Server port flag not set, using config value: %s", actualServerPort)
 		} else {
-			logger.Info("Start Command: Server port flag was set, using flag value: %s", actualServerPort)
+			logger.Debug("Start Command: Server port flag was set, using flag value: %s", actualServerPort)
 		}
 		if actualServerPort == "" {
 			logger.Error("Start Command: Server port is empty after checking flag and config, defaulting to 8778") // Changed Warn to Error
@@ -47,9 +47,9 @@ Press Ctrl+C to gracefully shut down all services.`,
 		actualProxyPort := startProxyPort
 		if !cmd.Flags().Changed("proxy-port") {
 			actualProxyPort = config.AppConfig.Proxy.Port
-			logger.Info("Start Command: Proxy port flag not set, using config value: %s", actualProxyPort)
+			logger.Debug("Start Command: Proxy port flag not set, using config value: %s", actualProxyPort)
 		} else {
-			logger.Info("Start Command: Proxy port flag was set, using flag value: %s", actualProxyPort)
+			logger.Debug("Start Command: Proxy port flag was set, using flag value: %s", actualProxyPort)
 		}
 		if actualProxyPort == "" {
 			logger.Error("Start Command: Proxy port is empty after checking flag and config, defaulting to 8777") // Changed Warn to Error

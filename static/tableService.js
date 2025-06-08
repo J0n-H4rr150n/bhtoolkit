@@ -5,6 +5,8 @@ let saveLayoutsToBackendFunc;
 let getGlobalTableLayoutsFunc;
 let updateGlobalTableLayoutsFunc;
 
+let _isResizing = false; // Flag to track if a column resize is currently active
+
 /**
  * Initializes the table service with necessary dependencies.
  * @param {Object} dependencies - Object containing functions.
@@ -43,6 +45,11 @@ export function saveCurrentTableLayout(tableKey, tableHeadId) {
     tableHead.querySelectorAll('th[data-col-key]').forEach(th => {
         const colKey = th.getAttribute('data-col-key');
         const currentWidth = th.style.width || getComputedStyle(th).width;
+        
+        // Skip saving width for the 'actions' column as it's fixed
+        if (colKey === 'actions') {
+            return;
+        }
         if (currentWidth && colKey) {
             newLayoutForThisTable[colKey] = currentWidth;
         }
@@ -80,7 +87,10 @@ export function makeTableColumnsResizable(tableHeadId) {
     const headers = Array.from(tableHead.querySelectorAll('th[data-col-key]'));
 
     headers.forEach((th, index) => {
-        if (index === headers.length - 1 && !th.nextElementSibling) {
+        const colKey = th.getAttribute('data-col-key');
+
+        // Skip adding resizer for the 'actions' column or if it's the very last header without a next sibling (optional)
+        if (colKey === 'actions' || (index === headers.length - 1 && !th.nextElementSibling)) {
             return;
         }
 
@@ -96,10 +106,12 @@ export function makeTableColumnsResizable(tableHeadId) {
         let startX, startWidth;
 
         const onMouseDown = (e) => {
+            _isResizing = true; // Set the flag when resize starts
             e.preventDefault();
-            e.stopPropagation();
+            e.stopPropagation(); // Prevent sort click on TH
             startX = e.pageX;
             startWidth = th.offsetWidth;
+            
 
             document.documentElement.style.cursor = 'col-resize';
             th.classList.add('resizing');
@@ -120,9 +132,23 @@ export function makeTableColumnsResizable(tableHeadId) {
             document.removeEventListener('mouseup', onMouseUp);
             document.documentElement.style.cursor = '';
             th.classList.remove('resizing');
+
+            // IMPORTANT: Delay resetting _isResizing flag.
+            // This allows any click event (which fires after mouseup) on the TH
+            // to correctly see that a resize was in progress.
+            setTimeout(() => { _isResizing = false; }, 0);
+
         };
 
         resizer.removeEventListener('mousedown', onMouseDown); // Remove old listener before adding
         resizer.addEventListener('mousedown', onMouseDown);
     });
+}
+
+/**
+ * Returns true if a column resize operation is currently active.
+ * @returns {boolean}
+ */
+export function getIsResizing() {
+    return _isResizing;
 }

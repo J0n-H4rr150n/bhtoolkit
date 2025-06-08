@@ -75,6 +75,19 @@ button.danger:hover { background-color: #c0392b; }
 .modal-buttons { display: flex; justify-content: center; gap: 10px; }
 .modal-buttons button { min-width: 80px; }
 
+/* Styles for the more structured modal content box (used by AddToSitemapModal) */
+.modal-content {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    display: flex; /* For flex-direction column layout */
+    flex-direction: column;
+    max-height: 90vh; /* Prevent modal from being too tall */
+    /* width is often set inline or via specific modal ID */
+    /* transform: scale(0.9); */ /* Optional: for consistency with .modal-box animation */
+    /* transition: transform 0.3s ease; */ /* Optional: for consistency */
+}
+
 /* --- NEW INLINE FORM STYLES --- */
 .inline-form {
     display: flex;
@@ -290,4 +303,37 @@ td.checklist-item-command-text pre.command-text {
     word-wrap: break-word;   /* Breaks long words if necessary to prevent overflow */
     overflow-wrap: break-word; /* Standardized version of word-wrap */
     word-break: break-all;   /* Ensures very long strings without spaces also wrap */
+}
+
+/* Dropdown Menu for Actions */
+.actions-dropdown-menu {
+    position: absolute;
+    background-color: white;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+    z-index: 1001; /* Ensure it's above table content */
+    min-width: 160px;
+    border-radius: 4px;
+}
+
+.actions-dropdown-menu ul {
+    list-style: none;
+    padding: 5px 0;
+    margin: 0;
+}
+
+.actions-dropdown-menu ul li a {
+    display: block;
+    padding: 8px 15px;
+    text-decoration: none;
+    color: #333;
+}
+.actions-dropdown-menu ul li a:hover {
+    background-color: #f0f0f0;
+}
+
+/* Add some padding to lists within tab content for better readability */
+.tab-content ul {
+    padding-left: 20px; /* Adjust as needed */
+    margin-left: 5px;  /* Optional: if you want a bit more space from the very edge */
 }

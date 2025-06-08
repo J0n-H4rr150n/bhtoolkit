@@ -1,40 +1,36 @@
 package handlers
 
 import (
-	"net/http"
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterSettingsRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/current-target", GetCurrentTargetSettingHandler)
-	mux.HandleFunc("POST /settings/current-target", SetCurrentTargetSettingHandler)
+func RegisterSettingsRoutes(r chi.Router) {
+	r.Get("/settings/current-target", GetCurrentTargetSettingHandler)
+	r.Post("/settings/current-target", SetCurrentTargetSettingHandler)
 
-	mux.HandleFunc("/settings/custom-headers", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/settings/custom-headers" { // Ensure exact match
-			http.NotFound(w, r)
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			GetCustomHeadersSettingHandler(w, r)
-		case http.MethodPost, http.MethodPut:
-			SetCustomHeadersSettingHandler(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
+	r.Route("/settings/custom-headers", func(r chi.Router) {
+		r.Get("/", GetCustomHeadersSettingHandler)
+		r.Post("/", SetCustomHeadersSettingHandler)
+		r.Put("/", SetCustomHeadersSettingHandler)
 	})
-	mux.HandleFunc("/settings/table-column-widths", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/settings/table-column-widths" { // Ensure exact match
-			http.NotFound(w, r)
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			GetTableColumnWidthsHandler(w, r)
-		case http.MethodPost, http.MethodPut:
-			SetTableColumnWidthsHandler(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
+
+	r.Post("/settings/table-column-widths/reset", ResetTableColumnWidthsHandler)
+
+	r.Route("/settings/table-column-widths", func(r chi.Router) {
+		r.Get("/", GetTableColumnWidthsHandler)
+		r.Post("/", SetTableColumnWidthsHandler)
+		r.Put("/", SetTableColumnWidthsHandler)
 	})
-	mux.HandleFunc("GET /ui-settings", GetUISettingsHandler)
+
+	r.Route("/ui-settings", func(r chi.Router) {
+		r.Get("/", GetUISettingsHandler)
+		r.Put("/", SetUISettingsHandler)
+		r.Post("/", SetUISettingsHandler) // If you want to allow POST as well
+	})
+
+	r.Route("/settings/proxy-exclusions", func(r chi.Router) {
+		r.Get("/", GetProxyExclusionRulesHandler)
+		r.Post("/", SetProxyExclusionRulesHandler)
+		r.Put("/", SetProxyExclusionRulesHandler)
+	})
 }

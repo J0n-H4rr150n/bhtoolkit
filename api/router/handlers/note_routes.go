@@ -1,47 +1,41 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
+
+	"toolkit/logger"
+
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterNoteRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/notes", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/notes" { // Ensure exact match for collection
-			http.NotFound(w, r)
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			ListNotesHandler(w, r)
-		case http.MethodPost:
-			CreateNoteHandler(w, r)
-		default:
-			http.Error(w, "Method not allowed for /notes", http.StatusMethodNotAllowed)
-		}
-	})
-	mux.HandleFunc("/notes/", func(w http.ResponseWriter, r *http.Request) {
-		idStr := strings.TrimPrefix(r.URL.Path, "/notes/")
-		noteID, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			http.Error(w, "Invalid note ID format", http.StatusBadRequest)
-			return
-		}
-		handleSingleNoteRequest(w, r, noteID)
-	})
-}
+func RegisterNoteRoutes(r chi.Router) {
+	// Collection routes for /notes
+	r.Get("/notes", ListNotesHandler)   // Existing handler
+	r.Post("/notes", CreateNoteHandler) // Existing handler
 
-func handleSingleNoteRequest(w http.ResponseWriter, r *http.Request, noteID int64) {
-	switch r.Method {
-	case http.MethodGet:
-		GetNoteHandler(w, r, noteID)
-	case http.MethodPut:
-		UpdateNoteHandler(w, r, noteID)
-	case http.MethodDelete:
-		DeleteNoteHandler(w, r, noteID)
-	default:
-		http.Error(w, fmt.Sprintf("Method not allowed for /notes/%d", noteID), http.StatusMethodNotAllowed)
-	}
+	// Routes for specific note items: /notes/{noteID}
+	r.Route("/notes/{noteID}", func(subRouter chi.Router) {
+		// GET /notes/{noteID}
+		subRouter.Get("/", func(w http.ResponseWriter, req *http.Request) {
+			noteIDStr := chi.URLParam(req, "noteID")
+			noteID, err := strconv.ParseInt(noteIDStr, 10, 64)
+			if err != nil {
+				logger.Error("RegisterNoteRoutes: Invalid noteID format '%s': %v", noteIDStr, err)
+				http.Error(w, "Invalid note ID format", http.StatusBadRequest)
+				return
+			}
+			GetNoteHandler(w, req, noteID) // Existing handler
+		})
+		// PUT /notes/{noteID}
+		subRouter.Put("/", func(w http.ResponseWriter, req *http.Request) {
+			noteID, _ := strconv.ParseInt(chi.URLParam(req, "noteID"), 10, 64) // Error checked by Get
+			UpdateNoteHandler(w, req, noteID)                                  // Existing handler
+		})
+		// DELETE /notes/{noteID}
+		subRouter.Delete("/", func(w http.ResponseWriter, req *http.Request) {
+			noteID, _ := strconv.ParseInt(chi.URLParam(req, "noteID"), 10, 64) // Error checked by Get
+			DeleteNoteHandler(w, req, noteID)                                  // Existing handler
+		})
+	})
 }

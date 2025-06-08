@@ -445,48 +445,52 @@ function renderChecklistTable(containerElement, items, targetId) {
         notes: { default: 'auto', id: 'col-checklist-notes' },
         actions: { default: '15%', id: 'col-checklist-actions' }
     };
+    
+    // Always render the table structure
+    html += `
+        <table style="table-layout: fixed;">
+            <thead id="checklistTableHead">
+                <tr>
+                    <th style="width: ${savedTableWidths.index || columnConfig.index.default};" data-col-key="index" id="${columnConfig.index.id}">#</th>
+                    <th style="width: ${savedTableWidths.status || columnConfig.status.default};" data-col-key="status" id="${columnConfig.status.id}">Status</th>
+                    <th style="width: ${savedTableWidths.item || columnConfig.item.default};" data-col-key="item" id="${columnConfig.item.id}">Item</th>
+                    <th style="width: ${savedTableWidths.command || columnConfig.command.default};" data-col-key="command" id="${columnConfig.command.id}">Command</th>
+                    <th style="width: ${savedTableWidths.notes || columnConfig.notes.default};" data-col-key="notes" id="${columnConfig.notes.id}">Notes</th>
+                    <th style="width: ${savedTableWidths.actions || columnConfig.actions.default};" data-col-key="actions" id="${columnConfig.actions.id}">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="checklistTableBody">`;
 
     if (!items || items.length === 0) {
-        html += "<p>No checklist items defined for this target yet.</p>";
+        const numberOfColumns = Object.keys(columnConfig).length;
+        html += `<tr><td colspan="${numberOfColumns}" style="text-align: center; padding: 10px;">No checklist items defined for this target yet.</td></tr>`;
     } else {
-        html += `
-            <table style="table-layout: fixed;">
-                <thead id="checklistTableHead">
-                    <tr>
-                        <th style="width: ${savedTableWidths.index || columnConfig.index.default};" data-col-key="index" id="${columnConfig.index.id}">#</th>
-                        <th style="width: ${savedTableWidths.status || columnConfig.status.default};" data-col-key="status" id="${columnConfig.status.id}">Status</th>
-                        <th style="width: ${savedTableWidths.item || columnConfig.item.default};" data-col-key="item" id="${columnConfig.item.id}">Item</th>
-                        <th style="width: ${savedTableWidths.command || columnConfig.command.default};" data-col-key="command" id="${columnConfig.command.id}">Command</th>
-                        <th style="width: ${savedTableWidths.notes || columnConfig.notes.default};" data-col-key="notes" id="${columnConfig.notes.id}">Notes</th>
-                        <th style="width: ${savedTableWidths.actions || columnConfig.actions.default};" data-col-key="actions" id="${columnConfig.actions.id}">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="checklistTableBody">`;
-
         items.forEach((item, index) => {
             const notesText = item.notes && item.notes.Valid ? item.notes.String : '';
             const commandText = item.item_command_text && item.item_command_text.Valid ? item.item_command_text.String : '';
             const isCompleted = item.is_completed;
 
             html += `
-                <tr data-item-id="${item.id}" class="${isCompleted ? 'completed-item' : ''}"
-                    data-item-text="${escapeHtmlAttribute(item.item_text)}"
-                    data-item-command-text="${escapeHtmlAttribute(commandText)}"
-                    data-item-notes="${escapeHtmlAttribute(notesText)}">
-                    <td>${index + 1}</td>
-                    <td><input type="checkbox" class="checklist-item-complete" data-item-id="${item.id}" ${isCompleted ? 'checked' : ''}></td>
-                    <td class="checklist-item-text">${escapeHtml(item.item_text)}</td>
-                    <td class="checklist-item-command-text"><pre class="command-text">${escapeHtml(commandText)}</pre></td>
-                    <td class="checklist-item-notes">${escapeHtml(notesText)}</td>
-                    <td>
-                        <button class="action-button edit-checklist-item" data-item-id="${item.id}" title="Edit Item">✏️</button>
-                        ${commandText ? `<button class="action-button copy-checklist-command" data-command="${escapeHtmlAttribute(commandText)}" title="Copy Command">📋</button>` : ''}
-                        <button class="action-button delete-checklist-item" data-item-id="${item.id}" title="Delete Item">🗑️</button>
-                    </td>
-                </tr>
-            `;
+            <tr data-item-id="${item.id}" class="${isCompleted ? 'completed-item' : ''}"
+                data-item-text="${escapeHtmlAttribute(item.item_text)}"
+                data-item-command-text="${escapeHtmlAttribute(commandText)}"
+                data-item-notes="${escapeHtmlAttribute(notesText)}">
+                <td>${index + 1}</td>
+                <td><input type="checkbox" class="checklist-item-complete" data-item-id="${item.id}" ${isCompleted ? 'checked' : ''}></td>
+                <td class="checklist-item-text">${escapeHtml(item.item_text)}</td>
+                <td class="checklist-item-command-text"><pre class="command-text">${escapeHtml(commandText)}</pre></td>
+                <td class="checklist-item-notes">${escapeHtml(notesText)}</td>
+                <td>
+                    <button class="action-button edit-checklist-item" data-item-id="${item.id}" title="Edit Item">✏️</button>
+                    ${commandText ? `<button class="action-button copy-checklist-command" data-command="${escapeHtmlAttribute(commandText)}" title="Copy Command">📋</button>` : ''}
+                    <button class="action-button delete-checklist-item" data-item-id="${item.id}" title="Delete Item">🗑️</button>
+                </td>
+            </tr>`;
         });
-        html += `</tbody></table>`;
+    }
+    html += `</tbody></table>`;
+
+    if (items && items.length > 0) {
         html += `<p style="margin-top:5px;">${items.length} total item(s).</p>`;
     }
     containerElement.innerHTML = html;

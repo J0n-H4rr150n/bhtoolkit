@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io" // Import the io package
 	"net/http"
 	"strconv"
 	"toolkit/database"
@@ -164,12 +165,26 @@ func GetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
 // SetTableColumnWidthsHandler saves the custom table column widths settings.
 func SetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
 	var payload TableColumnWidthsPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		logger.Error("SetTableColumnWidthsHandler: Error decoding request body: %v", err)
-		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+
+	// Read the body into a byte slice first for debugging
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		logger.Error("SetTableColumnWidthsHandler: Error reading request body: %v", err)
+		http.Error(w, "Failed to read request body: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer r.Body.Close()
+	defer r.Body.Close() // Ensure body is closed
+
+	// Log the raw body content
+	logger.Debug("SetTableColumnWidthsHandler: Received raw body: %s", string(bodyBytes))
+
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		logger.Error("SetTableColumnWidthsHandler: Error decoding request body: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Invalid request payload: " + err.Error()})
+		return
+	}
 
 	widthsJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -185,6 +200,27 @@ func SetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Table column widths saved successfully."})
+}
+
+// ResetTableColumnWidthsHandler resets all table column widths to default (empty JSON).
+func ResetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		logger.Error("ResetTableColumnWidthsHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := database.SetSetting(models.TableColumnWidthsKey, "{}"); err != nil {
+		logger.Error("ResetTableColumnWidthsHandler: Error resetting column widths: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Failed to reset table column widths."})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "All table column widths have been reset."})
+	logger.Info("All table column widths have been reset in database.")
 }
 
 // GetUISettingsHandler retrieves all UI-related settings.
@@ -253,6 +289,27 @@ func GetUISettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	settings[models.TableColumnWidthsKey] = widthsMap
 
+	// UI Settings (like showSynackSection)
+	uiSettingsJSON, err := database.GetSetting(models.UISettingsKey)
+	var generalUISettings map[string]interface{} // To hold settings like showSynackSection
+	if err != nil {
+		logger.Error("GetUISettingsHandler: Error getting ui_settings: %v", err)
+		errs = append(errs, "ui_settings")
+		generalUISettings = map[string]interface{}{"showSynackSection": false} // Default on error
+	} else if uiSettingsJSON == "" {
+		generalUISettings = map[string]interface{}{"showSynackSection": false} // Default if not set
+	} else {
+		if err := json.Unmarshal([]byte(uiSettingsJSON), &generalUISettings); err != nil {
+			logger.Error("GetUISettingsHandler: Error unmarshalling ui_settings: %v. JSON: %s", err, uiSettingsJSON)
+			errs = append(errs, "ui_settings_unmarshal")
+			generalUISettings = map[string]interface{}{"showSynackSection": false} // Default on unmarshal error
+		}
+	}
+	// Merge generalUISettings into the main settings map
+	for k, v := range generalUISettings {
+		settings[k] = v
+	}
+
 	if len(errs) > 0 {
 		logger.Info("GetUISettingsHandler: WARN: Encountered errors fetching some UI settings: %v", errs)
 		// Decide if you want to return a partial success or an error.
@@ -261,4 +318,97 @@ func GetUISettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(settings)
+}
+
+// SetUISettingsHandler saves various UI settings.
+func SetUISettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		logger.Error("SetUISettingsHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed (use PUT or POST)", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var newSettings map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&newSettings); err != nil {
+		logger.Error("SetUISettingsHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// For now, we only handle 'showSynackSection'.
+	// This could be expanded to save the whole map or individual keys.
+	if showSynack, ok := newSettings["showSynackSection"].(bool); ok {
+		// Example: Storing as a JSON blob under a single key "ui_settings"
+		// Or, store individual keys like "ui_settings_show_synack"
+		// For simplicity, let's assume we update a general ui_settings JSON.
+		// Fetch existing, merge, then save. Or just overwrite if simple.
+		// Here, we'll just save this specific setting.
+		// A more robust approach would merge with existing UI settings.
+		uiSettingsToSave := map[string]interface{}{"showSynackSection": showSynack}
+		settingsJSON, err := json.Marshal(uiSettingsToSave)
+		if err != nil {
+			logger.Error("SetUISettingsHandler: Error marshalling UI settings: %v", err)
+			http.Error(w, "Failed to process UI settings", http.StatusInternalServerError)
+			return
+		}
+		if err := database.SetSetting(models.UISettingsKey, string(settingsJSON)); err != nil {
+			logger.Error("SetUISettingsHandler: Error saving UI settings: %v", err)
+			http.Error(w, "Failed to save UI settings", http.StatusInternalServerError)
+			return
+		}
+	} // Add more settings handling here as needed
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "UI settings saved successfully."})
+	logger.Info("UI settings updated.")
+}
+
+// GetProxyExclusionRulesHandler retrieves the list of global proxy exclusion rules.
+func GetProxyExclusionRulesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		logger.Error("GetProxyExclusionRulesHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rules, err := database.GetProxyExclusionRules()
+	if err != nil {
+		logger.Error("GetProxyExclusionRulesHandler: Error getting rules: %v", err)
+		http.Error(w, "Failed to retrieve proxy exclusion rules", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rules)
+	logger.Info("Successfully served %d proxy exclusion rules.", len(rules))
+}
+
+// SetProxyExclusionRulesHandler saves the list of global proxy exclusion rules.
+func SetProxyExclusionRulesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut { // Allow POST or PUT
+		logger.Error("SetProxyExclusionRulesHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed (use POST or PUT)", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var rules []models.ProxyExclusionRule
+	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
+		logger.Error("SetProxyExclusionRulesHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if err := database.SetProxyExclusionRules(rules); err != nil {
+		logger.Error("SetProxyExclusionRulesHandler: Error saving rules: %v", err)
+		http.Error(w, "Failed to save proxy exclusion rules", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Proxy exclusion rules saved successfully."})
+	logger.Info("Successfully saved %d proxy exclusion rules.", len(rules))
 }

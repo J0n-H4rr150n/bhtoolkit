@@ -3,40 +3,63 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"strings"
+
 	"toolkit/logger"
+
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterTrafficLogRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /traffic-log", GetTrafficLogHandler)
-	mux.HandleFunc("/traffic-log/entry/", trafficLogEntryItemHandler) // Dispatcher
-}
+func RegisterTrafficLogRoutes(r chi.Router) {
+	r.Get("/traffic-log", GetTrafficLogHandler)
 
-func trafficLogEntryItemHandler(w http.ResponseWriter, r *http.Request) {
-	basePath := "/traffic-log/entry/"
-	trimmedPath := strings.TrimPrefix(r.URL.Path, basePath)
-	parts := strings.Split(strings.Trim(trimmedPath, "/"), "/")
+	// Routes for specific log entries: /traffic-log/entry/{logID}
+	r.Route("/traffic-log/entry/{logID}", func(subRouter chi.Router) {
+		// GET /traffic-log/entry/{logID}
+		subRouter.Get("/", func(w http.ResponseWriter, req *http.Request) {
+			logIDStr := chi.URLParam(req, "logID")
+			logID, err := strconv.ParseInt(logIDStr, 10, 64)
+			if err != nil {
+				logger.Error("TrafficLogEntry Get: Invalid log entry ID '%s': %v", logIDStr, err)
+				http.Error(w, "Invalid log entry ID format", http.StatusBadRequest)
+				return
+			}
+			getTrafficLogEntryDetail(w, req, logID) // Existing handler
+		})
 
-	if len(parts) < 1 || parts[0] == "" {
-		logger.Error("TrafficLogEntryItemHandler: Malformed path, missing log ID: %s", r.URL.Path)
-		http.NotFound(w, r)
-		return
-	}
+		// PUT /traffic-log/entry/{logID}/notes
+		subRouter.Put("/notes", func(w http.ResponseWriter, req *http.Request) {
+			logIDStr := chi.URLParam(req, "logID")
+			logID, err := strconv.ParseInt(logIDStr, 10, 64)
+			if err != nil {
+				logger.Error("TrafficLogEntry Notes Update: Invalid log entry ID '%s': %v", logIDStr, err)
+				http.Error(w, "Invalid log entry ID format", http.StatusBadRequest)
+				return
+			}
+			updateTrafficLogEntryNotes(w, req, logID) // Existing handler
+		})
 
-	logID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		logger.Error("TrafficLogEntryItemHandler: Invalid log entry ID '%s': %v", parts[0], err)
-		http.Error(w, "Invalid log entry ID format", http.StatusBadRequest)
-		return
-	}
+		// PUT /traffic-log/entry/{logID}/favorite
+		subRouter.Put("/favorite", func(w http.ResponseWriter, req *http.Request) {
+			logIDStr := chi.URLParam(req, "logID")
+			logID, err := strconv.ParseInt(logIDStr, 10, 64)
+			if err != nil {
+				logger.Error("TrafficLogEntry Favorite Update: Invalid log entry ID '%s': %v", logIDStr, err)
+				http.Error(w, "Invalid log entry ID format", http.StatusBadRequest)
+				return
+			}
+			setTrafficLogEntryFavoriteStatus(w, req, logID) // Existing handler
+		})
+	})
 
-	if len(parts) == 1 && r.Method == http.MethodGet {
-		getTrafficLogEntryDetail(w, r, logID)
-	} else if len(parts) == 2 && parts[1] == "notes" && r.Method == http.MethodPut {
-		updateTrafficLogEntryNotes(w, r, logID)
-	} else if len(parts) == 2 && parts[1] == "favorite" && r.Method == http.MethodPut {
-		setTrafficLogEntryFavoriteStatus(w, r, logID)
-	} else {
-		http.Error(w, "Method not allowed or path not found for traffic log entry", http.StatusMethodNotAllowed)
-	}
+	// Route for target-specific log operations: /traffic-log/target/{targetID}
+	r.Delete("/traffic-log/target/{targetID}", func(w http.ResponseWriter, req *http.Request) {
+		targetIDStr := chi.URLParam(req, "targetID")
+		targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+		if err != nil {
+			logger.Error("TrafficLogTarget Delete: Invalid target ID '%s': %v", targetIDStr, err)
+			http.Error(w, "Invalid target ID format", http.StatusBadRequest)
+			return
+		}
+		DeleteTrafficLogsForTargetHandler(w, req, targetID) // Existing handler
+	})
 }

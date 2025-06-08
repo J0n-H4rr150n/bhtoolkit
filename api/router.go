@@ -4,12 +4,14 @@ import (
 	"net/http"
 	"toolkit/api/router/handlers"
 	"toolkit/logger"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // NewRouter creates and configures a new HTTP ServeMux for the API.
 // All registered paths are relative to the /api base path.
 func NewRouter() http.Handler {
-	router := http.NewServeMux()
+	router := chi.NewRouter()
 
 	handlers.RegisterHealthRoutes(router)
 	handlers.RegisterPlatformRoutes(router)
@@ -21,15 +23,17 @@ func NewRouter() http.Handler {
 	handlers.RegisterSettingsRoutes(router)
 	handlers.RegisterChecklistRoutes(router)
 	handlers.RegisterChecklistTemplateRoutes(router)
+	handlers.RegisterFindingRoutes(router) // Add this line
 	handlers.RegisterNoteRoutes(router)
 
 	// Placeholder/Not Implemented Yet routes
 	handlers.RegisterRelationshipRoutes(router)
 	handlers.RegisterVisualizationRoutes(router)
 	handlers.RegisterSearchRoutes(router)
-	handlers.RegisterSitemapRoutes(router)
+	handlers.RegisterSitemapRoutes(router) // This will also need to be adapted for chi.Router
 
-	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// Catch-all for unhandled routes within the API
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		logger.Error("API SUB-ROUTER CATCH-ALL: Unhandled route relative to /api: %s %s", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	})

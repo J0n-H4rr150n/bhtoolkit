@@ -497,3 +497,57 @@ func setTrafficLogEntryFavoriteStatus(w http.ResponseWriter, r *http.Request, lo
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "Favorite status updated successfully.", "is_favorite": req.IsFavorite})
 	logger.Info("Successfully updated favorite status for log entry ID %d to %v", logID, req.IsFavorite)
 }
+
+// DeleteTrafficLogsForTargetHandler handles the DELETE request to remove all logs for a specific target.
+func DeleteTrafficLogsForTargetHandler(w http.ResponseWriter, r *http.Request, targetID int64) {
+	// targetID is already parsed by the calling router function
+
+	if targetID == 0 {
+		logger.Error("API DeleteTrafficLogs: Target ID 0 provided for deleting logs, which is invalid.")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Target ID cannot be zero"})
+		return
+	}
+
+	// Ensure the target itself exists (optional, but good practice)
+	var exists bool
+	err := database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM targets WHERE id = ?)", targetID).Scan(&exists)
+	if err != nil {
+		logger.Error("API DeleteTrafficLogs: Error checking existence of target ID %d before deleting logs: %v", targetID, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Failed to verify target existence"})
+		return
+	}
+	if !exists {
+		logger.Info("API DeleteTrafficLogs: Attempt to delete logs for non-existent target ID %d", targetID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Target not found, no logs to delete"})
+		return
+	}
+
+	stmt, err := database.DB.Prepare("DELETE FROM http_traffic_log WHERE target_id = ?")
+	if err != nil {
+		logger.Error("API DeleteTrafficLogs: Error preparing delete statement for http_traffic_log, target_id %d: %v", targetID, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Failed to prepare log deletion query"})
+		return
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(targetID)
+	if err != nil {
+		logger.Error("API DeleteTrafficLogs: Error executing delete on http_traffic_log for target_id %d: %v", targetID, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Failed to delete logs for target"})
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	logger.Info("API DeleteTrafficLogs: Deleted %d proxy logs from http_traffic_log for target_id %d", rowsAffected, targetID)
+	w.WriteHeader(http.StatusNoContent)
+}

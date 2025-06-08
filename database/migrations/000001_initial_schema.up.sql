@@ -1,4 +1,5 @@
--- Initial database schema
+-- database/migrations/000001_initial_schema.up.sql
+
 CREATE TABLE IF NOT EXISTS platforms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS target_checklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     target_id INTEGER NOT NULL,
     item_text TEXT NOT NULL,
+    item_command_text TEXT,
     notes TEXT,
     is_completed BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -123,7 +125,8 @@ CREATE TABLE IF NOT EXISTS synack_targets (
     status TEXT NOT NULL DEFAULT 'new',
     is_active BOOLEAN DEFAULT TRUE,
     deactivated_at DATETIME,
-    notes TEXT
+    notes TEXT,
+    analytics_last_fetched_at DATETIME -- This column was added by a later migration, now part of initial
 );
 
 CREATE TABLE IF NOT EXISTS discovered_urls (
@@ -187,3 +190,72 @@ CREATE TABLE IF NOT EXISTS checklist_template_items (
     UNIQUE (template_id, display_order),
     FOREIGN KEY(template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS target_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id INTEGER NOT NULL,
+    http_traffic_log_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT,
+    payload TEXT,
+    severity TEXT,
+    status TEXT NOT NULL DEFAULT 'Open',
+    cvss_score REAL,
+    cwe_id INTEGER,
+    finding_references TEXT, -- This is the final name after the rename
+    discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE,
+    FOREIGN KEY (http_traffic_log_id) REFERENCES http_traffic_log(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_target_findings_target_id ON target_findings(target_id);
+CREATE INDEX IF NOT EXISTS idx_target_findings_severity ON target_findings(severity);
+CREATE INDEX IF NOT EXISTS idx_target_findings_status ON target_findings(status);
+
+CREATE TRIGGER IF NOT EXISTS update_target_finding_updated_at
+AFTER UPDATE ON target_findings
+FOR EACH ROW
+BEGIN
+    UPDATE target_findings SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+
+CREATE TABLE IF NOT EXISTS sitemap_manual_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id INTEGER NOT NULL,
+    http_traffic_log_id INTEGER UNIQUE,
+    folder_path TEXT NOT NULL,
+    request_method TEXT NOT NULL,
+    request_path TEXT NOT NULL,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE,
+    FOREIGN KEY (http_traffic_log_id) REFERENCES http_traffic_log(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sitemap_manual_entries_target_id ON sitemap_manual_entries(target_id);
+CREATE INDEX IF NOT EXISTS idx_sitemap_manual_entries_folder_path ON sitemap_manual_entries(folder_path);
+
+CREATE TRIGGER IF NOT EXISTS update_sitemap_manual_entry_updated_at
+AFTER UPDATE ON sitemap_manual_entries
+FOR EACH ROW
+BEGIN
+    UPDATE sitemap_manual_entries SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+
+-- Initial data seeding for checklist_templates
+INSERT OR IGNORE INTO checklist_templates (name, description) VALUES
+('Basic Web Application Scan', 'A fundamental checklist for initial web application assessments.'),
+('API Security Top 10 (OWASP)', 'Checklist based on OWASP API Security Top 10 vulnerabilities.'),
+('Tool Commands', 'Commands for various tools.'),
+('Tool Commands with Proxy', 'Commands for various tools with proxy support.');
+

@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"net/http"
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterVisualizationRoutes(mux *http.ServeMux) {
+func RegisterVisualizationRoutes(r chi.Router) {
 	// Placeholder
-	mux.HandleFunc("GET /visualization", GetVisualizationDataHandler)
+	r.Get("/visualization", GetVisualizationDataHandler)
 }

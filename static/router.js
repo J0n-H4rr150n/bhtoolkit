@@ -238,8 +238,12 @@ async function loadView(viewId, params = {}) {
             if (viewLoaders.loadChecklistTemplatesView) viewLoaders.loadChecklistTemplatesView();
             else console.error("loadChecklistTemplatesView not found in viewLoaders");
             break;
-        case 'visualizer': if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Visualizer</h1><p>Cytoscape visualization will be here.</p>`; break;
-        case 'settings': if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Settings</h1><p>Configuration settings UI will be here.</p>`; break;
+        case 'visualizer': 
+            if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Visualizer</h1><p>Cytoscape visualization will be here.</p>`; break;
+        case 'settings': 
+            if (viewLoaders.loadSettingsView) viewLoaders.loadSettingsView(); // Use the loader
+            else console.error("loadSettingsView not found in viewLoaders");
+            break;
     }
 }
 

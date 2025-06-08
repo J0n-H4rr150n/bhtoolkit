@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"net/http"
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterAnalysisRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /analyze/jslinks", AnalyzeJSLinksHandler)
+func RegisterAnalysisRoutes(r chi.Router) {
+	r.Post("/analyze/jslinks", AnalyzeJSLinksHandler)
 }

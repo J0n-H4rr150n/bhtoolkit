@@ -2,8 +2,8 @@
 import { initState, getState, updateState } from './stateService.js';
 import { initRouter } from './router.js';
 import { initUIService, showModalMessage, showModalConfirm, updateBreadcrumbs } from './uiService.js';
-import * as apiService from './apiService.js';
-import { initTableService, saveCurrentTableLayout, makeTableColumnsResizable } from './tableService.js';
+import * as apiService from './apiService.js'; // Keep as is
+import { initTableService, saveCurrentTableLayout, makeTableColumnsResizable, getIsResizing } from './tableService.js'; // Import getIsResizing
 import { escapeHtml, escapeHtmlAttribute, debounce, copyToClipboard, downloadCSV } from './utils.js';
 
 // View Module Imports
@@ -18,6 +18,7 @@ import { initSynackView, loadSynackTargetsView, loadSynackAnalyticsView } from '
 import { initChecklistView, fetchAndDisplayChecklistItems, cancelActiveChecklistItemEdit } from './views/checklistView.js';
 import { initChecklistTemplateView, loadChecklistTemplatesView } from './views/checklistTemplateView.js';
 import { initSettingsView, loadSettingsView } from './views/settingsView.js';
+import { initSitemapView, loadSitemapView } from './views/sitemapView.js';
 
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -25,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const sidebarToggle = document.getElementById('sidebarToggle');
     const viewContentContainer = document.getElementById('viewContentContainer');
     const sidebarItems = document.querySelectorAll('.sidebar-item');
+    console.log('[App.js] DOMContentLoaded. viewContentContainer:', viewContentContainer); // Log container
     const currentTargetDisplay = document.getElementById('currentPlatformTarget');
 
     const modalOverlay = document.getElementById('customModal');
@@ -69,7 +71,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     const tableServiceAPI = {
         saveCurrentTableLayout,
-        makeTableColumnsResizable
+        makeTableColumnsResizable,
+        getIsResizing // Add getIsResizing here
     };
 
     apiService.initApiService(API_BASE_URL_CONST);
@@ -85,7 +88,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     initTableService({
         showModalMessage: showModalMessage,
         saveTableLayouts: apiService.saveTableLayouts,
-        getGlobalTableLayouts: getState,
+        getGlobalTableLayouts: () => {
+            const state = getState();
+            return state.globalTableLayouts || {}; // Ensure it returns an object even if undefined
+        },
         updateGlobalTableLayouts: (newLayouts) => updateState({ globalTableLayouts: newLayouts })
     });
 
@@ -95,6 +101,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initChecklistView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initChecklistTemplateView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initSettingsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
+    initSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
 
     await fetchAndSetInitialCurrentTarget();
 
@@ -118,16 +125,20 @@ document.addEventListener('DOMContentLoaded', async function() {
             loadProxyLogView: (proxyLogParams) => loadProxyLogView(viewContentContainer, proxyLogParams),
             loadProxyLogDetailView: (logId) => loadProxyLogDetailView(viewContentContainer, logId),
             loadChecklistTemplatesView: () => loadChecklistTemplatesView(viewContentContainer),
-            loadSettingsView: () => loadSettingsView(viewContentContainer)
+            loadSettingsView: () => {
+                console.log('[App.js] Router attempting to call loadSettingsView.');
+                loadSettingsView(viewContentContainer);
+            },
+            loadSitemapView: () => loadSitemapView(viewContentContainer)
         },
         getPlatformDetailsFunc: apiService.getPlatformDetails,
         cancelTargetEditFunc: cancelActiveTargetEdit,
         cancelChecklistItemEditFunc: cancelActiveChecklistItemEdit
     });
 
-    async function loadCurrentTargetView(targetIdFromParam = null) {
+    async function loadCurrentTargetView(targetIdFromParam = null, tabToMakeActive = 'checklistTab') {
         const appState = getState();
-        const targetIdToLoad = targetIdFromParam || appState.currentTargetId;
+        const targetIdToLoad = targetIdFromParam !== null ? parseInt(targetIdFromParam, 10) : appState.currentTargetId;
 
         if (targetIdToLoad) {
              try {
@@ -155,23 +166,38 @@ document.addEventListener('DOMContentLoaded', async function() {
                     <p><strong>Link:</strong> <a href="${escapeHtml(target.link)}" target="_blank">${escapeHtml(target.link)}</a></p>
                     <p><strong>Platform ID:</strong> ${target.platform_id} (${escapeHtml(platformNameForBreadcrumb)})</p>
 
-                    <div id="targetNotesSection" data-target-id="${target.id}" data-current-link="${escapeHtml(target.link)}">
-                        <div class="notes-display-mode">
-                            <p><strong>Notes:</strong> <button id="editTargetNotesBtn" class="action-button inline-edit-button" title="Edit Notes">✏️</button></p>
-                            <pre id="targetNotesContent" style="white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(target.notes || '(None)')}</pre>
-                        </div>
-                        <div class="notes-edit-mode" style="display:none;">
-                            <p><strong>Notes:</strong></p>
-                            <textarea id="targetNotesTextarea" rows="5" style="width: 100%; margin-bottom: 10px;"></textarea>
-                            <button id="saveTargetNotesBtn" class="primary small-button">Save Notes</button>
-                            <button id="cancelTargetNotesBtn" class="secondary small-button">Cancel</button>
-                            <div id="saveTargetNotesMessage" class="message-area" style="margin-top: 5px;"></div>
+                    <div class="tabs" style="margin-top: 20px;">
+                        <button class="tab-button" data-tab="checklistTab">Checklist</button>
+                        <button class="tab-button" data-tab="notesTab">Notes</button>
+                        <button class="tab-button" data-tab="findingsTab">Findings</button>
+                        <button class="tab-button" data-tab="scopeRulesTab">Scope Rules</button>
+                    </div>
+
+                    <div id="checklistTab" class="tab-content">
+                        <h3>Target Checklist</h3>
+                        <div id="targetChecklistContent">Loading checklist...</div>
+                    </div>
+
+                    <div id="notesTab" class="tab-content">
+                        <h3>Target Notes</h3>
+                        <div id="targetNotesSection" data-target-id="${target.id}" data-current-link="${escapeHtml(target.link)}">
+                            <div class="notes-display-mode">
+                                <p><strong>Notes:</strong> <button id="editTargetNotesBtn" class="action-button inline-edit-button" title="Edit Notes">✏️</button></p>
+                                <pre id="targetNotesContent" style="white-space: pre-wrap; word-wrap: break-word; padding: 10px; background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; min-height: 100px;">${escapeHtml(target.notes || '(None)')}</pre>
+                            </div>
+                            <div class="notes-edit-mode" style="display:none;">
+                                <p><strong>Edit Notes:</strong></p>
+                                <textarea id="targetNotesTextarea" rows="10" style="width: 100%; margin-bottom: 10px;"></textarea>
+                                <button id="saveTargetNotesBtn" class="primary small-button">Save Notes</button>
+                                <button id="cancelTargetNotesBtn" class="secondary small-button">Cancel</button>
+                                <div id="saveTargetNotesMessage" class="message-area" style="margin-top: 5px;"></div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="tabs" style="margin-top: 20px;">
-                        <button class="tab-button" data-tab="checklistTab">Checklist</button>
-                        <button class="tab-button" data-tab="scopeRulesTab">Scope Rules</button>
+                    <div id="findingsTab" class="tab-content">
+                        <h3>Target Findings</h3>
+                        <div id="targetFindingsContent">Loading findings...</div>
                     </div>
 
                     <div id="scopeRulesTab" class="tab-content">
@@ -201,11 +227,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                         </div>
                         <div id="current-target-scope"></div>
                     </div>
-
-                    <div id="checklistTab" class="tab-content">
-                        <h3>Target Checklist</h3>
-                        <div id="targetChecklistContent">Loading checklist...</div>
-                    </div>
                 `;
                 renderScopeRulesTable(document.getElementById('current-target-scope'), target.scope_rules || []);
 
@@ -222,9 +243,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 document.getElementById('saveTargetNotesBtn')?.addEventListener('click', handleSaveTargetNotes);
                 document.getElementById('cancelTargetNotesBtn')?.addEventListener('click', cancelTargetNotesEdit);
 
-                setActiveTab('checklistTab');
+                setActiveTab(tabToMakeActive || 'checklistTab'); // Use passed tab or default
                 document.querySelectorAll('.tabs .tab-button').forEach(button => button.addEventListener('click', handleTabSwitch));
                 fetchAndDisplayChecklistItems(target.id);
+                fetchAndDisplayTargetFindings(target.id); // New function call
 
              } catch(error) {
                  console.error("Error fetching target details:", error);
@@ -323,12 +345,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         const itemType = form.querySelector('select[name="item_type"]').value;
         const description = form.querySelector('input[name="description"]').value.trim();
         const isInScope = form.getAttribute('data-in-scope') === 'true';
-        const messageArea = document.getElementById('addScopeRuleMessage');
-        const activeTabButton = document.querySelector('.tabs .tab-button.active');
-        const activeTabId = activeTabButton ? activeTabButton.getAttribute('data-tab') : 'checklistTab';
+        const messageArea = document.getElementById('addScopeRuleMessage');        
 
-        messageArea.textContent = '';
-        messageArea.className = 'message-area';
+        if (messageArea) messageArea.textContent = '';
+        if (messageArea) messageArea.className = 'message-area';
         if (!pattern) {
             messageArea.textContent = 'Pattern cannot be empty.';
             return;
@@ -339,7 +359,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             messageArea.textContent = 'Scope rule added successfully!';
             messageArea.classList.add('success-message');
             form.reset();
-            loadCurrentTargetView(targetId, activeTabId);
+            loadCurrentTargetView(targetId, 'scopeRulesTab'); // Keep scopeRulesTab active
         } catch (error) {
             messageArea.textContent = `Error adding scope rule: ${error.message}`;
             messageArea.classList.add('error-message');
@@ -399,11 +419,60 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 await apiService.deleteScopeRule(ruleId);
                 showModalMessage('Success', `Scope rule ID ${ruleId} deleted successfully.`);
-                if (targetId) loadCurrentTargetView(targetId, 'scopeRulesTab');
+                if (targetId) loadCurrentTargetView(targetId.toString(), 'scopeRulesTab'); // Keep scopeRulesTab active
             } catch (error) {
                 showModalMessage('Error', `Error deleting scope rule: ${error.message}`);
             }
         });
+    }
+
+    async function fetchAndDisplayTargetFindings(targetId) {
+        const findingsContentDiv = document.getElementById('targetFindingsContent');
+        if (!findingsContentDiv) {
+            console.error("targetFindingsContent div not found!");
+            return;
+        }
+        findingsContentDiv.innerHTML = '<p>Loading findings...</p>';
+
+        try {
+            const findings = await apiService.getTargetFindings(targetId);
+            if (findings && findings.length > 0) {
+                let findingsHTML = `
+                    <button id="addNewFindingBtn" class="primary small-button" style="margin-bottom:15px;">Add New Finding</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Severity</th>
+                                <th>Status</th>
+                                <th>Discovered</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                findings.forEach(finding => {
+                    findingsHTML += `
+                        <tr data-finding-id="${finding.id}">
+                            <td>${finding.id}</td>
+                            <td>${escapeHtml(finding.title)}</td>
+                            <td>${escapeHtml(finding.severity.String || 'N/A')}</td>
+                            <td>${escapeHtml(finding.status)}</td>
+                            <td>${new Date(finding.discovered_at).toLocaleDateString()}</td>
+                            <td><button class="action-button view-finding-detail" data-finding-id="${finding.id}">👁️</button> <button class="action-button edit-finding" data-finding-id="${finding.id}">✏️</button> <button class="action-button delete-finding danger" data-finding-id="${finding.id}">🗑️</button></td>
+                        </tr>`;
+                });
+                findingsHTML += `</tbody></table>`;
+                findingsContentDiv.innerHTML = findingsHTML;
+                // Add event listeners for view/edit/delete finding buttons later
+            } else {
+                findingsContentDiv.innerHTML = '<p>No findings recorded for this target yet.</p> <button id="addNewFindingBtn" class="primary small-button">Add New Finding</button>';
+            }
+            // Add event listener for "Add New Finding" button later
+        } catch (error) {
+            console.error("Error fetching target findings:", error);
+            findingsContentDiv.innerHTML = `<p class="error-message">Error loading findings: ${error.message}</p>`;
+        }
     }
 
     function applyUiSettings(settings) {

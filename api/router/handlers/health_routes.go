@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"toolkit/logger"
+
+	"github.com/go-chi/chi/v5"
 )
 
-func RegisterHealthRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /health", healthCheckHandler)
+func RegisterHealthRoutes(r chi.Router) {
+	r.Get("/health", healthCheckHandler)
 }
 
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {

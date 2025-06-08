@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"bufio"       // For trafficPurgeCmd confirmation
-	"bytes"       // For printBody helper
+	"bufio" // For trafficPurgeCmd confirmation
+	"bytes" // For printBody helper
 	"database/sql"
 	"encoding/json" // For printHeaders and printBody helpers
 	"errors"
@@ -76,7 +76,7 @@ func printBody(bodyBytes []byte, contentType string) {
 	}
 
 	if strings.Contains(strings.ToLower(contentType), "json") {
-		var prettyJSON bytes.Buffer // Uses bytes
+		var prettyJSON bytes.Buffer                                           // Uses bytes
 		if err := json.Indent(&prettyJSON, bodyBytes, "", "  "); err == nil { // Uses json
 			fmt.Println(prettyJSON.String())
 			return
@@ -89,11 +89,10 @@ func printBody(bodyBytes []byte, contentType string) {
 	fmt.Println(printableBody)
 }
 
-
 // --- List Command ---
 var trafficListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List captured HTTP traffic logs with filters and pagination",
+	Use:   "list",
+	Short: "List captured HTTP traffic logs with filters and pagination",
 	Long: `Retrieves and displays entries from the HTTP traffic log, with optional filters.
 Supports pagination using --page and --limit flags.
 Regex filter can be applied to different fields using --regex-field.
@@ -272,13 +271,27 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 			} else {
 				t.Timestamp = parsedTime
 			}
-			if statusCode.Valid { t.ResponseStatusCode = int(statusCode.Int64) }
-			if contentType.Valid { t.ResponseContentType = contentType.String }
-			if bodySize.Valid { t.ResponseBodySize = bodySize.Int64 }
-			if duration.Valid { t.DurationMs = duration.Int64 }
-			if isHTTPS.Valid { t.IsHTTPS = isHTTPS.Bool }
-			if reqHeadersStr.Valid { t.RequestHeaders = reqHeadersStr.String }
-			if resHeadersStr.Valid { t.ResponseHeaders = resHeadersStr.String }
+			if statusCode.Valid {
+				t.ResponseStatusCode = int(statusCode.Int64)
+			}
+			if contentType.Valid {
+				t.ResponseContentType = contentType.String
+			}
+			if bodySize.Valid {
+				t.ResponseBodySize = bodySize.Int64
+			}
+			if duration.Valid {
+				t.DurationMs = duration.Int64
+			}
+			if isHTTPS.Valid {
+				t.IsHTTPS = isHTTPS.Bool
+			}
+			if reqHeadersStr.Valid {
+				t.RequestHeaders = reqHeadersStr.String
+			}
+			if resHeadersStr.Valid {
+				t.ResponseHeaders = resHeadersStr.String
+			}
 			t.RequestBody = reqBodyBytes
 			t.ResponseBody = resBodyBytes
 
@@ -330,13 +343,21 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 
 			for _, t := range logs {
 				httpsStr := "N"
-				if t.IsHTTPS { httpsStr = "Y" }
+				if t.IsHTTPS {
+					httpsStr = "Y"
+				}
 				tsFormatted := "N/A"
-				if !t.Timestamp.IsZero() { tsFormatted = t.Timestamp.Format("2006-01-02 15:04:05") }
+				if !t.Timestamp.IsZero() {
+					tsFormatted = t.Timestamp.Format("2006-01-02 15:04:05")
+				}
 				displayURL := t.RequestURL
-				if len(displayURL) > 80 { displayURL = displayURL[:77] + "..." }
+				if len(displayURL) > 80 {
+					displayURL = displayURL[:77] + "..."
+				}
 				displayContentType := t.ResponseContentType
-				if len(displayContentType) > 30 { displayContentType = displayContentType[:27] + "..." }
+				if len(displayContentType) > 30 {
+					displayContentType = displayContentType[:27] + "..."
+				}
 
 				fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%d\t%s\t%d\t%dms\t%s\n",
 					t.ID, tsFormatted, t.RequestMethod, displayURL, t.ResponseStatusCode,
@@ -356,10 +377,18 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 		fmt.Println(footer)
 
 		baseCmd := "toolkit traffic list"
-		if trafficListDomain != "" { baseCmd += fmt.Sprintf(" --domain \"%s\"", trafficListDomain) }
-		if trafficListStatusCode > 0 { baseCmd += fmt.Sprintf(" --status-code %d", trafficListStatusCode) }
-		if trafficListRegex != "" { baseCmd += fmt.Sprintf(" --regex '%s' --regex-field %s", trafficListRegex, trafficListRegexField) }
-		if trafficListLimit != 30 { baseCmd += fmt.Sprintf(" --limit %d", trafficListLimit) }
+		if trafficListDomain != "" {
+			baseCmd += fmt.Sprintf(" --domain \"%s\"", trafficListDomain)
+		}
+		if trafficListStatusCode > 0 {
+			baseCmd += fmt.Sprintf(" --status-code %d", trafficListStatusCode)
+		}
+		if trafficListRegex != "" {
+			baseCmd += fmt.Sprintf(" --regex '%s' --regex-field %s", trafficListRegex, trafficListRegexField)
+		}
+		if trafficListLimit != 30 {
+			baseCmd += fmt.Sprintf(" --limit %d", trafficListLimit)
+		}
 
 		if trafficListPage > 1 {
 			fmt.Printf("  Previous page: %s --page %d\n", baseCmd, trafficListPage-1)
@@ -388,8 +417,8 @@ Will return an error if the log entry is already mapped to a target.`,
 		targetIDToMap := trafficMapTargetID
 
 		if !cmd.Flags().Changed("target-id") {
-			logger.Info("traffic map: --target-id flag not provided, attempting to use current target from state.")
-			state, err := readState() 
+			logger.Debug("traffic map: --target-id flag not provided, attempting to use current target from state.")
+			state, err := readState()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error reading state file: %v\n", err)
 				fmt.Fprintln(os.Stderr, "Please set a current target using 'toolkit target set-current' or provide --target-id.")
@@ -401,9 +430,9 @@ Will return an error if the log entry is already mapped to a target.`,
 				os.Exit(1)
 			}
 			targetIDToMap = state.CurrentTargetID
-			logger.Info("traffic map: Using current target ID from state: %d", targetIDToMap)
+			logger.Debug("traffic map: Using current target ID from state: %d", targetIDToMap)
 		} else {
-			logger.Info("traffic map: Using target ID from flag: %d", targetIDToMap)
+			logger.Debug("traffic map: Using target ID from flag: %d", targetIDToMap)
 		}
 
 		if targetIDToMap == 0 {
@@ -473,7 +502,7 @@ Will return an error if the log entry is already mapped to a target.`,
 			fmt.Fprintf(os.Stderr, "Warning: Log entry %d was not found during update, though it existed before.\n", logID)
 		} else {
 			fmt.Printf("Successfully mapped traffic log entry %d to target %d.\n", logID, targetIDToMap)
-			logger.Info("Traffic log entry %d mapped to target %d via CLI", logID, targetIDToMap)
+			logger.Info("Traffic log entry %d mapped to target %d", logID, targetIDToMap)
 		}
 	},
 }
@@ -488,10 +517,10 @@ to the specified target ID (using --target-id) or the currently set target.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger.Info("Executing 'traffic list-mapped' command")
 
-		targetIDToList := trafficMapTargetID 
+		targetIDToList := trafficMapTargetID
 
 		if !cmd.Flags().Changed("target-id") {
-			logger.Info("traffic list-mapped: --target-id flag not provided, attempting to use current target from state.")
+			logger.Debug("traffic list-mapped: --target-id flag not provided, attempting to use current target from state.")
 			state, err := readState()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error reading state file: %v\n", err)
@@ -504,9 +533,9 @@ to the specified target ID (using --target-id) or the currently set target.`,
 				os.Exit(1)
 			}
 			targetIDToList = state.CurrentTargetID
-			logger.Info("traffic list-mapped: Using current target ID from state: %d", targetIDToList)
+			logger.Debug("traffic list-mapped: Using current target ID from state: %d", targetIDToList)
 		} else {
-			logger.Info("traffic list-mapped: Using target ID from flag: %d", targetIDToList)
+			logger.Debug("traffic list-mapped: Using target ID from flag: %d", targetIDToList)
 		}
 
 		if targetIDToList == 0 {
@@ -545,13 +574,29 @@ to the specified target ID (using --target-id) or the currently set target.`,
 				os.Exit(1)
 			}
 			parsedTime, parseErr := time.Parse(time.RFC3339, timestampStr)
-			if parseErr != nil { parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr) }
-			if parseErr == nil { t.Timestamp = parsedTime } else { logger.Error("Failed to parse timestamp '%s': %v", timestampStr, parseErr)}
-			if statusCode.Valid { t.ResponseStatusCode = int(statusCode.Int64) }
-			if contentType.Valid { t.ResponseContentType = contentType.String }
-			if bodySize.Valid { t.ResponseBodySize = bodySize.Int64 }
-			if duration.Valid { t.DurationMs = duration.Int64 }
-			if isHTTPS.Valid { t.IsHTTPS = isHTTPS.Bool }
+			if parseErr != nil {
+				parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr)
+			}
+			if parseErr == nil {
+				t.Timestamp = parsedTime
+			} else {
+				logger.Error("Failed to parse timestamp '%s': %v", timestampStr, parseErr)
+			}
+			if statusCode.Valid {
+				t.ResponseStatusCode = int(statusCode.Int64)
+			}
+			if contentType.Valid {
+				t.ResponseContentType = contentType.String
+			}
+			if bodySize.Valid {
+				t.ResponseBodySize = bodySize.Int64
+			}
+			if duration.Valid {
+				t.DurationMs = duration.Int64
+			}
+			if isHTTPS.Valid {
+				t.IsHTTPS = isHTTPS.Bool
+			}
 			t.TargetID = &targetIDToList
 			logs = append(logs, t)
 		}
@@ -575,13 +620,21 @@ to the specified target ID (using --target-id) or the currently set target.`,
 
 		for _, t := range logs {
 			httpsStr := "N"
-			if t.IsHTTPS { httpsStr = "Y" }
+			if t.IsHTTPS {
+				httpsStr = "Y"
+			}
 			tsFormatted := "N/A"
-			if !t.Timestamp.IsZero() { tsFormatted = t.Timestamp.Format("2006-01-02 15:04:05") }
+			if !t.Timestamp.IsZero() {
+				tsFormatted = t.Timestamp.Format("2006-01-02 15:04:05")
+			}
 			displayURL := t.RequestURL
-			if len(displayURL) > 80 { displayURL = displayURL[:77] + "..." }
+			if len(displayURL) > 80 {
+				displayURL = displayURL[:77] + "..."
+			}
 			displayContentType := t.ResponseContentType
-			if len(displayContentType) > 30 { displayContentType = displayContentType[:27] + "..." }
+			if len(displayContentType) > 30 {
+				displayContentType = displayContentType[:27] + "..."
+			}
 
 			fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%d\t%s\t%d\t%dms\t%s\n",
 				t.ID, tsFormatted, t.RequestMethod, displayURL, t.ResponseStatusCode,
@@ -652,25 +705,59 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 			os.Exit(1)
 		}
 
-		if targetID.Valid { t.TargetID = &targetID.Int64 }
+		if targetID.Valid {
+			t.TargetID = &targetID.Int64
+		}
 		parsedTime, parseErr := time.Parse(time.RFC3339, timestampStr)
-		if parseErr != nil { parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr) }
-		if parseErr == nil { t.Timestamp = parsedTime } else { logger.Error("Failed to parse timestamp '%s': %v", timestampStr, parseErr)}
-		if reqHttpVerSql.Valid { t.RequestHTTPVersion = reqHttpVerSql.String }
-		if reqHeadersStr.Valid { t.RequestHeaders = reqHeadersStr.String }
+		if parseErr != nil {
+			parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr)
+		}
+		if parseErr == nil {
+			t.Timestamp = parsedTime
+		} else {
+			logger.Error("Failed to parse timestamp '%s': %v", timestampStr, parseErr)
+		}
+		if reqHttpVerSql.Valid {
+			t.RequestHTTPVersion = reqHttpVerSql.String
+		}
+		if reqHeadersStr.Valid {
+			t.RequestHeaders = reqHeadersStr.String
+		}
 		t.RequestBody = reqBodyBytes
-		if statusCode.Valid { t.ResponseStatusCode = int(statusCode.Int64) }
-		if reasonPhraseSql.Valid { t.ResponseReasonPhrase = reasonPhraseSql.String }
-		if resHttpVerSql.Valid { t.ResponseHTTPVersion = resHttpVerSql.String }
-		if resHeadersStr.Valid { t.ResponseHeaders = resHeadersStr.String }
+		if statusCode.Valid {
+			t.ResponseStatusCode = int(statusCode.Int64)
+		}
+		if reasonPhraseSql.Valid {
+			t.ResponseReasonPhrase = reasonPhraseSql.String
+		}
+		if resHttpVerSql.Valid {
+			t.ResponseHTTPVersion = resHttpVerSql.String
+		}
+		if resHeadersStr.Valid {
+			t.ResponseHeaders = resHeadersStr.String
+		}
 		t.ResponseBody = resBodyBytes
-		if contentType.Valid { t.ResponseContentType = contentType.String }
-		if bodySize.Valid { t.ResponseBodySize = bodySize.Int64 }
-		if duration.Valid { t.DurationMs = duration.Int64 }
-		if clientIPSql.Valid { t.ClientIP = clientIPSql.String }
-		if serverIPSqL.Valid { t.ServerIP = serverIPSqL.String }
-		if isHTTPS.Valid { t.IsHTTPS = isHTTPS.Bool }
-		if notes.Valid { t.Notes = notes.String }
+		if contentType.Valid {
+			t.ResponseContentType = contentType.String
+		}
+		if bodySize.Valid {
+			t.ResponseBodySize = bodySize.Int64
+		}
+		if duration.Valid {
+			t.DurationMs = duration.Int64
+		}
+		if clientIPSql.Valid {
+			t.ClientIP = clientIPSql.String
+		}
+		if serverIPSqL.Valid {
+			t.ServerIP = serverIPSqL.String
+		}
+		if isHTTPS.Valid {
+			t.IsHTTPS = isHTTPS.Bool
+		}
+		if notes.Valid {
+			t.Notes = notes.String
+		}
 
 		fmt.Println("--- REQUEST ---")
 		fmt.Printf("%s %s %s\n", t.RequestMethod, t.RequestURL, t.RequestHTTPVersion)
@@ -845,7 +932,6 @@ This command will ask for confirmation before proceeding unless the --force flag
 	},
 }
 
-
 // --- Init Function ---
 
 func init() {
@@ -868,7 +954,6 @@ func init() {
 
 	// Purge command flags
 	trafficPurgeCmd.Flags().BoolVarP(&trafficPurgeForce, "force", "", false, "Skip confirmation before purging records")
-
 
 	// Add subcommands to the base traffic command
 	trafficCmd.AddCommand(trafficListCmd)
