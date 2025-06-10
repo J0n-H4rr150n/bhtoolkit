@@ -227,7 +227,8 @@ async function loadModifierTaskIntoWorkspace(taskId) {
                 <h2 id="modifierTaskNameDisplay" data-task-id="${task.id}">${escapeHtml(task.name || `Task ${task.id}`)}</h2>
                 <div id="modifierTaskNameEditControls" style="display: inline-block; margin-left: 10px;">
                     <button id="editModifierTaskNameBtn" class="action-button inline-edit-button" title="Edit Task Name" style="margin-right: 5px;">✏️</button>
-                    <button id="cloneModifierTaskBtn" class="action-button inline-edit-button" title="Clone Task">🐑</button> 
+                    <button id="cloneModifierTaskBtn" class="action-button inline-edit-button" title="Clone Task" style="margin-right: 5px;">🐑</button> 
+                    <button id="deleteModifierTaskBtn" class="action-button inline-edit-button" title="Delete Task">🗑️</button>
                 </div>
                 <div id="modifierTaskNameInputContainer" style="display: none; margin-bottom:10px;">
                     <input type="text" id="modifierTaskNameInput" class="modifier-input" value="${escapeHtmlAttribute(task.name || `Task ${task.id}`)}" style="width: 500px; margin-right: 5px;">
@@ -290,6 +291,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
         document.getElementById('saveModifierTaskNameBtn')?.addEventListener('click', () => handleSaveTaskName(task.id));
         document.getElementById('cancelModifierTaskNameBtn')?.addEventListener('click', () => toggleTaskNameEdit(false, task.id, task.name));
         document.getElementById('cloneModifierTaskBtn')?.addEventListener('click', () => handleCloneModifierTask(task.id));
+        document.getElementById('deleteModifierTaskBtn')?.addEventListener('click', () => handleDeleteModifierTask(task.id, task.name || `Task ${task.id}`));
         document.querySelectorAll('.modifier-tab-button').forEach(button => {
             button.addEventListener('click', () => setActiveModifierTab(button.dataset.tabId));
         });
@@ -539,11 +541,38 @@ async function saveModifierTasksOrder() {
 
     try {
         await apiService.updateModifierTasksOrder(taskOrders);
-        uiService.showModalMessage("Success", "Task order saved.", true, 1500);
-        // Optionally, re-fetch to confirm, though optimistic update is usually fine for order
-        // await fetchAndDisplayModifierTasks();
+        // uiService.showModalMessage("Success", "Task order saved.", true, 1500); // Removed success popup
+        await fetchAndDisplayModifierTasks(); // Re-fetch to confirm the order from the backend
     } catch (error) {
         console.error("Error saving task order:", error);
         uiService.showModalMessage("Error", `Failed to save task order: ${escapeHtml(error.message)}`);
     }
+}
+
+async function handleDeleteModifierTask(taskId, taskName) {
+    if (!taskId) {
+        uiService.showModalMessage("Error", "No task ID provided for deletion.");
+        return;
+    }
+
+    uiService.showModalConfirm(
+        "Confirm Delete Task",
+        `Are you sure you want to delete the Modifier task "${escapeHtml(taskName)}"? This action cannot be undone.`,
+        async () => {
+            try {
+                await apiService.deleteModifierTask(taskId); // Call the actual API service function
+                uiService.showModalMessage("Success", `Task "${escapeHtml(taskName)}" deleted successfully.`, true, 2000);
+
+                // Clear the workspace
+                const workspaceDiv = document.getElementById('modifierWorkspace');
+                if (workspaceDiv) {
+                    workspaceDiv.innerHTML = '<h2>Workspace</h2><p>Select a task from the list to view and modify its details.</p>';
+                }
+                await fetchAndDisplayModifierTasks(); // Refresh the task list
+            } catch (error) {
+                console.error("Error deleting modifier task:", error);
+                uiService.showModalMessage("Error", `Failed to delete task: ${escapeHtml(error.message)}`);
+            }
+        }
+    );
 }

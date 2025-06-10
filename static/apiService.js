@@ -511,6 +511,16 @@ export async function getSitemapManualEntries(targetId) {
     return handleResponse(response);
 }
 
+/**
+ * Fetches the generated sitemap tree for a given target.
+ * @param {string|number} targetId - The ID of the target.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of sitemap tree nodes.
+ */
+export async function getGeneratedSitemap(targetId) {
+    const response = await fetch(`${API_BASE}/sitemap/generated?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
 
 export async function getProxyExclusionRules() {
     const response = await fetch(`${API_BASE}/settings/proxy-exclusions`, {
@@ -713,4 +723,107 @@ export async function updateModifierTasksOrder(taskOrders) {
         body: JSON.stringify(taskOrders),
     });
     return handleResponse(response);
+}
+
+// --- Page Sitemap API ---
+
+/**
+ * Starts recording a new page.
+ * @param {Object} pageData - Data for the new page (e.g., { target_id, name, description }).
+ * @returns {Promise<Object>} - A promise that resolves with the created page details.
+ */
+export async function createPageSitemapEntry(pageData) {
+    const response = await fetch(`${API_BASE}/pages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pageData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Stops recording for a specific page and associates logs.
+ * @param {Object} stopData - Data to stop recording (e.g., { page_id, target_id, start_timestamp }).
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response message.
+ */
+export async function stopPageSitemapRecording(stopData) {
+    const response = await fetch(`${API_BASE}/pages/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stopData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches all recorded pages for a given target.
+ * @param {string|number} targetId - The ID of the target.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of page objects.
+ */
+export async function getPagesForTarget(targetId) {
+    const response = await fetch(`${API_BASE}/pages?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
+/**
+ * Fetches all HTTP logs associated with a specific recorded page.
+ * @param {string|number} pageId - The ID of the page.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of HTTP log objects.
+ */
+export async function getLogsForPageSitemapEntry(pageId) {
+    const response = await fetch(`${API_BASE}/pages/logs?page_id=${pageId}`);
+    return handleResponse(response);
+}
+
+/**
+ * Updates the display order of recorded pages.
+ * @param {Object} pageOrders - A map where keys are page IDs (string) and values are their new display order (number).
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response message.
+ */
+export async function updatePageSitemapOrder(pageOrders) {
+    const response = await fetch(`${API_BASE}/pages/order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pageOrders),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes a specific recorded page sitemap entry.
+ * @param {string|number} pageId - The ID of the page sitemap entry to delete.
+ * @returns {Promise<Object>} - A promise that resolves (usually with an empty object or success message on success).
+ */
+export async function deletePageSitemapEntry(pageId) {
+    const response = await fetch(`${API_BASE}/pages/${pageId}`, { // Note the URL structure
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Expects 200 OK or 204 No Content on success
+}
+
+/**
+ * Updates details of a specific recorded page sitemap entry (e.g., name, description).
+ * @param {string|number} pageId - The ID of the page sitemap entry to update.
+ * @param {Object} updateData - An object containing the data to update (e.g., { name: "New Name" }).
+ * @returns {Promise<Object>} - A promise that resolves with the updated page details.
+ */
+export async function updatePageSitemapEntryDetails(pageId, updateData) {
+    const response = await fetch(`${API_BASE}/pages/${pageId}`, { // Assuming PUT to /api/pages/{id}
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes a specific modifier task.
+ * @param {string|number} taskId - The ID of the modifier task to delete.
+ * @returns {Promise<Object>} - A promise that resolves (usually with an empty object or success message on success).
+ */
+export async function deleteModifierTask(taskId) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/${taskId}`, { // URL for deleting a specific task
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Expects 200 OK or 204 No Content on success
 }

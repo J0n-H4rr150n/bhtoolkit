@@ -1,0 +1,159 @@
+/* static/styles/sitemapView.css */
+
+/* Sitemap View Specific Styles */
+.sitemap-tree-container ul, .sitemap-tree-container li {
+    list-style-type: none;
+    padding-left: 0; /* Reset default padding for consistency */
+}
+
+.sitemap-tree-container .sitemap-node {
+    margin-bottom: 2px;
+}
+
+.sitemap-tree-container .sitemap-node-header {
+    padding: 4px 6px;
+    border-radius: 3px;
+    background-color: #f8f9fa; /* Lighter grey for folder nodes */
+    border: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+}
+.sitemap-tree-container .sitemap-node-header:hover {
+    background-color: #e9ecef;
+}
+.sitemap-tree-container .sitemap-node-header.clickable-for-endpoints {
+    cursor: pointer; /* Indicate that the header is clickable for endpoints */
+}
+
+
+.sitemap-tree-container .sitemap-node-toggle {
+    font-family: monospace;
+    color: #007bff;
+    cursor: pointer;
+    width: 18px; /* Ensure space for icon */
+    display: inline-block;
+    text-align: center;
+    margin-right: 4px;
+    font-weight: bold;
+}
+.sitemap-tree-container .sitemap-node-toggle:empty { /* Hide if no children */
+    visibility: hidden;
+}
+
+
+.sitemap-tree-container .sitemap-node-icon {
+    margin-right: 6px;
+    color: #6c757d; /* Icon color */
+}
+
+.sitemap-tree-container .sitemap-node-name {
+    font-weight: 500; /* Slightly less bold than default bold */
+    color: #343a40;
+}
+
+.sitemap-tree-container .sitemap-endpoints-toggle-indicator {
+    margin-left: 5px;
+    font-size: 0.9em;
+}
+
+.sitemap-tree-container .sitemap-node-children {
+    padding-left: 25px; /* Indentation for children */
+    border-left: 1px dashed #ced4da;
+    margin-left: 10px; /* Align with the toggle character more or less */
+}
+.sitemap-tree-container .sitemap-node-children > .sitemap-tree { /* Direct UL child */
+    padding-top: 3px;
+}
+
+
+.sitemap-tree-container .sitemap-node-endpoints {
+    padding-left: 25px; /* Indent endpoints under their parent path */
+    margin-left: 10px; /* Similar to children for alignment */
+    margin-top: 2px;
+    border-left: 1px solid #e0e0e0; /* Softer line for endpoints section */
+}
+.sitemap-tree-container .sitemap-node-endpoints ul {
+    padding-left: 10px; /* Further indent endpoint list items */
+    list-style-type: none;
+}
+
+
+.sitemap-tree-container .sitemap-endpoint {
+    padding: 3px 5px;
+    font-size: 0.9em;
+    border-bottom: 1px dotted #f0f0f0; /* Softer separator for endpoints */
+    display: flex;
+    align-items: center;
+}
+.sitemap-tree-container .sitemap-endpoint:last-child {
+    border-bottom: none;
+}
+
+.sitemap-tree-container .sitemap-endpoint .sitemap-actions-cell {
+    display: inline-flex; /* To keep buttons on one line */
+    align-items: center;
+    margin-right: 10px; /* Space between actions and method */
+    flex-shrink: 0; /* Prevent actions cell from shrinking */
+}
+
+.sitemap-tree-container .sitemap-endpoint .endpoint-method {
+    display: inline-block;
+    min-width: 55px; /* Min-width for methods */
+    font-weight: bold;
+    margin-right: 10px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    color: white;
+    text-align: center;
+    font-size: 0.85em;
+    flex-shrink: 0;
+}
+
+.sitemap-tree-container .sitemap-endpoint .endpoint-log-id {
+    color: #6c757d; /* Bootstrap's text-muted color */
+    font-size: 0.9em;
+    margin: 0 8px 0 5px; /* top right bottom left - added margin-right for spacing */
+}
+.sitemap-tree-container .sitemap-endpoint .method-get { background-color: #28a745; }
+.sitemap-tree-container .sitemap-endpoint .method-post { background-color: #007bff; }
+.sitemap-tree-container .sitemap-endpoint .method-put { background-color: #ffc107; color: #212529;}
+.sitemap-tree-container .sitemap-endpoint .method-delete { background-color: #dc3545; }
+.sitemap-tree-container .sitemap-endpoint .method-patch { background-color: #fd7e14; }
+.sitemap-tree-container .sitemap-endpoint .method-options { background-color: #6f42c1; }
+.sitemap-tree-container .sitemap-endpoint .method-head { background-color: #6c757d; }
+/* Add more as needed */
+.sitemap-tree-container .sitemap-endpoint .method-default { background-color: #6c757d; } /* Fallback */
+
+
+.sitemap-tree-container .sitemap-endpoint .endpoint-path {
+    color: #495057;
+    word-break: break-all; /* Break long paths */
+    /* margin-right: auto; /* No longer needed to push actions, path will take remaining space */
+}
+
+.sitemap-tree-container .sitemap-endpoint .favorite-indicator {
+    color: #ffc107;
+    margin-left: 8px;
+    font-size: 1.1em;
+}
+.sitemap-tree-container .sitemap-endpoint .manual-indicator,
+.sitemap-tree-container .sitemap-node-header .manual-indicator {
+    font-style: italic;
+    color: #6c757d;
+    font-size: 0.85em;
+    margin-left: 8px;
+}
+.sitemap-tree-container .sitemap-endpoint.manual-endpoint {
+    background-color: #fff9e0; /* Lighter yellow for manually added endpoints */
+}
+
+.sitemap-tree-container .sitemap-endpoint .action-button {
+    margin-left: 5px;
+    padding: 1px 3px;
+    font-size: 0.9em;
+    visibility: hidden; /* Hide by default */
+}
+
+.sitemap-tree-container .sitemap-endpoint:hover .action-button {
+    visibility: visible; /* Show on hover of the endpoint item */
+}

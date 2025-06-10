@@ -14,6 +14,55 @@ import (
 	"toolkit/models"
 )
 
+// GetGeneratedSitemapHandler generates and returns the sitemap tree for a target.
+// @Summary Get generated sitemap tree
+// @Description Retrieves a hierarchical sitemap generated from proxy logs and manual entries for a target.
+// @Tags Sitemap
+// @Produce json
+// @Param target_id query int true "ID of the target"
+// @Success 200 {array} models.SitemapTreeNode
+// @Failure 400 {object} models.ErrorResponse "Invalid or missing target_id"
+// @Failure 500 {object} models.ErrorResponse "Failed to generate sitemap"
+// @Router /sitemap/generated [get]
+func GetGeneratedSitemapHandler(w http.ResponseWriter, r *http.Request) {
+	targetIDStr := r.URL.Query().Get("target_id")
+	if targetIDStr == "" {
+		logger.Error("GetGeneratedSitemapHandler: target_id query parameter is required")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "target_id query parameter is required"})
+		return
+	}
+
+	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+	if err != nil {
+		logger.Error("GetGeneratedSitemapHandler: Invalid target_id parameter '%s': %v", targetIDStr, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Message: "Invalid target_id parameter, must be an integer"})
+		return
+	}
+
+	logEntries, err := database.GetLogEntriesForSitemapGeneration(targetID)
+	if err != nil { // Error already logged in GetLogEntriesForSitemapGeneration
+		http.Error(w, "Failed to retrieve log entries for sitemap", http.StatusInternalServerError)
+		return
+	}
+
+	manualEntries, err := database.GetSitemapManualEntriesByTargetID(targetID)
+	if err != nil { // Error already logged
+		http.Error(w, "Failed to retrieve manual sitemap entries", http.StatusInternalServerError)
+		return
+	}
+
+	sitemapTree := database.BuildSitemapTree(logEntries, manualEntries)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(sitemapTree); err != nil {
+		logger.Error("GetGeneratedSitemapHandler: Error encoding sitemap tree to JSON: %v", err)
+	}
+}
+
 // GetSitemapEndpointsHandler is a placeholder for getting unique sitemap endpoints.
 // @Summary Get sitemap/unique endpoints for a target
 // @Description (Not Implemented Yet) Retrieves a list of unique [METHOD] /path combinations discovered for a target.

@@ -120,6 +120,10 @@ async function loadView(viewId, params = {}) {
             pageTitle = "Request Modifier";
             breadcrumbSegments = [{ name: "Modifier" }];
             break;
+        case 'page-sitemap': // New case for Page Sitemap
+            pageTitle = "Page Sitemap";
+            breadcrumbSegments = [{ name: "Page Sitemap" }];
+            break;
         default:
             if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Page Not Found</h1><p>The view '${viewId}' is not implemented or the path is incorrect. Please select an option from the sidebar.</p>`;
             if (updateBreadcrumbs) updateBreadcrumbs([{ name: "Page Not Found" }]);
@@ -229,7 +233,10 @@ async function loadView(viewId, params = {}) {
             if (viewLoaders.loadProxyLogDetailView) viewLoaders.loadProxyLogDetailView(params.id);
             else console.error("loadProxyLogDetailView not found in viewLoaders");
             break;
-        case 'sitemap': if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Sitemap</h1><p>Sitemap viewer will be here.</p>`; break;
+        case 'sitemap':
+            if (viewLoaders.loadSitemapView) viewLoaders.loadSitemapView(); // Use the loader
+            else console.error("loadSitemapView not found in viewLoaders");
+            break;
         case 'discovered-urls': if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Discovered URLs</h1><p>List of discovered URLs will be here.</p>`; break;
         case 'checklist-templates':
             newPaginationState.checklistTemplateItems = {
@@ -253,6 +260,10 @@ async function loadView(viewId, params = {}) {
         case 'modifier':
             if (viewLoaders.loadModifierView) viewLoaders.loadModifierView(params);
             else console.error("loadModifierView not found in viewLoaders");
+            break;
+        case 'page-sitemap': // New case to load the Page Sitemap view
+            if (viewLoaders.loadPageSitemapView) viewLoaders.loadPageSitemapView();
+            else console.error("loadPageSitemapView not found in viewLoaders");
             break;
     }
 }

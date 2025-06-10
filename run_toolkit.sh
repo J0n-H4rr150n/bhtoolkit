@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Clear golang cache
+# go clean -cache
+
 # Navigate to the script's directory to ensure we are in the project root.
 # This makes the script runnable from anywhere, as long as it's in the project root.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"

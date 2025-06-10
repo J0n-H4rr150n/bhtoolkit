@@ -20,6 +20,7 @@ import { initChecklistTemplateView, loadChecklistTemplatesView } from './views/c
 import { initSettingsView, loadSettingsView } from './views/settingsView.js';
 import { initSitemapView, loadSitemapView } from './views/sitemapView.js'; // Assuming this is correct
 import { initModifierView, loadModifierView } from './views/modifierView.js';
+import { initPageSitemapView, loadPageSitemapView } from './views/pageSitemapView.js';
 
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -104,6 +105,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSettingsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initModifierView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
+    initPageSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
 
     await fetchAndSetInitialCurrentTarget();
 
@@ -132,7 +134,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 loadSettingsView(viewContentContainer);
             },
             loadSitemapView: () => loadSitemapView(viewContentContainer),
-            loadModifierView: (params) => loadModifierView(viewContentContainer, params)
+            loadModifierView: (params) => loadModifierView(viewContentContainer, params),
+            loadPageSitemapView: () => loadPageSitemapView(viewContentContainer)
         },
         getPlatformDetailsFunc: apiService.getPlatformDetails,
         cancelTargetEditFunc: cancelActiveTargetEdit,

@@ -1,0 +1,63 @@
+/* static/styles/pageSitemapView.css */
+
+.page-sitemap-layout {
+    display: flex;
+    gap: 20px;
+    height: calc(100vh - 180px); /* Adjust based on header and controls height */
+}
+
+#recordedPagesListContainer {
+    flex: 1;
+    max-width: 350px; /* Or your preferred width */
+    border-right: 1px solid #ccc;
+    padding-right: 20px;
+    overflow-y: auto;
+}
+
+#recordedPagesListContainer h2,
+#pageLogsContainer h2 {
+    margin-top: 0; /* Remove default top margin from h2 if any */
+    margin-bottom: 10px;
+    font-size: 1.2em;
+    color: #34495e;
+}
+
+#recordedPagesList ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.page-sitemap-item {
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.page-sitemap-item:hover {
+    background-color: #e9ecef;
+}
+
+.page-sitemap-item.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #0056b3;
+}
+.page-sitemap-item.active small {
+    color: #e0e0e0;
+}
+
+#pageLogsContainer {
+    flex: 2;
+    overflow-y: auto; /* Allow logs list to scroll if content is long */
+}
+
+.page-sitemap-logs-table {
+    /* Uses global table styles from style.css by default */
+    /* Add specific overrides here if needed */
+    margin-top: 0; /* Override default table margin-top if any */
+}
