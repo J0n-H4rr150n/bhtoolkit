@@ -69,11 +69,8 @@ func AnalyzeJSContent(jsContentBytes []byte, httpLogID int64) (map[string][]stri
 			continue
 		}
 		urlStr := strings.TrimSpace(urlMatch.URL)
-		if urlStr != "" &&
-			!strings.HasPrefix(urlStr, "data:") &&
-			!strings.HasPrefix(urlStr, "javascript:") &&
-			!strings.HasPrefix(urlStr, "mailto:") &&
-			!strings.HasPrefix(urlStr, "tel:") {
+		// Allow only http and https schemes
+		if urlStr != "" && (strings.HasPrefix(strings.ToLower(urlStr), "http:") || strings.HasPrefix(strings.ToLower(urlStr), "https:")) {
 			urlsFound = append(urlsFound, urlStr)
 
 			if stmt != nil {
@@ -115,7 +112,6 @@ func AnalyzeJSContent(jsContentBytes []byte, httpLogID int64) (map[string][]stri
 		// secrets = append(secrets, fmt.Sprintf("Potential Secret: Kind='%s', Value='%s' (Context: %s)", secretMatch.Kind, secretMatch.Value.DecodedString(), secretMatch.Context))
 		// secrets = append(secrets, fmt.Sprintf("Potential Secret: Description='%s', Match='%s' (Context: %s)", secretMatch.Description, secretMatch.Match, secretMatch.Context))
 		// secrets = append(secrets, fmt.Sprintf("Potential Secret: Kind='%s', Match='%s' (Context: %s)", secretMatch.Finding.Kind, secretMatch.Finding.Match, secretMatch.Context))
-
 
 		// Replace with a placeholder using the debug output
 		secrets = append(secrets, fmt.Sprintf("Raw Secret Match %d: %+v", i, secretMatch))

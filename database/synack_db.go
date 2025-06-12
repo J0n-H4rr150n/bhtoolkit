@@ -472,6 +472,12 @@ func ListSynackTargetsPaginated(limit int, offset int, sortByColumn string, sort
 	}
 	secondarySortColumnSQL := "st.id"
 
+	// Construct the full ORDER BY clause string safely
+	// dbSortColumnSQL is derived from dbSortColumn (allowlisted) and potentially "COLLATE NOCASE"
+	// sortOrder is validated to be "ASC" or "DESC"
+	// secondarySortColumnSQL is hardcoded "st.id"
+	orderByClause := "ORDER BY " + dbSortColumnSQL + " " + sortOrder + ", " + secondarySortColumnSQL + " " + sortOrder
+
 	query := fmt.Sprintf(`
 		SELECT
 			st.id, st.synack_target_id_str, st.codename, st.organization_id,
@@ -479,9 +485,9 @@ func ListSynackTargetsPaginated(limit int, offset int, sortByColumn string, sort
 			st.is_active, st.deactivated_at, st.notes,
 			st.first_seen_timestamp, st.last_seen_timestamp, st.analytics_last_fetched_at,
 			(SELECT COUNT(sf.id) FROM synack_findings sf WHERE sf.synack_target_db_id = st.id) as findings_count
-		%s %s
-		ORDER BY %s %s, %s %s
-		LIMIT ? OFFSET ?`, countQueryBase, whereClause, dbSortColumnSQL, sortOrder, secondarySortColumnSQL, sortOrder)
+		%s %s  /* countQueryBase, whereClause */
+		%s      /* orderByClause */
+		LIMIT ? OFFSET ?`, countQueryBase, whereClause, orderByClause)
 
 	queryArgs := append(args, limit, offset)
 	rows, err := DB.Query(query, queryArgs...)

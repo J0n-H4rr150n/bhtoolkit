@@ -1,0 +1,16 @@
+database:
+  path: "~/.config/toolkit/bountytool.db"
+
+server:
+  port: "8778"
+  log_path: "~/.config/toolkit/logs/app.log"
+
+ui:
+  showSynackSection: false
+
+logging:
+  level: "debug"
+
+proxy:
+  modifier_skip_tls_verify: true
+  modifier_allow_loopback: true

@@ -9,10 +9,13 @@ import (
 	"errors" // Import the errors package
 	"fmt"
 	"io"
+	"net" // Added for IP address parsing and checks
 	"net/http"
+	"net/url" // Added for URL parsing in SSRF check
 	"strconv"
 	"strings"
 	"time"
+	"toolkit/config" // Added for accessing app configuration
 	"toolkit/database"
 	"toolkit/logger"
 	"toolkit/models"
@@ -174,6 +177,39 @@ func parseHeadersString(headerStr string) (http.Header, error) {
 	return headers, nil
 }
 
+// isSafeURLForModifier checks if the URL is safe for the backend to request,
+// primarily to mitigate SSRF risks against the server itself.
+func isSafeURLForModifier(rawurl string, allowLoopback bool) (bool, error) {
+	parsedURL, err := url.Parse(rawurl)
+	if err != nil {
+		return false, fmt.Errorf("invalid URL: %w", err)
+	}
+
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		// Allow URLs without hostnames (e.g. relative paths if base URL is handled elsewhere, though less common for modifier)
+		// Or treat as an error depending on expected use. For now, let's assume it might be valid in some contexts.
+		// If the http.NewRequest fails later, that will catch it.
+		return true, nil
+	}
+
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		logger.Warn("isSafeURLForModifier: Could not resolve hostname '%s': %v. Proceeding with caution as the user might be targeting non-public DNS.", hostname, err)
+		return true, nil // Allow if DNS resolution fails, as user might intend to hit internal-only hostnames.
+	}
+
+	for _, ip := range ips {
+		if ip.IsLoopback() && !allowLoopback {
+			return false, fmt.Errorf("requests to loopback addresses (e.g., localhost, 127.0.0.1) are disallowed by default for security reasons")
+		}
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return false, fmt.Errorf("requests to link-local addresses (e.g., 169.254.x.x) are disallowed for security reasons")
+		}
+	}
+	return true, nil
+}
+
 // ExecuteModifiedRequestHandler handles executing a modified request.
 func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 	var payload executeModifiedRequestPayload
@@ -194,6 +230,17 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Error("ExecuteModifiedRequestHandler: Error parsing headers: %v", err)
 		http.Error(w, "Error parsing headers: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// SSRF Check
+	// Assume config.GetAppConfig() exists and returns your application's configuration.
+	// You'll need to add ModifierAllowLoopback to your config struct (e.g., in models/config.go and load it in config/config.go)
+	allowLoopback := config.AppConfig.Proxy.ModifierAllowLoopback
+	safe, errSafe := isSafeURLForModifier(payload.URL, allowLoopback)
+	if !safe {
+		logger.Error("ExecuteModifiedRequestHandler: Unsafe URL for SSRF: %s. Error: %v", payload.URL, errSafe)
+		http.Error(w, "The requested URL is considered unsafe: "+errSafe.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -223,9 +270,15 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Configure an HTTP client (e.g., to skip TLS verification for testing)
-	// WARNING: InsecureSkipVerify should be used with caution.
+	// Use a configuration setting for InsecureSkipVerify.
+	// Assume config.GetAppConfig() exists and returns your application's configuration.
+	// You'll need to add ModifierSkipTLSVerify to your config struct.
+	skipTLSVerify := config.AppConfig.Proxy.ModifierSkipTLSVerify
+	if skipTLSVerify {
+		logger.Warn("ExecuteModifiedRequestHandler: TLS certificate verification is DISABLED for outgoing modified requests.")
+	}
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify},
 	}
 	client := &http.Client{
 		Transport: tr,

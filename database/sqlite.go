@@ -401,11 +401,25 @@ func GetAllNotesPaginated(limit int, offset int, sortByColumn string, sortOrder 
 		sortOrder = "DESC"
 	}
 
-	query := fmt.Sprintf(`SELECT id, title, content, created_at, updated_at
-						   FROM notes
-						   ORDER BY %s %s, id %s
-						   LIMIT ? OFFSET ?`, sortByColumn, sortOrder, sortOrder)
+	// Build ORDER BY clause safely to prevent SQL injection.
+	// sortByColumn and sortOrder are validated above.
+	var orderByClause string
+	switch sortByColumn {
+	case "title":
+		orderByClause = "ORDER BY title " + sortOrder + ", id " + sortOrder
+	case "created_at":
+		orderByClause = "ORDER BY created_at " + sortOrder + ", id " + sortOrder
+	case "updated_at":
+		orderByClause = "ORDER BY updated_at " + sortOrder + ", id " + sortOrder
+	case "id":
+		orderByClause = "ORDER BY id " + sortOrder // Secondary sort by id is redundant if primary is id
+	default:
+		// This case should ideally not be reached due to the validation above.
+		// Defaulting to a known safe order as a fallback.
+		orderByClause = "ORDER BY updated_at DESC, id DESC"
+	}
 
+	query := fmt.Sprintf("SELECT id, title, content, created_at, updated_at FROM notes %s LIMIT ? OFFSET ?", orderByClause)
 	rows, err := DB.Query(query, limit, offset)
 	if err != nil {
 		return nil, totalRecords, fmt.Errorf("querying notes: %w", err)

@@ -31,10 +31,12 @@ type Configuration struct {
 		LogPath string `mapstructure:"log_path"`
 	} `mapstructure:"server"`
 	Proxy struct {
-		Port       string `mapstructure:"port"`
-		CACertPath string `mapstructure:"ca_cert_path"`
-		CAKeyPath  string `mapstructure:"ca_key_path"`
-		LogPath    string `mapstructure:"log_path"`
+		Port                  string `mapstructure:"port"`
+		CACertPath            string `mapstructure:"ca_cert_path"`
+		CAKeyPath             string `mapstructure:"ca_key_path"`
+		LogPath               string `mapstructure:"log_path"`
+		ModifierSkipTLSVerify bool   `mapstructure:"modifier_skip_tls_verify"`
+		ModifierAllowLoopback bool   `mapstructure:"modifier_allow_loopback"`
 	} `mapstructure:"proxy"`
 	Logging struct {
 		Level string `mapstructure:"level"`
@@ -110,6 +112,8 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 	v.SetDefault("proxy.ca_cert_path", defaults.CACertPath)
 	v.SetDefault("proxy.ca_key_path", defaults.CAKeyPath)
 	v.SetDefault("proxy.log_path", defaults.LogPathProxy)
+	v.SetDefault("proxy.modifier_skip_tls_verify", false) // Default to secure: verify TLS
+	v.SetDefault("proxy.modifier_allow_loopback", false)  // Default to secure: disallow loopback
 	v.SetDefault("logging.level", defaults.LogLevel)
 	v.SetDefault("synack.targets_url", defaults.SynackTargetsURL)
 	v.SetDefault("synack.target_id_field", "id")
@@ -244,6 +248,12 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 		logger.Info("Synack Individual Findings parsing from Analytics ENABLED. Expected JSON path: '%s'", AppConfig.Synack.FindingsArrayPathInAnalyticsJson)
 	} else {
 		logger.Info("Synack Individual Findings fetching DISABLED.")
+	}
+	if AppConfig.Proxy.ModifierSkipTLSVerify {
+		logger.Warn("Modifier: TLS certificate verification for outgoing requests is DISABLED.")
+	}
+	if AppConfig.Proxy.ModifierAllowLoopback {
+		logger.Warn("Modifier: Requests to loopback addresses are ALLOWED.")
 	}
 
 	logger.Debug("Final AppConfig Initialized: %+v", AppConfig)
