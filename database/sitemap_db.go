@@ -174,7 +174,7 @@ func ensurePathNode(segments []string, rootNodes *[]*models.SitemapTreeNode, nod
 	return parentNode
 }
 
-// BuildSitemapTree constructs the sitemap tree from log entries and manual entries.
+// BuildSitemapTree constructs the sitemap tree from log entries and manual entries. Returns the top-level nodes.
 func BuildSitemapTree(logEntries []LogEntryForSitemap, manualEntries []models.SitemapManualEntry) []*models.SitemapTreeNode {
 	rootNodes := []*models.SitemapTreeNode{}
 	nodesMap := make(map[string]*models.SitemapTreeNode)
@@ -210,12 +210,15 @@ func BuildSitemapTree(logEntries []LogEntryForSitemap, manualEntries []models.Si
 		leafNode := ensurePathNode(segments, &rootNodes, nodesMap)
 		if leafNode != nil {
 			endpoint := models.SitemapEndpoint{
-				HTTPTrafficLogID: logEntry.ID,
+				// Fix 1: Convert logEntry.ID (int64) to sql.NullInt64
+				HTTPTrafficLogID: sql.NullInt64{Int64: logEntry.ID, Valid: logEntry.ID != 0}, // Assuming ID 0 is invalid/not set
 				Method:           logEntry.RequestMethod,
 				Path:             endpointPath,                // Use the path with query string
 				StatusCode:       logEntry.ResponseStatusCode, // Direct assignment, already sql.NullInt64
 				ResponseSize:     logEntry.ResponseBodySize,   // Direct assignment, already sql.NullInt64
 				IsFavorite:       logEntry.IsFavorite,         // Direct assignment, already sql.NullBool
+				IsManuallyAdded:  false,                       // Log entries are not manually added
+				ManualEntryID:    sql.NullInt64{},             // Log entries don't have a manual entry ID
 			}
 			leafNode.Endpoints = append(leafNode.Endpoints, endpoint)
 		}
@@ -231,12 +234,18 @@ func BuildSitemapTree(logEntries []LogEntryForSitemap, manualEntries []models.Si
 		folderNode := ensurePathNode(segments, &rootNodes, nodesMap)
 		if folderNode != nil {
 			endpoint := models.SitemapEndpoint{
-				Method:           manualEntry.RequestMethod,
-				Path:             manualEntry.RequestPath, // This should ideally include query for manual entries too
+				Method: manualEntry.RequestMethod,
+				Path:   manualEntry.RequestPath, // This should ideally include query for manual entries too
+				// Fix 3: Assign manualEntry.HTTPTrafficLogID (sql.NullInt64) directly
+				HTTPTrafficLogID: manualEntry.HTTPTrafficLogID,
 				IsManuallyAdded:  true,
-				ManualEntryID:    manualEntry.ID,
+				// Fix 2: Convert manualEntry.ID (int64) to sql.NullInt64
+				ManualEntryID:    sql.NullInt64{Int64: manualEntry.ID, Valid: manualEntry.ID != 0}, // Assuming ID 0 is invalid/not set
 				ManualEntryNotes: manualEntry.Notes,
-				HTTPTrafficLogID: manualEntry.HTTPTrafficLogID.Int64,
+				// Add default/zero values for other fields
+				StatusCode:   sql.NullInt64{},
+				ResponseSize: sql.NullInt64{},
+				IsFavorite:   sql.NullBool{},
 			}
 			folderNode.Endpoints = append(folderNode.Endpoints, endpoint)
 		}

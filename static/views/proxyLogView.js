@@ -1,3 +1,4 @@
+// static/views/proxyLogView.js
 import { escapeHtml, escapeHtmlAttribute, debounce, downloadCSV } from '../utils.js';
 
 // Module-level variables for services
@@ -31,13 +32,26 @@ function formatBody(body, contentType = '') {
     if (!body) return '(Empty body)';
     try {
         const textContent = atob(body);
+
         if (contentType.toLowerCase().includes('json')) {
             try {
+                // If it's JSON, pretty-print it.
+                // JSON.stringify itself will escape special characters within strings.
+                // The output of JSON.stringify is safe to be set as textContent.
                 return JSON.stringify(JSON.parse(textContent), null, 2);
-            } catch (e) { /* fallback to text */ }
+            } catch (e) {
+                // If JSON parsing fails, treat it as plain text and escape it.
+                // Replace control characters for better readability.
+                return escapeHtml(textContent.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
+            }
         }
+        // For non-JSON content, escape HTML entities.
+        // Also replace control characters with a '.' for better readability.
         return escapeHtml(textContent.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
     } catch (e) {
+        // If atob fails (not valid Base64), or for any other error,
+        // display the raw body (truncated) after escaping it.
+        // This ensures that even malformed base64 is treated as text.
         return escapeHtml(body.substring(0, 2000) + (body.length > 2000 ? "\n... (truncated)" : ""));
     }
 }
@@ -177,7 +191,7 @@ function handleViewLogDetail(event) {
         // to prevent double slashes if detailHashPath already starts with one.
         const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
         const fullUrl = baseUrl + detailHashPath;
-        
+
         window.open(fullUrl, '_blank'); // Open in new tab
     } else {
         // Default action: navigate in the current tab using hash change
@@ -192,7 +206,7 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
         console.error("Proxy log list or pagination container not found.");
         return;
     }
-    
+
     const appState = stateService.getState(); // Still get currentTargetId etc. from global state
     const { currentTargetId, currentTargetName } = appState;
 
@@ -202,7 +216,7 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
 
     console.log(`[ProxyLogView] fetchAndDisplayProxyLogs using filterMethod: "${filterMethod}"`, activeParams);
     const globalTableLayouts = appState.globalTableLayouts;
-    const tableKey = 'proxyLogTable'; 
+    const tableKey = 'proxyLogTable';
     const columnConfig = appState.paginationState.proxyLogTableLayout;
 
     listDiv.innerHTML = `<p>Fetching proxy logs for target ${escapeHtml(currentTargetName)} (ID: ${currentTargetId}), page ${currentPage}, sort by ${sortBy} ${sortOrder}...</p>`;
@@ -249,7 +263,7 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
             { key: 'size', label: 'Size (B)', sortKey: 'response_body_size', filter: false },
             { key: 'actions', label: 'Actions', sortKey: null, filter: false }
         ];
-        
+
         // For debugging, let's log what layouts are available when rendering
         console.log("[ProxyLogView] fetchAndDisplayProxyLogs - globalTableLayouts:", JSON.parse(JSON.stringify(globalTableLayouts)));
         console.log("[ProxyLogView] fetchAndDisplayProxyLogs - tableKey:", tableKey);
@@ -295,19 +309,20 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                 } else {
                     itemIndex = (currentDisplayPage - 1) * limit + index + 1;
                 }
-                const safeURL = escapeHtml(log.request_url);
+                const requestURLString = log.request_url?.String || ''; // Access the string value, default to empty string if null/invalid
+                const safeURL = escapeHtml(requestURLString);
                 const ts = log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A';
                 tableHTML += `<tr>
-                    <td>${itemIndex}</td><td>${ts}</td><td>${escapeHtml(log.request_method)}</td>
+                    <td>${itemIndex}</td><td>${ts}</td><td>${escapeHtml(log.request_method?.String || '')}</td>
                     <td class="proxy-log-url-cell" title="${safeURL}">${safeURL}</td>
                     <td>${log.response_status_code || '-'}</td>
                     <td title="${escapeHtmlAttribute(log.response_content_type || '-')}">${escapeHtml(log.response_content_type?.substring(0,30) || '-')}${log.response_content_type && log.response_content_type.length > 30 ? '...' : ''}</td>
                     <td>${log.response_body_size || 0}</td>
                     <td class="actions-cell">
                         <span class="favorite-toggle table-row-favorite-toggle ${log.is_favorite ? 'favorited' : ''}" data-log-id="${log.id}" data-is-favorite="${log.is_favorite ? 'true' : 'false'}" title="Toggle Favorite" style="cursor: pointer; margin-right: 8px; font-size: 1.2em; vertical-align: middle;">${log.is_favorite ? '★' : '☆'}</span>
-                        <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button>                        
-                        <button class="action-button add-to-sitemap" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method)}" data-log-path="${escapeHtmlAttribute(log.request_url.split('?')[0])}" title="Add to Sitemap">🗺️</button>
-                        <button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method)}" data-log-path="${escapeHtmlAttribute(log.request_url.split('?')[0])}" title="More Actions">⋮</button>
+                        <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button> <!-- log.request_method is sql.NullString -->
+                        <button class="action-button add-to-sitemap" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="Add to Sitemap">🗺️</button> <!-- log.request_url is sql.NullString -->
+                        <button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="More Actions">⋮</button> <!-- log.request_url is sql.NullString -->
                     </td></tr>`;
             });
             tableHTML += `</tbody></table>`;
@@ -333,11 +348,11 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                         event.stopPropagation();
                     });
                 });
-                
+
                 if (tableService) {
                     tableService.makeTableColumnsResizable('proxyLogTableHead');
                 }
-            } else if (logs.length > 0) { 
+            } else if (logs.length > 0) {
                 console.error("[ProxyLogView] Table head 'proxyLogTableHead' not found after rendering table (using requestAnimationFrame).");
             }
 
@@ -393,7 +408,7 @@ function openMoreActionsDropdown(event) {
             <li><a href="#proxy-log-detail?id=${logId}&tab=jsAnalysisTab" data-action="analyze-js">Analyze JS</a></li>
             <li><a href="#" data-action="add-to-sitemap-dropdown" data-log-id="${logId}">Add to Sitemap</a></li>
             <li><a href="#" data-action="send-to-findings" data-log-id="${logId}">Send to Findings (TBD)</a></li>
-            <li><a href="#" data-action="send-to-repeater">Send to Repeater (TBD)</a></li>
+            <li><a href="#" data-action="send-to-modifier-dropdown" data-log-id="${logId}">Send to Modifier</a></li>
             <li><a href="#" data-action="run-gf">Run GF Patterns (TBD)</a></li>
         </ul>
     `;
@@ -419,6 +434,13 @@ function openMoreActionsDropdown(event) {
     dropdown.querySelector('a[data-action="send-to-findings"]').addEventListener('click', (e) => {
         e.preventDefault();
         uiService.showModalMessage("Not Implemented", `Sending log ID ${logId} to Findings is not yet implemented.`);
+        closeMoreActionsDropdown();
+    });
+
+    // Add event listener for "Send to Modifier"
+    dropdown.querySelector('a[data-action="send-to-modifier-dropdown"]')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await handleSendLogToModifier(logId); // You'll need to create or adapt this function
         closeMoreActionsDropdown();
     });
 
@@ -551,12 +573,12 @@ async function triggerAndFetchParamAnalysis(targetId, targetName) {
 
     try {
         const analysisSummary = await apiService.analyzeTargetParameters(targetId);
-        uiService.showModalMessage("Analysis Complete", 
+        uiService.showModalMessage("Analysis Complete",
             `Scanned: ${analysisSummary.total_logs_scanned} logs.<br>
              Processed: ${analysisSummary.parameterized_urls_processed} URLs with params.<br>
              New Unique Entries: ${analysisSummary.new_unique_entries_found}.<br>
              Now fetching results...`, true);
-        
+
         // Reset pagination for this view and fetch the first page
         const appState = stateService.getState();
         const currentParamAnalysisState = appState.paginationState.parameterizedUrlsView;
@@ -580,8 +602,8 @@ async function displayParameterizedURLs() {
     const appState = stateService.getState();
     const { currentTargetId, currentTargetName } = appState;
     const { currentPage, limit, sortBy, sortOrder, filterRequestMethod, filterPathSearch, filterParamKeysSearch } = appState.paginationState.parameterizedUrlsView;
-    const tableKey = 'parameterizedUrlsTable'; // For column layouts
-    const columnConfig = appState.paginationState.parameterizedUrlsTableLayout;
+    const tableKey = 'parameterizedUrlsTable';
+    const columnConfig = appState.paginationState.parameterizedUrlsTableLayout; // Corrected path
     const globalTableLayouts = appState.globalTableLayouts || {};
     const savedTableWidths = globalTableLayouts[tableKey] || {};
 
@@ -649,10 +671,10 @@ async function displayParameterizedURLs() {
                 const lastSeen = new Date(pUrl.last_seen_at).toLocaleString();
                 tableHTML += `<tr>
                     <td>${pUrl.id}</td>
-                    <td>${escapeHtml(pUrl.request_method)}</td>
-                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.request_path)}">${escapeHtml(pUrl.request_path)}</td>
+                    <td>${escapeHtml(pUrl.request_method?.String || '')}</td>
+                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.request_path?.String || '')}">${escapeHtml(pUrl.request_path?.String || '')}</td>
                     <td title="${escapeHtmlAttribute(pUrl.param_keys)}">${escapeHtml(pUrl.param_keys)}</td>
-                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.example_full_url)}">${escapeHtml(pUrl.example_full_url)}</td>
+                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.example_full_url?.String || '')}">${escapeHtml(pUrl.example_full_url?.String || '')}</td>
                     <td>${discovered}</td>
                     <td>${lastSeen}</td>
                     <td class="actions-cell">
@@ -735,6 +757,25 @@ function applyParamUrlFilters() {
     displayParameterizedURLs();
 }
 
+async function handleSendLogToModifier(logId) {
+    if (!logId) {
+        uiService.showModalMessage("Error", "Log ID not found for sending to Modifier.");
+        return;
+    }
+    uiService.showModalMessage("Sending...", `Sending log ID ${logId} to Modifier...`, true, 1000);
+    try {
+        // The addModifierTask API expects an object, even if just with http_traffic_log_id
+        const newTask = await apiService.addModifierTask({ http_traffic_log_id: parseInt(logId, 10) });
+        uiService.showModalMessage("Sent to Modifier", `Task "${escapeHtml(newTask.name || `Task ${newTask.id}`)}" created from log ${logId}. Navigating...`, true, 2000);
+        // Navigate to the modifier view with the new task ID
+        window.location.hash = `#modifier?task_id=${newTask.id}`;
+    } catch (error) {
+        console.error("Error sending log to modifier:", error);
+        uiService.showModalMessage("Error", `Failed to send log to Modifier: ${escapeHtml(error.message)}`);
+    }
+}
+
+
 async function handleSendToModifier(event) {
     const button = event.currentTarget;
     const pUrlId = button.dataset.purlId;
@@ -758,7 +799,7 @@ async function handleSendToModifier(event) {
         window.location.hash = `#modifier?task_id=${newTask.id}`;
     } catch (error) {
         console.error("Error sending item to modifier:", error);
-        uiService.showModalMessage("Error", `Failed to send to Modifier: ${error.message}`);
+        uiService.showModalMessage("Error", `Failed to send to Modifier: ${escapeHtml(error.message)}`);
     }
 }
 
@@ -871,14 +912,14 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
     if (!currentTargetId) {
         const allLogsContent = document.getElementById('allLogsTab');
         if (allLogsContent) allLogsContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to view its proxy log.</p>';
-        
+
         const paramAnalysisContent = document.getElementById('paramAnalysisTab');
         if (paramAnalysisContent) paramAnalysisContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to perform analysis.</p>';
-        
+
         // Also disable the run button if no target
         const runBtn = document.getElementById('runParamAnalysisBtn');
         if (runBtn) runBtn.disabled = true;
-        
+
         return;
     }
 
@@ -922,7 +963,7 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
     // Add event listener for the new "Run Parameter Analysis" button
     const runParamAnalysisBtn = document.getElementById('runParamAnalysisBtn');
     // currentTargetId is confirmed if we reach here, so no need to check it again for the listener
-    if (runParamAnalysisBtn) { 
+    if (runParamAnalysisBtn) {
         runParamAnalysisBtn.addEventListener('click', () => {
             triggerAndFetchParamAnalysis(currentTargetId, currentTargetName);
         });
@@ -1093,12 +1134,12 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
     const appState = stateService.getState();
     const { sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = appState.paginationState.proxyLog;
     const navParams = { sortBy, sortOrder, favorites_only: filterFavoritesOnly, method: filterMethod, status: filterStatus, type: filterContentType, search: filterSearchText };
-    
+
     // Check for tab parameter from hash
     const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
     const requestedTab = hashParams.get('tab');
     console.log("[ProxyLogDetailView] Requested tab from hash:", requestedTab);
-    
+
     try {
         const logEntry = await apiService.getProxyLogDetail(logId, navParams);
         let reqHeaders = {}; try { reqHeaders = JSON.parse(logEntry.request_headers || '{}'); } catch(e) { console.warn("Error parsing request headers JSON", e); }
@@ -1117,8 +1158,8 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
             </div>
             <div class="log-meta-info" style="margin-bottom: 15px; padding: 10px; background-color: #f9f9f9; border-radius: 4px;">
                 <p><strong>Timestamp:</strong> ${new Date(logEntry.timestamp).toLocaleString()}</p>
-                <p><strong>URL:</strong> ${escapeHtml(logEntry.request_url)}</p>
-                <p><strong>Method:</strong> ${escapeHtml(logEntry.request_method)}</p>
+                <p><strong>URL:</strong> ${escapeHtml(logEntry.request_url?.String || '')}</p> <!-- Access .String -->
+                <p><strong>Method:</strong> ${escapeHtml(logEntry.request_method?.String || '')}</p> <!-- Access .String -->
                 <p><strong>Status:</strong> ${logEntry.response_status_code || '-'}</p>
                 <p><strong>Duration:</strong> ${logEntry.duration_ms || 0} ms</p>
                 ${logEntry.target_id ? `<p><strong>Target ID:</strong> ${logEntry.target_id}</p>` : ''}
@@ -1128,10 +1169,45 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 <button class="tab-button" data-tab="responseTab">Response</button>
                 <button class="tab-button" data-tab="jsAnalysisTab">JS Analysis</button>
             </div>
-            <div id="requestTab" class="tab-content"><h3>Request Details</h3><p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.request_http_version)}</p><h4>Headers:</h4><pre class="headers-box">${formatHeaders(reqHeaders)}</pre><h4>Body:</h4><pre class="body-box">${formatBody(logEntry.request_body, reqHeaders['Content-Type']?.[0])}</pre></div>
-            <div id="responseTab" class="tab-content"><h3>Response Details</h3><p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.response_http_version)}</p><h4>Headers:</h4><pre class="headers-box">${formatHeaders(resHeaders)}</pre><h4>Body: (${logEntry.response_body_size} bytes)</h4><pre class="body-box">${formatBody(logEntry.response_body, logEntry.response_content_type)}</pre></div>
+            <div id="requestTab" class="tab-content active">
+                <h3>Request Details</h3>
+                <p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.request_http_version)}</p>
+                <h4>Headers:</h4>
+                <pre class="headers-box" id="requestHeadersPre"></pre> <!-- Give it an ID -->
+                <h4>Body:</h4>
+                <pre class="body-box" id="requestBodyPre"></pre> <!-- Give it an ID -->
+            </div>
+            <div id="responseTab" class="tab-content">
+                <h3>Response Details</h3>
+                <p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.response_http_version)}</p>
+                <h4>Headers:</h4>
+                <pre class="headers-box" id="responseHeadersPre"></pre> <!-- Give it an ID -->
+                <h4>Body: (${logEntry.response_body_size} bytes)</h4>
+                <pre class="body-box" id="responseBodyPre"></pre> <!-- Give it an ID -->
+            </div>
             <div id="jsAnalysisTab" class="tab-content"><h3>JavaScript Analysis Results</h3><div style="margin-bottom: 10px;"><button id="exportJsAnalysisCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button></div><div id="jsAnalysisResultsContent"><p>Click "Analyze JS" to perform analysis.</p></div></div>
-            <div class="notes-section" style="margin-top: 20px;"><h3>Notes:</h3><textarea id="logEntryNotes" rows="5" style="width: 100%;">${escapeHtml(logEntry.notes || '')}</textarea><button id="saveLogEntryNotesBtn" class="primary" data-log-id="${logEntry.id}" style="margin-top: 10px;">Save Notes</button><div id="saveNotesMessage" class="message-area" style="margin-top: 5px;"></div></div>`;
+            <div class="notes-section" style="margin-top: 20px;"><h3>Notes:</h3><textarea id="logEntryNotes" rows="5" style="width: 100%;">${escapeHtml(logEntry.notes && logEntry.notes.Valid ? logEntry.notes.String : '')}</textarea><button id="saveLogEntryNotesBtn" class="primary" data-log-id="${logEntry.id}" style="margin-top: 10px;">Save Notes</button><div id="saveNotesMessage" class="message-area" style="margin-top: 5px;"></div></div>`;
+
+        // Safely set the response body content
+        const responseBodyPre = document.getElementById('responseBodyPre');
+        if (responseBodyPre) { // For Response
+            responseBodyPre.textContent = formatBody(logEntry.response_body, logEntry.response_content_type);
+        }
+        // Safely set the request body content
+        const requestBodyPre = document.getElementById('requestBodyPre');
+        if (requestBodyPre) { // For Request
+            requestBodyPre.textContent = formatBody(logEntry.request_body, reqHeaders['Content-Type']?.[0]);
+        }
+        // Safely set the request headers
+        const requestHeadersPre = document.getElementById('requestHeadersPre');
+        if (requestHeadersPre) {
+            requestHeadersPre.textContent = formatHeaders(reqHeaders);
+        }
+        // Safely set the response headers
+        const responseHeadersPre = document.getElementById('responseHeadersPre');
+        if (responseHeadersPre) {
+            responseHeadersPre.textContent = formatHeaders(resHeaders);
+        }
 
         document.querySelectorAll('.tab-button').forEach(button => {
             button.addEventListener('click', () => {

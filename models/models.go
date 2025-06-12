@@ -146,28 +146,29 @@ type DiscoveredURL struct {
 }
 
 type HTTPTrafficLog struct {
-	ID                   int64     `json:"id" readOnly:"true"`
-	TargetID             *int64    `json:"target_id,omitempty"`
-	Timestamp            time.Time `json:"timestamp" readOnly:"true"`
-	RequestMethod        string    `json:"request_method" example:"GET"`
-	RequestURL           string    `json:"request_url" example:"https://example.com/api/data?id=123"`
-	RequestHTTPVersion   string    `json:"request_http_version" example:"HTTP/1.1"`
-	RequestHeaders       string    `json:"request_headers" example:"{\"Content-Type\":[\"application/json\"]}"`
-	RequestBody          []byte    `json:"request_body,omitempty"`
-	ResponseStatusCode   int       `json:"response_status_code,omitempty" example:"200"`
-	ResponseReasonPhrase string    `json:"response_reason_phrase,omitempty" example:"OK"`
-	ResponseHTTPVersion  string    `json:"response_http_version,omitempty" example:"HTTP/1.1"`
-	ResponseHeaders      string    `json:"response_headers,omitempty" example:"{\"Content-Type\":[\"application/json\"]}"`
-	ResponseBody         []byte    `json:"response_body,omitempty"`
-	ResponseContentType  string    `json:"response_content_type,omitempty" example:"application/json"`
-	ResponseBodySize     int64     `json:"response_body_size,omitempty" example:"1024"`
-	DurationMs           int64     `json:"duration_ms,omitempty" example:"150"`
-	ClientIP             string    `json:"client_ip,omitempty" example:"192.168.1.100"`
-	ServerIP             string    `json:"server_ip,omitempty" example:"203.0.113.45"`
-	IsHTTPS              bool      `json:"is_https" example:"true"`
-	IsPageCandidate      bool      `json:"is_page_candidate" example:"false"`
-	Notes                string    `json:"notes,omitempty"`
-	IsFavorite           bool      `json:"is_favorite"` // Added for favorite logs
+	ID                   int64          `json:"id" readOnly:"true"`
+	TargetID             *int64         `json:"target_id,omitempty"`
+	Timestamp            time.Time      `json:"timestamp" readOnly:"true"`
+	RequestMethod        sql.NullString `json:"request_method" example:"GET"`
+	RequestURL           sql.NullString `json:"request_url" example:"https://example.com/api/data?id=123"`
+	RequestHTTPVersion   string         `json:"request_http_version" example:"HTTP/1.1"`
+	RequestHeaders       sql.NullString `json:"request_headers,omitempty" example:"{\"Content-Type\":[\"application/json\"]}"`
+	RequestBody          []byte         `json:"request_body,omitempty"`
+	ResponseStatusCode   int            `json:"response_status_code,omitempty" example:"200"`
+	ResponseReasonPhrase string         `json:"response_reason_phrase,omitempty" example:"OK"`
+	ResponseHTTPVersion  string         `json:"response_http_version,omitempty" example:"HTTP/1.1"`
+	ResponseHeaders      string         `json:"response_headers,omitempty" example:"{\"Content-Type\":[\"application/json\"]}"`
+	ResponseBody         []byte         `json:"response_body,omitempty"`
+	ResponseContentType  string         `json:"response_content_type,omitempty" example:"application/json"`
+	ResponseBodySize     int64          `json:"response_body_size,omitempty" example:"1024"`
+	DurationMs           int64          `json:"duration_ms,omitempty" example:"150"`
+	ClientIP             string         `json:"client_ip,omitempty" example:"192.168.1.100"`
+	ServerIP             string         `json:"server_ip,omitempty" example:"203.0.113.45"`
+	IsHTTPS              bool           `json:"is_https" example:"true"`
+	IsPageCandidate      bool           `json:"is_page_candidate" example:"false"`
+	Notes                sql.NullString `json:"notes,omitempty"`
+	IsFavorite           bool           `json:"is_favorite"`                       // Added for favorite logs
+	SourceModifierTaskID *int64         `json:"source_modifier_task_id,omitempty"` // Link to the modifier task
 }
 
 type WebPage struct {

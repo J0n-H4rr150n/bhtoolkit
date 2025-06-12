@@ -234,7 +234,7 @@ async function loadView(viewId, params = {}) {
             else console.error("loadProxyLogDetailView not found in viewLoaders");
             break;
         case 'sitemap':
-            if (viewLoaders.loadSitemapView) viewLoaders.loadSitemapView(); // Use the loader
+            if (viewLoaders.loadSitemapView) viewLoaders.loadSitemapView();
             else console.error("loadSitemapView not found in viewLoaders");
             break;
         case 'discovered-urls': if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Discovered URLs</h1><p>List of discovered URLs will be here.</p>`; break;
@@ -251,20 +251,22 @@ async function loadView(viewId, params = {}) {
             if (viewLoaders.loadChecklistTemplatesView) viewLoaders.loadChecklistTemplatesView();
             else console.error("loadChecklistTemplatesView not found in viewLoaders");
             break;
-        case 'visualizer': 
-            if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Visualizer</h1><p>Cytoscape visualization will be here.</p>`; break;
         case 'settings': 
-            if (viewLoaders.loadSettingsView) viewLoaders.loadSettingsView(); // Use the loader
+            if (viewLoaders.loadSettingsView) viewLoaders.loadSettingsView();
             else console.error("loadSettingsView not found in viewLoaders");
             break;
         case 'modifier':
             if (viewLoaders.loadModifierView) viewLoaders.loadModifierView(params);
             else console.error("loadModifierView not found in viewLoaders");
             break;
-        case 'page-sitemap': // New case to load the Page Sitemap view
+        case 'page-sitemap':
             if (viewLoaders.loadPageSitemapView) viewLoaders.loadPageSitemapView();
             else console.error("loadPageSitemapView not found in viewLoaders");
             break;
+        case 'visualizer':
+            if (viewLoaders.loadVisualizerView) viewLoaders.loadVisualizerView();
+            else console.error("loadVisualizerView not found in viewLoaders");
+             break;
     }
 }
 

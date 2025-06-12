@@ -2,23 +2,23 @@ package models
 
 import (
 	"database/sql"
-	"time"
 )
 
 // ModifierTask represents a task sent to the HTTP request modifier.
 type ModifierTask struct {
-	ID                 int64         `json:"id"`
-	TargetID           sql.NullInt64 `json:"target_id,omitempty"` // Can be null if not tied to a specific target
-	Name               string        `json:"name"`
-	BaseRequestURL     string        `json:"base_request_url"`
-	BaseRequestMethod  string        `json:"base_request_method"`
-	BaseRequestHeaders string        `json:"base_request_headers"` // Stored as JSON string
-	BaseRequestBody    string        `json:"base_request_body"`    // Stored as Base64 string
-	DisplayOrder       int           `json:"display_order"`
-	CreatedAt          time.Time     `json:"created_at"`
-	UpdatedAt          time.Time     `json:"updated_at"`
-	SourceLogID        sql.NullInt64 `json:"source_log_id,omitempty"`
-	SourceParamURLID   sql.NullInt64 `json:"source_param_url_id,omitempty"`
+	ID                 int64          `json:"id"`
+	TargetID           sql.NullInt64  `json:"target_id,omitempty"` // Can be null if not tied to a specific target
+	Name               string         `json:"name"`
+	BaseRequestURL     string         `json:"base_request_url"`
+	BaseRequestMethod  string         `json:"base_request_method"`
+	BaseRequestHeaders sql.NullString `json:"base_request_headers,omitempty"` // Stored as JSON string
+	BaseRequestBody    sql.NullString `json:"base_request_body,omitempty"`    // Stored as Base64 string
+	DisplayOrder       int            `json:"display_order"`
+	CreatedAt          sql.NullTime   `json:"created_at"`                     // Changed to sql.NullTime
+	UpdatedAt          sql.NullTime   `json:"updated_at"`                     // Changed to sql.NullTime
+	LastExecutedLogID  sql.NullInt64  `json:"last_executed_log_id,omitempty"` // Link to the last executed log entry
+	SourceLogID        sql.NullInt64  `json:"source_log_id,omitempty"`
+	SourceParamURLID   sql.NullInt64  `json:"source_param_url_id,omitempty"`
 }
 
 // AddModifierTaskRequest defines the payload for creating a new modifier task.

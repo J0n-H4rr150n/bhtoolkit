@@ -20,5 +20,3 @@ func Base64Encode(data []byte) string {
 	}
 	return base64.StdEncoding.EncodeToString(data)
 }
-
-// You might also need a Base64Decode function if you store base64 and need to read it back as bytes.

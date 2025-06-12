@@ -827,3 +827,39 @@ export async function deleteModifierTask(taskId) {
     });
     return handleResponse(response); // Expects 200 OK or 204 No Content on success
 }
+
+/**
+ * Finds comments in a proxy log entry's response body.
+ * @param {number} httpLogId - The ID of the HTTP log entry.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of comment findings.
+ */
+export async function findComments(httpLogId) {
+	const response = await fetch(`${API_BASE}/traffic-log/analyze/comments`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ http_log_id: httpLogId })
+	});
+	return handleResponse(response);
+}
+
+// --- Visualizer API ---
+
+/**
+ * Fetches sitemap graph data for a given target.
+ * @param {string|number} targetId - The ID of the target.
+ * @returns {Promise<Object>} - A promise that resolves with the graph data (nodes and edges).
+ */
+export async function getSitemapGraphData(targetId) {
+    const response = await fetch(`${API_BASE}/visualizer/sitemap-graph?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
+/**
+ * Fetches page sitemap graph data for a given target.
+ * @param {string|number} targetId - The ID of the target.
+ * @returns {Promise<Object>} - A promise that resolves with the graph data (nodes and edges).
+ */
+export async function getPageSitemapGraphData(targetId) {
+    const response = await fetch(`${API_BASE}/visualizer/page-sitemap-graph?target_id=${targetId}`);
+    return handleResponse(response);
+}

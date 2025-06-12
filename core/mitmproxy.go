@@ -525,10 +525,10 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 			requestData := &models.HTTPTrafficLog{
 				TargetID:           currentTargetIDForLog, // Use the determined target ID
 				Timestamp:          startTime,
-				RequestMethod:      r.Method,
-				RequestURL:         r.URL.String(),
+				RequestMethod:      models.NullString(r.Method),
+				RequestURL:         models.NullString(r.URL.String()),
 				RequestHTTPVersion: r.Proto,
-				RequestHeaders:     string(reqHeadersJson),
+				RequestHeaders:     models.NullString(string(reqHeadersJson)),
 				RequestBody:        reqBodyBytes,
 				ClientIP:           r.RemoteAddr,
 				IsHTTPS:            isCurrentSessionHTTPS,

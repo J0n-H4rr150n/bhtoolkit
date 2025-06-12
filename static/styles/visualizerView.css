@@ -1,0 +1,51 @@
+/* /mnt/data_drive/code/bhtoolkit/static/styles/visualizerView.css */
+
+/* Styles for tabs specifically within the Visualizer view */
+.tabs { /* This will apply to any .tabs div, ensure specificity if needed or that this is the desired global tab style */
+    display: flex;
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 15px;
+}
+
+.tab-button { /* This will apply to any .tab-button, ensure specificity if needed */
+    padding: 10px 15px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-bottom: none;
+    background-color: #f1f1f1;
+    margin-right: 2px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    transition: background-color 0.3s ease;
+}
+
+.tab-button:hover {
+    background-color: #ddd;
+}
+
+.tab-button.active {
+    background-color: #fff;
+    border-color: #ccc;
+    border-bottom: 1px solid #fff; /* Makes it look like it's part of the content area */
+    position: relative;
+    top: 1px; /* Lifts the active tab slightly */
+    /* Note: The generic .tab-button.active in style.css has font-weight: bold and color: #007bff. 
+       If you want those here, add them. Otherwise, these styles will override. */
+}
+
+.tab-content { /* This will apply to any .tab-content */
+    display: none; /* Hide inactive tab content */
+    padding: 15px;
+    border: 1px solid #ccc;
+    border-top: none;
+    border-radius: 0 0 4px 4px; /* Rounded corners for the bottom */
+}
+
+.tab-content.active {
+    display: block; /* Show active tab content */
+}
+
+/* Ensure graph containers within tabs are visible when tab is active */
+.tab-content.active .graph-container {
+    display: block !important; /* Override the inline style if necessary */
+}

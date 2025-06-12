@@ -230,7 +230,10 @@ export function restorePlatformRow(platformId, updatedName = null, API_BASE, sho
 
      const displayName = updatedName !== null ? updatedName : platformRow.getAttribute('data-platform-name');
 
-     if (nameCell) nameCell.innerHTML = displayName;
+    if (nameCell) {
+        // Use textContent for safer display of the platform name
+        nameCell.textContent = displayName; // displayName is already HTML-escaped
+    }
      platformRow.setAttribute('data-platform-name', displayName);
      const originalActionsHTML = actionsCell ? actionsCell.getAttribute('data-original-content') : null;
 

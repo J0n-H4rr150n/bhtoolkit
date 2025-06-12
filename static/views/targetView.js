@@ -140,10 +140,16 @@ function restoreTargetRow(targetId, updatedTargetData = null) {
     if (updatedTargetData) {
         const safeLink = escapeHtml(updatedTargetData.link);
         const safeNotes = escapeHtml(updatedTargetData.notes || '');
-        if (linkCell) linkCell.innerHTML = `<a href="${safeLink}" target="_blank" title="${safeLink}">${safeLink.length > 40 ? safeLink.substring(0, 37) + '...' : safeLink}</a>`;
+        // Link cell still needs innerHTML for the <a> tag, but its content is escaped.
+        if (linkCell) {
+            const linkDisplay = safeLink.length > 40 ? safeLink.substring(0, 37) + '...' : safeLink;
+            linkCell.innerHTML = `<a href="${escapeHtmlAttribute(updatedTargetData.link)}" target="_blank" title="${safeLink}">${linkDisplay}</a>`;
+        }
         if (notesCell) {
-            notesCell.textContent = `${safeNotes.substring(0, 50)}${safeNotes.length > 50 ? '...' : ''}`;
-            notesCell.setAttribute('title', safeNotes);
+            // Use textContent for the notes cell for maximum safety.
+            // The full note is in the title, which is an attribute and thus safe.
+            notesCell.textContent = safeNotes.substring(0, 50) + (safeNotes.length > 50 ? '...' : '');
+            notesCell.setAttribute('title', safeNotes); // Keep full notes in title
         }
     } else { // Restore from data-original-content if no new data (i.e., cancellation)
         if (linkCell && linkCell.hasAttribute('data-original-content')) linkCell.innerHTML = linkCell.getAttribute('data-original-content');

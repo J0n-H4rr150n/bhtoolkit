@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -58,13 +59,13 @@ func AnalyzeTargetForParameterizedURLsHandler(w http.ResponseWriter, r *http.Req
 
 	var processedCount, newEntriesCount int
 	for _, log := range logs {
-		if !strings.Contains(log.RequestURL, "?") {
+		if !log.RequestURL.Valid || !strings.Contains(log.RequestURL.String, "?") {
 			continue // Skip URLs without query parameters
 		}
 
-		paramKeys, requestPath, err := getParamKeysFromURL(log.RequestURL)
+		paramKeys, requestPath, err := getParamKeysFromURL(log.RequestURL.String)
 		if err != nil {
-			logger.Info("AnalyzeTargetForParameterizedURLsHandler: Could not parse URL '%s' from log ID %d: %v (Skipping)", log.RequestURL, log.ID, err) // Changed to Info if Warn is not available
+			logger.Info("AnalyzeTargetForParameterizedURLsHandler: Could not parse URL '%s' from log ID %d: %v (Skipping)", log.RequestURL.String, log.ID, err) // Changed to Info if Warn is not available
 			continue
 		}
 
@@ -73,12 +74,12 @@ func AnalyzeTargetForParameterizedURLsHandler(w http.ResponseWriter, r *http.Req
 		}
 
 		pURL := models.ParameterizedURL{
-			TargetID:         targetID,
+			TargetID:         sql.NullInt64{Int64: targetID, Valid: true},
 			HTTPTrafficLogID: log.ID,
-			RequestMethod:    log.RequestMethod,
-			RequestPath:      requestPath,
+			RequestMethod:    log.RequestMethod, // log.RequestMethod is now sql.NullString
+			RequestPath:      models.NullString(requestPath),
 			ParamKeys:        strings.Join(paramKeys, ","),
-			ExampleFullURL:   log.RequestURL,
+			ExampleFullURL:   log.RequestURL, // log.RequestURL is now sql.NullString
 			// Notes can be added later via UI
 		}
 

@@ -32,14 +32,14 @@ type SitemapTreeNode struct {
 
 // SitemapEndpoint represents an actual HTTP endpoint found at a particular path.
 type SitemapEndpoint struct {
-	HTTPTrafficLogID int64          `json:"http_traffic_log_id,omitempty"` // 0 if manually added without direct log link
+	HTTPTrafficLogID sql.NullInt64  `json:"http_traffic_log_id,omitempty"` // Changed to sql.NullInt64
 	Method           string         `json:"method"`
 	Path             string         `json:"path"` // The specific path of the endpoint
 	StatusCode       sql.NullInt64  `json:"status_code,omitempty"`
 	ResponseSize     sql.NullInt64  `json:"response_size,omitempty"`
 	IsFavorite       sql.NullBool   `json:"is_favorite,omitempty"`
 	IsManuallyAdded  bool           `json:"is_manually_added,omitempty"`
-	ManualEntryID    int64          `json:"manual_entry_id,omitempty"`
+	ManualEntryID    sql.NullInt64  `json:"manual_entry_id,omitempty"` // Changed to sql.NullInt64
 	ManualEntryNotes sql.NullString `json:"manual_entry_notes,omitempty"`
 }
 

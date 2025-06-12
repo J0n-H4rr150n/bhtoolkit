@@ -2,8 +2,9 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
-	"strings"
+	"net/url"
 	"time"
 	"toolkit/logger"
 	"toolkit/models"
@@ -39,12 +40,14 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 		if err != nil {
 			return nil, fmt.Errorf("creating task from http log ID %d: %w", req.HTTPTrafficLogID, err)
 		}
+		// SourceLogID is set here because this is the direct source.
 		task.SourceLogID = sql.NullInt64{Int64: req.HTTPTrafficLogID, Valid: true}
 	} else if req.ParameterizedURLID != 0 {
 		task, err = createTaskFromParameterizedURL(req.ParameterizedURLID)
 		if err != nil {
 			return nil, fmt.Errorf("creating task from parameterized URL ID %d: %w", req.ParameterizedURLID, err)
 		}
+		// SourceLogID (for the example log) is set inside createTaskFromParameterizedURL.
 		task.SourceParamURLID = sql.NullInt64{Int64: req.ParameterizedURLID, Valid: true}
 	} else {
 		return nil, fmt.Errorf("either HTTPTrafficLogID or ParameterizedURLID must be provided")
@@ -101,8 +104,8 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 		return nil, fmt.Errorf("getting last insert ID for modifier_task: %w", err)
 	}
 	task.ID = id
-	task.CreatedAt = currentTime
-	task.UpdatedAt = currentTime
+	task.CreatedAt = sql.NullTime{Time: currentTime, Valid: true}
+	task.UpdatedAt = sql.NullTime{Time: currentTime, Valid: true}
 
 	logger.Info("Created ModifierTask with ID: %d, Name: %s", task.ID, task.Name)
 	return &task, nil
@@ -111,69 +114,100 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 // Helper function to create a task from an http_traffic_log entry
 func createTaskFromHTTPLog(logID int64) (models.ModifierTask, error) {
 	var task models.ModifierTask
-	var log models.HTTPTrafficLog // Assuming you have this model
-	// Fetch necessary fields from http_traffic_log
-	// This query needs to match your models.HTTPTrafficLog structure
-	err := DB.QueryRow(`SELECT target_id, request_url, request_method, request_headers, request_body
+	var log models.HTTPTrafficLog // HTTPTrafficLog already uses sql.NullString for RequestURL and RequestMethod
+	err := DB.QueryRow(`SELECT target_id, request_url, request_method, request_headers, request_body 
 						FROM http_traffic_log WHERE id = ?`, logID).Scan(
 		&log.TargetID, &log.RequestURL, &log.RequestMethod, &log.RequestHeaders, &log.RequestBody,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			logger.Info("createTaskFromHTTPLog: http_traffic_log entry with ID %d not found", logID)
+			return task, fmt.Errorf("source http log entry with ID %d not found: %w", logID, err)
+		}
+		logger.Error("createTaskFromHTTPLog: Error scanning http_traffic_log entry %d: %v", logID, err)
 		return task, fmt.Errorf("fetching http_traffic_log entry %d: %w", logID, err)
 	}
 
+	if !log.RequestURL.Valid || log.RequestURL.String == "" {
+		return task, fmt.Errorf("source log ID %d has no request URL, cannot create modifier task", logID)
+	}
+	if !log.RequestMethod.Valid || log.RequestMethod.String == "" {
+		return task, fmt.Errorf("source log ID %d has no request method, cannot create modifier task", logID)
+	}
+
 	task.TargetID = models.ConvertInt64PtrToSQLNullInt64(log.TargetID)
-	task.BaseRequestURL = log.RequestURL
-	task.BaseRequestMethod = log.RequestMethod
-	task.BaseRequestHeaders = log.RequestHeaders // Assuming it's already a JSON string
-	task.BaseRequestBody = models.Base64Encode(log.RequestBody)
-	task.Name = fmt.Sprintf("From Log #%d: %s", logID, strings.Split(log.RequestURL, "?")[0])
+	task.BaseRequestURL = log.RequestURL.String
+	task.BaseRequestMethod = log.RequestMethod.String
+	task.BaseRequestHeaders = log.RequestHeaders
+	task.BaseRequestBody = sql.NullString{String: models.Base64Encode(log.RequestBody), Valid: true}
+
+	// Set name to the path, similar to PURL logic.
+	// If path is empty, CreateModifierTaskFromSource will generate a default name.
+	parsedURL, parseErr := url.Parse(log.RequestURL.String)
+	if parseErr == nil && parsedURL.Path != "" {
+		task.Name = parsedURL.Path
+	} // else task.Name remains empty for default generation
 	return task, nil
 }
 
 // Helper function to create a task from a parameterized_urls entry
 func createTaskFromParameterizedURL(paramURLID int64) (models.ModifierTask, error) {
 	var task models.ModifierTask
-	var pURL models.ParameterizedURL // Assuming you have this model
-	// Fetch necessary fields from parameterized_urls
-	err := DB.QueryRow(`SELECT target_id, request_method, request_path, example_full_url
+	var pURL models.ParameterizedURL
+	err := DB.QueryRow(`SELECT target_id, request_method, request_path, example_full_url, http_traffic_log_id 
 						FROM parameterized_urls WHERE id = ?`, paramURLID).Scan(
-		&pURL.TargetID, &pURL.RequestMethod, &pURL.RequestPath, &pURL.ExampleFullURL,
+		&pURL.TargetID, &pURL.RequestMethod, &pURL.RequestPath, &pURL.ExampleFullURL, &pURL.HTTPTrafficLogID,
 	)
 	if err != nil {
 		return task, fmt.Errorf("fetching parameterized_urls entry %d: %w", paramURLID, err)
 	}
 
-	task.TargetID = sql.NullInt64{Int64: pURL.TargetID, Valid: pURL.TargetID != 0}
-	task.BaseRequestURL = pURL.ExampleFullURL // Use example_full_url as a starting point
-	task.BaseRequestMethod = pURL.RequestMethod
-	// For parameterized URLs, headers and body might be empty initially or fetched from an example log if available
-	task.BaseRequestHeaders = "{}" // Default empty JSON object
-	task.BaseRequestBody = ""      // Default empty body (empty base64 string)
-	task.Name = fmt.Sprintf("From PURL #%d: %s", paramURLID, pURL.RequestPath)
+	if !pURL.ExampleFullURL.Valid || pURL.ExampleFullURL.String == "" {
+		return task, fmt.Errorf("source PURL ID %d has no example full URL, cannot create modifier task", paramURLID)
+	}
+	if !pURL.RequestMethod.Valid || pURL.RequestMethod.String == "" {
+		return task, fmt.Errorf("source PURL ID %d has no request method, cannot create modifier task", paramURLID)
+	}
+
+	task.TargetID = pURL.TargetID
+	task.BaseRequestURL = pURL.ExampleFullURL.String
+	task.BaseRequestMethod = pURL.RequestMethod.String
+	task.BaseRequestHeaders = sql.NullString{String: "{}", Valid: true}
+	if pURL.HTTPTrafficLogID != 0 { // pURL.HTTPTrafficLogID is int64, not sql.NullInt64
+		task.SourceLogID = sql.NullInt64{Int64: pURL.HTTPTrafficLogID, Valid: true}
+	}
+	task.BaseRequestBody = sql.NullString{String: "", Valid: true}
+	if pURL.RequestPath.Valid && pURL.RequestPath.String != "" {
+		task.Name = pURL.RequestPath.String // Use the path as the name
+	} else {
+		// Fallback if PURL's path is empty, try to derive from ExampleFullURL
+		parsedExampleURL, errParse := url.Parse(pURL.ExampleFullURL.String)
+		if errParse == nil && parsedExampleURL.Path != "" {
+			task.Name = parsedExampleURL.Path
+		} // else task.Name remains empty for default generation by CreateModifierTaskFromSource
+	}
 	return task, nil
 }
 
 // GetModifierTasks retrieves all tasks for the modifier, optionally filtered by target_id (0 for no filter).
 // It now sorts by display_order ASC, then created_at DESC.
 func GetModifierTasks(targetIDFilter int64) ([]models.ModifierTask, error) {
-	// Implementation for GetModifierTasks (ensure it sorts by display_order)
-	// This is a placeholder; you'll need to implement the actual query and scanning.
-	query := "SELECT id, target_id, name, base_request_url, base_request_method, base_request_headers, base_request_body, display_order, created_at, updated_at, source_log_id, source_param_url_id FROM modifier_tasks ORDER BY display_order ASC, created_at DESC"
-	// If targetIDFilter is used, add WHERE clause: " WHERE target_id = ? ORDER BY ..."
-	// For now, assuming targetIDFilter = 0 means no filter, which is handled by not adding a WHERE clause.
-	// If you need to filter by target_id, you'd adjust the query and parameters.
+	query := "SELECT id, target_id, name, base_request_url, base_request_method, base_request_headers, base_request_body, display_order, created_at, updated_at, source_log_id, source_param_url_id, last_executed_log_id FROM modifier_tasks ORDER BY display_order ASC, created_at DESC"
+	// Add targetIDFilter logic if needed
 
-	rows, err := DB.Query(query) // Add targetIDFilter if used and query is adjusted
+	rows, err := DB.Query(query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying modifier tasks: %w", err)
 	}
 	defer rows.Close()
 	var tasks []models.ModifierTask
 	for rows.Next() {
 		var t models.ModifierTask
-		if err := rows.Scan(&t.ID, &t.TargetID, &t.Name, &t.BaseRequestURL, &t.BaseRequestMethod, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt, &t.SourceLogID, &t.SourceParamURLID); err != nil {
-			return nil, err
+		if err := rows.Scan(&t.ID, &t.TargetID, &t.Name, &t.BaseRequestURL, &t.BaseRequestMethod,
+			&t.BaseRequestHeaders, &t.BaseRequestBody,
+			&t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt,
+			&t.SourceLogID, &t.SourceParamURLID, &t.LastExecutedLogID); err != nil {
+			return nil, fmt.Errorf("scanning modifier task row: %w", err)
 		}
 		tasks = append(tasks, t)
 	}
@@ -183,16 +217,55 @@ func GetModifierTasks(targetIDFilter int64) ([]models.ModifierTask, error) {
 // GetModifierTaskByID retrieves a single modifier task by its ID.
 func GetModifierTaskByID(taskID int64) (*models.ModifierTask, error) {
 	var t models.ModifierTask
-	err := DB.QueryRow("SELECT id, target_id, name, base_request_url, base_request_method, base_request_headers, base_request_body, display_order, created_at, updated_at, source_log_id, source_param_url_id FROM modifier_tasks WHERE id = ?", taskID).Scan(
-		&t.ID, &t.TargetID, &t.Name, &t.BaseRequestURL, &t.BaseRequestMethod, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt, &t.SourceLogID, &t.SourceParamURLID,
+	err := DB.QueryRow("SELECT id, target_id, name, base_request_url, base_request_method, base_request_headers, base_request_body, display_order, created_at, updated_at, source_log_id, source_param_url_id, last_executed_log_id FROM modifier_tasks WHERE id = ?", taskID).Scan(
+		&t.ID, &t.TargetID, &t.Name, &t.BaseRequestURL, &t.BaseRequestMethod, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt, &t.SourceLogID, &t.SourceParamURLID, &t.LastExecutedLogID,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // Task not found
 		}
-		return nil, err
+		return nil, fmt.Errorf("querying/scanning modifier task ID %d: %w", taskID, err)
 	}
 	return &t, nil
+}
+
+// UpdateModifierTaskLastExecutedLogID updates the last_executed_log_id for a modifier task.
+func UpdateModifierTaskLastExecutedLogID(taskID int64, logID int64) error {
+	stmt, err := DB.Prepare("UPDATE modifier_tasks SET last_executed_log_id = ?, updated_at = ? WHERE id = ?")
+	if err != nil {
+		logger.Error("UpdateModifierTaskLastExecutedLogID: Error preparing statement for task ID %d: %v", taskID, err)
+		return fmt.Errorf("preparing update last_executed_log_id statement for task ID %d: %w", taskID, err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(logID, time.Now(), taskID)
+	if err != nil {
+		logger.Error("UpdateModifierTaskLastExecutedLogID: Error executing update for task ID %d, log ID %d: %v", taskID, logID, err)
+		return fmt.Errorf("executing update last_executed_log_id for task ID %d: %w", taskID, err)
+	}
+	return nil
+}
+
+// UpdateModifierTaskBaseRequestDetails updates the core request fields of a modifier task.
+func UpdateModifierTaskBaseRequestDetails(taskID int64, method, url, headersJSON, bodyBase64 string) error {
+	stmt, err := DB.Prepare(`UPDATE modifier_tasks SET
+		base_request_method = ?,
+		base_request_url = ?,
+		base_request_headers = ?,
+		base_request_body = ?,
+		updated_at = ?
+		WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("preparing update base request statement for task ID %d: %w", taskID, err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(method, url, models.NullString(headersJSON), models.NullString(bodyBase64), time.Now(), taskID)
+	if err != nil {
+		return fmt.Errorf("executing update base request for task ID %d: %w", taskID, err)
+	}
+	logger.Info("Updated base request details for ModifierTask ID: %d", taskID)
+	return nil
 }
 
 // UpdateModifierTaskName updates the name of a modifier task.
@@ -225,4 +298,65 @@ func UpdateModifierTasksOrder(taskOrders map[int64]int) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// CloneModifierTaskDB creates a new task by cloning an existing one.
+func CloneModifierTaskDB(originalTaskID int64) (*models.ModifierTask, error) {
+	originalTask, err := GetModifierTaskByID(originalTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching original task %d for clone: %w", originalTaskID, err)
+	}
+	if originalTask == nil {
+		return nil, fmt.Errorf("original modifier task with ID %d not found for cloning", originalTaskID)
+	}
+
+	clonedTask := *originalTask
+
+	clonedTask.ID = 0
+	clonedTask.Name = "Copy of " + originalTask.Name
+	if len(clonedTask.Name) > 255 {
+		clonedTask.Name = clonedTask.Name[:252] + "..."
+	}
+
+	var maxOrder sql.NullInt64
+	err = DB.QueryRow("SELECT MAX(display_order) FROM modifier_tasks").Scan(&maxOrder)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("getting max display_order for cloned task: %w", err)
+	}
+	nextOrder := 0
+	if maxOrder.Valid {
+		nextOrder = int(maxOrder.Int64) + 1
+	}
+	clonedTask.DisplayOrder = nextOrder
+
+	// Ensure LastExecutedLogID is included in the INSERT statement
+	stmt, err := DB.Prepare(`INSERT INTO modifier_tasks
+        (target_id, name, base_request_url, base_request_method, base_request_headers, base_request_body, display_order, source_log_id, source_param_url_id, last_executed_log_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return nil, fmt.Errorf("preparing insert statement for cloned modifier_task: %w", err)
+	}
+	defer stmt.Close()
+
+	currentTime := time.Now()
+	result, err := stmt.Exec(
+		clonedTask.TargetID, clonedTask.Name, clonedTask.BaseRequestURL, clonedTask.BaseRequestMethod,
+		clonedTask.BaseRequestHeaders, clonedTask.BaseRequestBody, clonedTask.DisplayOrder,
+		clonedTask.SourceLogID, clonedTask.SourceParamURLID, clonedTask.LastExecutedLogID, // Added LastExecutedLogID here
+		currentTime, currentTime,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("executing insert for cloned modifier_task: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("getting last insert ID for cloned modifier_task: %w", err)
+	}
+	clonedTask.ID = id
+	clonedTask.CreatedAt = sql.NullTime{Time: currentTime, Valid: true}
+	clonedTask.UpdatedAt = sql.NullTime{Time: currentTime, Valid: true}
+
+	logger.Info("Cloned ModifierTask ID %d to new ID: %d, Name: %s", originalTaskID, clonedTask.ID, clonedTask.Name)
+	return &clonedTask, nil
 }

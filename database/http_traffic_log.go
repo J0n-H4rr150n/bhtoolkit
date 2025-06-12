@@ -97,7 +97,10 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 		// Note: Scanning only a subset of fields needed by AnalyzeTargetForParameterizedURLsHandler
 		// Adjust if more fields are needed by other callers of this function.
 		if err := rows.Scan(&u.ID, &u.TargetID, &timestampStr, &u.RequestMethod, &u.RequestURL, &u.ResponseStatusCode, &u.ResponseContentType, &u.ResponseBodySize, &u.DurationMs, &u.IsFavorite); err != nil {
-			logger.Error("GetHTTPTrafficLogEntries: Error scanning row: %v", err)
+			// If RequestMethod or RequestURL are now sql.NullString, this Scan will fail if they are not sql.NullString in the struct.
+			// Assuming the struct models.HTTPTrafficLog is updated, this Scan should be fine.
+			// The fields u.RequestMethod and u.RequestURL are now sql.NullString.
+			logger.Error("GetHTTPTrafficLogEntries: Error scanning row for log ID %d: %v", u.ID, err)
 			// Decide whether to return partial results or error out
 			continue
 		}
@@ -118,7 +121,10 @@ func GetHTTPTrafficLogEntryByID(id int64) (models.HTTPTrafficLog, error) {
 	          FROM http_traffic_log WHERE id = ?`
 	var timestampStr string
 	err := DB.QueryRow(query, id).Scan(
-		&log.ID, &log.TargetID, &timestampStr, &log.RequestMethod, &log.RequestURL, &log.RequestHTTPVersion, &log.RequestHeaders, &log.RequestBody,
+		&log.ID, &log.TargetID, &timestampStr, &log.RequestMethod, &log.RequestURL,
+		&log.RequestHTTPVersion, // This is string
+		&log.RequestHeaders,     // This will scan into sql.NullString if model is updated
+		&log.RequestBody,
 		&log.ResponseStatusCode, &log.ResponseContentType, &log.ResponseBodySize, &log.ResponseHTTPVersion, &log.ResponseHeaders, &log.ResponseBody,
 		&log.DurationMs, &log.IsFavorite, &log.Notes,
 	)
@@ -132,4 +138,31 @@ func GetHTTPTrafficLogEntryByID(id int64) (models.HTTPTrafficLog, error) {
 	parsedTime, _ := time.Parse(time.RFC3339, timestampStr)
 	log.Timestamp = parsedTime
 	return log, nil
+}
+
+// LogExecutedModifierRequest saves an HTTPTrafficLog entry generated from the modifier.
+func LogExecutedModifierRequest(logEntry *models.HTTPTrafficLog) (int64, error) {
+	if DB == nil {
+		logger.Error("LogExecutedModifierRequest: Database is not initialized.")
+		return 0, fmt.Errorf("database not initialized")
+	}
+	result, err := DB.Exec(`INSERT INTO http_traffic_log (
+		target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body,
+		response_status_code, response_reason_phrase, response_http_version, response_headers, response_body,
+		response_content_type, response_body_size, duration_ms, client_ip, is_https, is_page_candidate, notes,
+		source_modifier_task_id 
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		logEntry.TargetID, logEntry.Timestamp, logEntry.RequestMethod, logEntry.RequestURL,
+		logEntry.RequestHTTPVersion, logEntry.RequestHeaders, logEntry.RequestBody,
+		logEntry.ResponseStatusCode, logEntry.ResponseReasonPhrase, logEntry.ResponseHTTPVersion,
+		logEntry.ResponseHeaders, logEntry.ResponseBody, logEntry.ResponseContentType,
+		logEntry.ResponseBodySize, logEntry.DurationMs, logEntry.ClientIP, logEntry.IsHTTPS,
+		logEntry.IsPageCandidate, logEntry.Notes, logEntry.SourceModifierTaskID,
+	)
+	// Note: is_favorite defaults to FALSE in schema, not explicitly set here.
+	if err != nil {
+		logger.Error("DB log error for modified request (%s %s): %v", logEntry.RequestMethod.String, logEntry.RequestURL.String, err)
+		return 0, err
+	}
+	return result.LastInsertId()
 }

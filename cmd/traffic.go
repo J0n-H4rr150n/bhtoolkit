@@ -273,7 +273,7 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 			}
 			if statusCode.Valid {
 				t.ResponseStatusCode = int(statusCode.Int64)
-			}
+			} // t.RequestMethod and t.RequestURL are now sql.NullString
 			if contentType.Valid {
 				t.ResponseContentType = contentType.String
 			}
@@ -287,7 +287,7 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 				t.IsHTTPS = isHTTPS.Bool
 			}
 			if reqHeadersStr.Valid {
-				t.RequestHeaders = reqHeadersStr.String
+				t.RequestHeaders = reqHeadersStr
 			}
 			if resHeadersStr.Valid {
 				t.ResponseHeaders = resHeadersStr.String
@@ -298,18 +298,18 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 			if regexFilter != nil {
 				match := false
 				switch trafficListRegexField {
-				case "url":
-					match = regexFilter.MatchString(t.RequestURL)
+				case "url": // t.RequestURL is now sql.NullString
+					match = t.RequestURL.Valid && regexFilter.MatchString(t.RequestURL.String)
 				case "req_headers":
-					match = regexFilter.MatchString(t.RequestHeaders)
+					match = t.RequestHeaders.Valid && regexFilter.MatchString(t.RequestHeaders.String)
 				case "req_body":
 					match = regexFilter.Match(t.RequestBody)
 				case "res_headers":
 					match = regexFilter.MatchString(t.ResponseHeaders)
 				case "res_body":
 					match = regexFilter.Match(t.ResponseBody)
-				default:
-					match = regexFilter.MatchString(t.RequestURL)
+				default: // Default to URL if field is invalid or not specified with regex
+					match = t.RequestURL.Valid && regexFilter.MatchString(t.RequestURL.String)
 				}
 
 				if match {
@@ -350,7 +350,7 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 				if !t.Timestamp.IsZero() {
 					tsFormatted = t.Timestamp.Format("2006-01-02 15:04:05")
 				}
-				displayURL := t.RequestURL
+				displayURL := t.RequestURL.String // Use .String
 				if len(displayURL) > 80 {
 					displayURL = displayURL[:77] + "..."
 				}
@@ -358,9 +358,8 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 				if len(displayContentType) > 30 {
 					displayContentType = displayContentType[:27] + "..."
 				}
-
 				fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%d\t%s\t%d\t%dms\t%s\n",
-					t.ID, tsFormatted, t.RequestMethod, displayURL, t.ResponseStatusCode,
+					t.ID, tsFormatted, t.RequestMethod.String, displayURL, t.ResponseStatusCode, // Use .String
 					displayContentType, t.ResponseBodySize, t.DurationMs, httpsStr,
 				)
 			}
@@ -565,7 +564,7 @@ to the specified target ID (using --target-id) or the currently set target.`,
 			var contentType sql.NullString
 			var bodySize sql.NullInt64
 			var duration sql.NullInt64
-			var isHTTPS sql.NullBool
+			var isHTTPS sql.NullBool // t.RequestMethod and t.RequestURL are now sql.NullString
 			var timestampStr string
 
 			if err := rows.Scan(&t.ID, &timestampStr, &t.RequestMethod, &t.RequestURL, &statusCode, &contentType, &bodySize, &duration, &isHTTPS); err != nil {
@@ -627,7 +626,7 @@ to the specified target ID (using --target-id) or the currently set target.`,
 			if !t.Timestamp.IsZero() {
 				tsFormatted = t.Timestamp.Format("2006-01-02 15:04:05")
 			}
-			displayURL := t.RequestURL
+			displayURL := t.RequestURL.String // Use .String
 			if len(displayURL) > 80 {
 				displayURL = displayURL[:77] + "..."
 			}
@@ -637,7 +636,7 @@ to the specified target ID (using --target-id) or the currently set target.`,
 			}
 
 			fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%d\t%s\t%d\t%dms\t%s\n",
-				t.ID, tsFormatted, t.RequestMethod, displayURL, t.ResponseStatusCode,
+				t.ID, tsFormatted, t.RequestMethod.String, displayURL, t.ResponseStatusCode, // Use .String
 				displayContentType, t.ResponseBodySize, t.DurationMs, httpsStr,
 			)
 		}
@@ -721,7 +720,7 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 			t.RequestHTTPVersion = reqHttpVerSql.String
 		}
 		if reqHeadersStr.Valid {
-			t.RequestHeaders = reqHeadersStr.String
+			t.RequestHeaders = reqHeadersStr
 		}
 		t.RequestBody = reqBodyBytes
 		if statusCode.Valid {
@@ -756,12 +755,12 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 			t.IsHTTPS = isHTTPS.Bool
 		}
 		if notes.Valid {
-			t.Notes = notes.String
+			t.Notes = notes
 		}
 
 		fmt.Println("--- REQUEST ---")
-		fmt.Printf("%s %s %s\n", t.RequestMethod, t.RequestURL, t.RequestHTTPVersion)
-		printHeaders(t.RequestHeaders)
+		fmt.Printf("%s %s %s\n", t.RequestMethod.String, t.RequestURL.String, t.RequestHTTPVersion) // Use .String
+		printHeaders(t.RequestHeaders.String)
 		fmt.Println()
 		printBody(t.RequestBody, "")
 
@@ -789,7 +788,7 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 		fmt.Printf("  HTTPS:         %t\n", t.IsHTTPS)
 		fmt.Printf("  Client IP:     %s\n", t.ClientIP)
 		fmt.Printf("  Server IP:     %s\n", t.ServerIP)
-		fmt.Printf("  Notes:         %s\n", t.Notes)
+		fmt.Printf("  Notes:         %s\n", t.Notes.String)
 
 		fmt.Println("---")
 		logger.Info("Successfully retrieved details for traffic log ID %d", logID)

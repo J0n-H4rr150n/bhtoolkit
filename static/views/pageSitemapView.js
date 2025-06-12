@@ -314,12 +314,14 @@ async function fetchAndDisplayLogsForPage(pageId, pageName) {
                     <tbody>`;
             logs.forEach((log, index) => {
                 const ts = log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A';
+                const requestMethod = log.request_method && log.request_method.Valid ? log.request_method.String : 'N/A';
+                const requestURL = log.request_url && log.request_url.Valid ? log.request_url.String : 'N/A';
                 tableHTML += `
                     <tr>
                         <td>${index + 1}</td>
                         <td>${ts}</td>
-                        <td>${escapeHtml(log.request_method)}</td>
-                        <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(log.request_url)}">${escapeHtml(log.request_url)}</td>
+                        <td>${escapeHtml(requestMethod)}</td>
+                        <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(requestURL)}">${escapeHtml(requestURL)}</td>
                         <td>${log.response_status_code || '-'}</td>
                         <td>${log.response_body_size || 0}</td>
                         <td class="actions-cell">

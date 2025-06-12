@@ -12,6 +12,7 @@ import (
 var (
 	AppLogger   *log.Logger
 	ProxyLogger *log.Logger
+	WarnLogger  *log.Logger
 	ErrorLogger *log.Logger
 
 	logLevel     string
@@ -95,6 +96,12 @@ func Info(format string, v ...interface{}) {
 
 func Debug(format string, v ...interface{}) {
 	if AppLogger != nil && logLevel == "DEBUG" {
+		AppLogger.Printf(format, v...)
+	}
+}
+
+func Warn(format string, v ...interface{}) {
+	if WarnLogger != nil && (logLevel == "WARN" || logLevel == "INFO" || logLevel == "DEBUG") { // Warnings also show if level is INFO or DEBUG
 		AppLogger.Printf(format, v...)
 	}
 }

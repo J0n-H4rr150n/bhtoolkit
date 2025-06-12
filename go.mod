@@ -20,6 +20,7 @@ require (
 
 require (
 	github.com/BishopFox/jsluice v0.0.0-20240110145140-0ddfab153e06
+	github.com/andybalholm/brotli v1.0.4
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/golang-migrate/migrate/v4 v4.18.3
 	github.com/spf13/viper v1.18.2

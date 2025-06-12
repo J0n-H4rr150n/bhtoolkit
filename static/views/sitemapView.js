@@ -93,41 +93,43 @@ function renderSitemapTree(nodes, parentElement, level = 0) {
             endpointsDiv.style.display = areEndpointsVisible ? 'block' : 'none'; // Control initial visibility
             let endpointsListHTML = '<ul>';
             node.endpoints.forEach(ep => {
-                let title = `Log ID: ${ep.http_traffic_log_id || 'N/A'}\nStatus: ${ep.status_code?.Int64 || ep.status_code?.String || 'N/A'}\nSize: ${ep.response_size?.Int64 || ep.response_size?.String || 'N/A'} bytes`;
+                let title = `Log ID: ${ep.http_traffic_log_id?.Int64 || 'N/A'}\nStatus: ${ep.status_code?.Int64 || 'N/A'}\nSize: ${ep.response_size?.Int64 || 'N/A'} bytes`;
                 if (ep.is_manually_added) {
-                    title = `Manually Added (ID: ${ep.manual_entry_id})\nNotes: ${ep.manual_entry_notes?.String || 'N/A'}`;
+                    const manualIdDisplay = (ep.manual_entry_id && ep.manual_entry_id.Valid) ? ep.manual_entry_id.Int64 : '-';
+                    title = `Manually Added (ID: ${manualIdDisplay})\nNotes: ${ep.manual_entry_notes?.String || 'N/A'}`;
+                }
+                
+                let logIdDisplay = '-';
+                if (ep.http_traffic_log_id && ep.http_traffic_log_id.Valid) {
+                    logIdDisplay = ep.http_traffic_log_id.Int64;
                 }
 
-                const getNullableValue = (sqlNullable, returnType = 'string') => {
-                    if (sqlNullable?.Valid) {
-                        if (typeof sqlNullable.Int64 === 'number') { // Covers 0 as well
-                            return sqlNullable.Int64;
-                        }
-                        if (typeof sqlNullable.String === 'string') { // Covers empty string ""
-                            return sqlNullable.String;
-                        }
-                        // If Int64 is 0, it's a valid value.
-                        // If Valid is true but neither Int64 nor String has a typical value
-                        return returnType === 'number' ? 0 : "";
+                const statusCodeDisplay = ep.status_code && ep.status_code.Valid ? ep.status_code.Int64 : '-';
+                const responseSizeDisplay = ep.response_size && ep.response_size.Valid ? ep.response_size.Int64 : '-';
+                const isFavorite = ep.is_favorite && ep.is_favorite.Valid && ep.is_favorite.Bool;
+
+                let endpointDetails = `[sc: ${statusCodeDisplay}; cl: ${responseSizeDisplay}; id: ${logIdDisplay}]`;
+                let logDetailLink = '';
+
+                if (ep.is_manually_added) {
+                    const manualIdDisplay = (ep.manual_entry_id && ep.manual_entry_id.Valid) ? ep.manual_entry_id.Int64 : '-';
+                    endpointDetails = `[Manual Entry ID: ${manualIdDisplay}]`;
+                    // Link to original log if http_traffic_log_id is present and valid for a manual entry
+                    if (ep.http_traffic_log_id && ep.http_traffic_log_id.Valid) { 
+                         logDetailLink = `<a href="#proxy-log-detail?id=${ep.http_traffic_log_id.Int64}" class="sitemap-log-link" title="View Original Log (ID: ${ep.http_traffic_log_id.Int64})">👁️</a>`;
                     }
-                    return returnType === 'number' ? 0 : "";
-                };
-
-                let logDetailsDisplay = '';
-                if (ep.http_traffic_log_id && ep.http_traffic_log_id !== 0) {
-                    const statusCode = getNullableValue(ep.status_code, 'number');
-                    const contentLength = getNullableValue(ep.response_size, 'number');
-                    logDetailsDisplay = ` <span class="endpoint-log-id">[sc: ${statusCode}; cl: ${contentLength}; id: ${ep.http_traffic_log_id}]</span>`;
+                } else if (ep.http_traffic_log_id && ep.http_traffic_log_id.Valid) { // For non-manual entries
+                    logDetailLink = `<a href="#proxy-log-detail?id=${ep.http_traffic_log_id.Int64}" class="sitemap-log-link" title="View Log (ID: ${ep.http_traffic_log_id.Int64})">👁️</a>`;
                 }
 
+                const favoriteStar = `<span class="favorite-toggle sitemap-favorite-toggle ${isFavorite ? 'favorited' : ''}" data-log-id="${ep.http_traffic_log_id?.Int64 || ''}" data-is-favorite="${isFavorite}" title="Toggle Favorite" style="cursor: pointer; margin-right: 5px;">${isFavorite ? '★' : '☆'}</span>`;
+                
                 const actionButtonsHTML = `
-                    <button class="action-button sitemap-view-log" data-log-id="${ep.http_traffic_log_id}" title="View Log Details" style="${!ep.http_traffic_log_id || ep.http_traffic_log_id === 0 ? 'display:none;' : ''}">👁️</button>
-                    <button class="action-button sitemap-send-to-modifier" data-log-id="${ep.http_traffic_log_id}" title="Send to Modifier" style="${!ep.http_traffic_log_id || ep.http_traffic_log_id === 0 ? 'display:none;' : ''}">🔧</button>
+                    <button class="action-button sitemap-send-to-modifier" data-log-id="${ep.http_traffic_log_id?.Int64 || ''}" title="Send to Modifier" style="${!(ep.http_traffic_log_id && ep.http_traffic_log_id.Valid) ? 'display:none;' : ''}">🔧</button>
                 `;
 
                 endpointsListHTML += `<li class="sitemap-endpoint ${ep.is_manually_added ? 'manual-endpoint' : ''}" title="${escapeHtmlAttribute(title)}">
-                    <span class="sitemap-actions-cell">${actionButtonsHTML}</span><span class="endpoint-method method-${escapeHtmlAttribute(ep.method.toLowerCase())}">${escapeHtml(ep.method)}</span>${logDetailsDisplay}<span class="endpoint-path">${escapeHtml(ep.path)}</span>
-                    ${ep.is_favorite?.Valid && ep.is_favorite.Bool ? '<span class="favorite-indicator">★</span>' : ''}
+                    <span class="sitemap-actions-cell">${favoriteStar}${logDetailLink}${actionButtonsHTML}</span><span class="endpoint-method method-${escapeHtmlAttribute(ep.method.toLowerCase())}">${escapeHtml(ep.method)}</span>${endpointDetails}<span class="endpoint-path">${escapeHtml(ep.path)}</span>
                     ${ep.is_manually_added ? `<span class="manual-indicator" title="${escapeHtmlAttribute(ep.manual_entry_notes?.String || "Manually added")}">(manual)</span>` : ''}
                 </li>`;
             });
@@ -277,24 +279,21 @@ async function fetchAndRenderSitemap(targetId, treeContainer, messageArea) {
 }
 
 function attachSitemapActionListeners(parentElement) {
-    parentElement.querySelectorAll('.sitemap-view-log').forEach(button => {
+    parentElement.querySelectorAll('.sitemap-log-link').forEach(button => { // Changed selector
         button.addEventListener('click', (e) => {
-            const logId = e.currentTarget.dataset.logId;
-            if (logId && logId !== "0") {
-                const detailHashPath = `#proxy-log-detail?id=${logId}`;
-                if (e.ctrlKey || e.metaKey) { // Check for Ctrl (Windows/Linux) or Command (Mac) key
-                    e.preventDefault(); // Prevent default click behavior if modifier is pressed
-                    // Construct the full URL for the new tab
-                    const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
-                    const fullUrl = baseUrl + detailHashPath;
-                    window.open(fullUrl, '_blank'); // Open in new tab
+            // const logId = e.currentTarget.dataset.logId; // logId is in href
+            // if (logId && logId !== "0") { // No longer needed as href handles it
+                if (e.ctrlKey || e.metaKey) { 
+                    e.preventDefault(); 
+                    const fullUrl = e.currentTarget.href;
+                    window.open(fullUrl, '_blank'); 
                 } else {
                     // Default action: navigate in the current tab using hash change
-                    window.location.hash = detailHashPath;
+                    // window.location.hash = detailHashPath; // Already handled by href
                 }
-            } else {
-                uiService.showModalMessage("Info", "This sitemap entry is not linked to a specific proxy log.");
-            }
+            // } else {
+            //     uiService.showModalMessage("Info", "This sitemap entry is not linked to a specific proxy log.");
+            // }
         });
     });
     parentElement.querySelectorAll('.sitemap-send-to-modifier').forEach(button => {
@@ -302,7 +301,6 @@ function attachSitemapActionListeners(parentElement) {
             const logId = e.currentTarget.dataset.logId;
              if (logId && logId !== "0") {
                 try {
-                    // Assuming addModifierTask can take http_traffic_log_id
                     const task = await apiService.addModifierTask({ http_traffic_log_id: parseInt(logId, 10) });
                     uiService.showModalMessage("Sent to Modifier", `Task "${escapeHtml(task.name || `Task ${task.id}`)}" sent to Modifier. Navigating...`, true, 1500);
                     window.location.hash = `#modifier?task_id=${task.id}`;
@@ -315,7 +313,33 @@ function attachSitemapActionListeners(parentElement) {
             }
         });
     });
+    parentElement.querySelectorAll('.sitemap-favorite-toggle').forEach(starBtn => {
+        starBtn.addEventListener('click', handleSitemapFavoriteToggle);
+    });
 }
+
+async function handleSitemapFavoriteToggle(event) {
+    const button = event.currentTarget;
+    const logId = button.getAttribute('data-log-id');
+    const isCurrentlyFavorite = button.getAttribute('data-is-favorite') === 'true';
+    const newFavoriteState = !isCurrentlyFavorite;
+
+    if (!logId || logId === "0" || logId === "") {
+        uiService.showModalMessage("Info", "Cannot toggle favorite: No associated log ID.");
+        return;
+    }
+
+    try {
+        await apiService.setProxyLogFavorite(logId, newFavoriteState); // Use existing API service function
+        button.innerHTML = newFavoriteState ? '★' : '☆';
+        button.classList.toggle('favorited', newFavoriteState);
+        button.setAttribute('data-is-favorite', newFavoriteState.toString());
+    } catch (favError) {
+        console.error("Error toggling favorite from Sitemap:", favError);
+        uiService.showModalMessage("Error", `Failed to update favorite status for log ${logId}: ${favError.message}`);
+    }
+}
+
 
 function toggleAllSitemapNodes(expand, treeContainer) {
     if (!treeContainer) treeContainer = document.getElementById('sitemapTreeContainer');
@@ -323,22 +347,6 @@ function toggleAllSitemapNodes(expand, treeContainer) {
 
     const allNodesHaveChildren = [];
     const allNodesWithEndpoints = [];
-
-    // First, collect all nodes that have children and all nodes that have endpoints
-    // This is a bit inefficient if the tree is huge, might need optimization later
-    // For now, this ensures we have the full_path for all relevant nodes.
-    function collectNodePaths(nodes, parentPath = '') {
-        nodes.forEach(node => {
-            if (node.children && node.children.length > 0) {
-                allNodesHaveChildren.push(node.full_path);
-                collectNodePaths(node.children, node.full_path);
-            }
-            if (node.endpoints && node.endpoints.length > 0) {
-                allNodesWithEndpoints.push(node.full_path);
-            }
-        });
-    }
-    // Assuming sitemapTreeData is accessible or passed if needed, for now, we operate on rendered elements
 
     treeContainer.querySelectorAll('.sitemap-node').forEach(nodeElement => {
         const fullPath = nodeElement.dataset.fullPath;
@@ -403,3 +411,4 @@ function handleToggleEndpointsVisibility(event) {
         endpointsIndicator.textContent = makeVisible ? '📂' : '📁';
     }
 }
+

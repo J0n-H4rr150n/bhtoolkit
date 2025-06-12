@@ -18,9 +18,10 @@ import { initSynackView, loadSynackTargetsView, loadSynackAnalyticsView } from '
 import { initChecklistView, fetchAndDisplayChecklistItems, cancelActiveChecklistItemEdit } from './views/checklistView.js';
 import { initChecklistTemplateView, loadChecklistTemplatesView } from './views/checklistTemplateView.js';
 import { initSettingsView, loadSettingsView } from './views/settingsView.js';
-import { initSitemapView, loadSitemapView } from './views/sitemapView.js'; // Assuming this is correct
+import { initSitemapView, loadSitemapView } from './views/sitemapView.js';
 import { initModifierView, loadModifierView } from './views/modifierView.js';
 import { initPageSitemapView, loadPageSitemapView } from './views/pageSitemapView.js';
+import { initVisualizerView, loadVisualizerView } from './views/visualizerView.js';
 
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -106,6 +107,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initModifierView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initPageSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
+    initVisualizerView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
 
     await fetchAndSetInitialCurrentTarget();
 
@@ -135,7 +137,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             },
             loadSitemapView: () => loadSitemapView(viewContentContainer),
             loadModifierView: (params) => loadModifierView(viewContentContainer, params),
-            loadPageSitemapView: () => loadPageSitemapView(viewContentContainer)
+            loadPageSitemapView: () => loadPageSitemapView(viewContentContainer),
+            loadVisualizerView: () => loadVisualizerView(viewContentContainer)
         },
         getPlatformDetailsFunc: apiService.getPlatformDetails,
         cancelTargetEditFunc: cancelActiveTargetEdit,

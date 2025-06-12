@@ -182,7 +182,7 @@ func GetLogsForPage(pageID int64) ([]models.HTTPTrafficLog, error) {
 		h.DurationMs = durationMs.Int64             // Assuming 0 if null
 		h.ClientIP = clientIP.String
 		h.ServerIP = serverIP.String
-		h.Notes = notes.String
+		h.Notes = notes // Direct assignment as both are sql.NullString
 
 		logs = append(logs, h)
 	}
