@@ -768,10 +768,12 @@ export async function getPagesForTarget(targetId) {
 /**
  * Fetches all HTTP logs associated with a specific recorded page.
  * @param {string|number} pageId - The ID of the page.
+ * @param {Object} params - Optional query parameters (e.g., page, limit, sort_by, sort_order).
  * @returns {Promise<Array<Object>>} - A promise that resolves with an array of HTTP log objects.
  */
-export async function getLogsForPageSitemapEntry(pageId) {
-    const response = await fetch(`${API_BASE}/pages/logs?page_id=${pageId}`);
+export async function getLogsForPageSitemapEntry(pageId, params = {}) {
+    const queryParams = new URLSearchParams({ page_id: pageId, ...params }).toString();
+    const response = await fetch(`${API_BASE}/pages/logs?${queryParams}`);
     return handleResponse(response);
 }
 

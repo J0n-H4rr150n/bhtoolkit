@@ -551,3 +551,46 @@ func DeleteTrafficLogsForTargetHandler(w http.ResponseWriter, r *http.Request, t
 	logger.Info("API DeleteTrafficLogs: Deleted %d proxy logs from http_traffic_log for target_id %d", rowsAffected, targetID)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// AnalyzeCommentsHandler handles requests to find comments in a log entry's response body.
+func AnalyzeCommentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		HTTPLogID int64 `json:"http_log_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("AnalyzeCommentsHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if req.HTTPLogID == 0 {
+		http.Error(w, "http_log_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch the response body for the given log ID
+	var responseBody []byte
+	err := database.DB.QueryRow("SELECT response_body FROM http_traffic_log WHERE id = ?", req.HTTPLogID).Scan(&responseBody)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Log entry not found", http.StatusNotFound)
+		} else {
+			logger.Error("AnalyzeCommentsHandler: Error fetching response body for log ID %d: %v", req.HTTPLogID, err)
+			http.Error(w, "Failed to fetch log entry data", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	findings, err := database.FindCommentsInText(string(responseBody)) // FindCommentsInText expects a string
+	// FindCommentsInText currently doesn't return an error, but good to keep for future.
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(findings) // Send back the array of CommentFinding
+}

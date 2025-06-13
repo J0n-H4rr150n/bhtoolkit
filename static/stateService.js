@@ -6,10 +6,14 @@ let state = {
     currentChecklistTemplateId: null,
     jsAnalysisDataCache: {},
     jsAnalysisSortState: { sortBy: 'category', sortOrder: 'ASC' },
+    jsAnalysisFilterCategory: '', // New: For JS Analysis category filter
+    jsAnalysisSearchText: '',     // New: For JS Analysis search text
+    commentAnalysisDataCache: {}, 
+    commentAnalysisSortState: { sortBy: 'lineNumber', sortOrder: 'ASC' }, // New: Sort state for comments
     globalTableLayouts: {},
     viewConfig: {
         synackTargets: { sortBy: 'last_seen_timestamp', sortOrder: 'DESC', filterIsActive: true, sortableColumns: ['synack_target_id_str', 'codename', 'name', 'findings_count', 'status', 'last_seen_timestamp']},
-        proxyLog: { sortBy: 'timestamp', sortOrder: 'DESC', filterFavoritesOnly: false, sortableColumns: ['id', 'timestamp', 'method', 'url', 'status', 'type', 'size', 'duration'] },
+        proxyLog: { sortBy: 'timestamp', sortOrder: 'DESC', filterFavoritesOnly: false, sortableColumns: ['id', 'timestamp', 'method', 'url', 'status', 'type', 'size', 'duration'], analysis_type: null },
         synackAnalyticsGlobal: { sortBy: 'target_codename', sortOrder: 'ASC', sortableColumns: ['target_codename', 'category_name', 'count'] },
         synackAnalyticsTarget: { sortBy: 'reported_at', sortOrder: 'DESC', sortableColumns: ['synack_finding_id', 'title', 'category_name', 'severity', 'status', 'reported_at', 'vulnerability_url'] },
     },
@@ -18,7 +22,8 @@ let state = {
         proxyLog: {
             currentPage: 1, limit: 15, totalPages: 1, totalRecords: 0,
             sortBy: 'timestamp', sortOrder: 'DESC', filterFavoritesOnly: false,
-            filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: ''
+            filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: '',
+            analysis_type: null // Added to proxyLog pagination state
         },
         checklistTemplateItems: {
             currentPage: 1,
@@ -57,6 +62,14 @@ let state = {
             actions: { default: '130px', visible: true, id: 'col-paramurl-actions' }, // Increased width
         },
         synackAnalytics: { currentPage: 1, limit: 20, totalPages: 1, totalRecords: 0, targetDbId: null, sortBy: 'category_name', sortOrder: 'ASC' },
+        pageSitemapLogs: { // New state for logs within Page Sitemap view
+            currentPage: 1,
+            limit: 20, // Default number of logs per page
+            totalPages: 1,
+            totalRecords: 0,
+            sortBy: 'timestamp', // Default sort column
+            sortOrder: 'DESC'    // Default sort order
+        }    
     }
 };
 
@@ -125,6 +138,15 @@ export function updateState(newStateUpdates) {
         }
         delete newStateUpdates.jsAnalysisDataCache;
     }
+    if (newStateUpdates.commentAnalysisDataCache) { // New: Handle comment analysis cache
+        if (typeof newStateUpdates.commentAnalysisDataCache === 'object' && newStateUpdates.commentAnalysisDataCache !== null) {
+            Object.keys(newStateUpdates.commentAnalysisDataCache).forEach(logIdKey => {
+                state.commentAnalysisDataCache[logIdKey] = newStateUpdates.commentAnalysisDataCache[logIdKey];
+            });
+        }
+        delete newStateUpdates.commentAnalysisDataCache;
+    }
+
     
     if (newStateUpdates.globalTableLayouts) {
         state.globalTableLayouts = { ...state.globalTableLayouts, ...newStateUpdates.globalTableLayouts };

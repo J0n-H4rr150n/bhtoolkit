@@ -3,8 +3,10 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"toolkit/database"
 	"toolkit/logger"
@@ -149,19 +151,81 @@ func GetLogsForPageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid page_id: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	// --- New: Parse pagination and sorting parameters ---
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+	sortBy := r.URL.Query().Get("sort_by")
+	sortOrder := r.URL.Query().Get("sort_order")
 
-	logs, err := database.GetLogsForPage(pageID)
+	page, _ := strconv.Atoi(pageStr)
+	if page < 1 {
+		page = 1
+	}
+
+	limit, _ := strconv.Atoi(limitStr)
+	if limit < 1 {
+		limit = 20 // Default limit
+	} else if limit > 200 { // Max limit
+		limit = 200
+	}
+
+	// Validate sortBy against a list of allowed column names
+	// These keys should match `data-sort-key` from pageSitemapView.js
+	validSortColumns := map[string]string{
+		"timestamp":            "timestamp",
+		"request_method":       "request_method",
+		"request_url":          "request_url",
+		"response_status_code": "response_status_code",
+		"response_body_size":   "response_body_size",
+	}
+	dbSortByColumn := "timestamp" // Default sort column
+	if col, ok := validSortColumns[sortBy]; ok {
+		dbSortByColumn = col
+	}
+
+	dbSortOrder := "DESC" // Default sort order
+	if strings.ToUpper(sortOrder) == "ASC" {
+		dbSortOrder = "ASC"
+	}
+	// --- End New ---
+
+	// Assume database.GetLogsForPage is updated or a new function like
+	// database.GetLogsForPagePaginatedAndSorted is created.
+	// It should now accept page, limit, sortBy, sortOrder and return (logs, totalRecords, error)
+	logs, totalRecords, err := database.GetLogsForPagePaginatedAndSorted(pageID, page, limit, dbSortByColumn, dbSortOrder)
 	if err != nil {
+		logger.Error("GetLogsForPageHandler: Error fetching logs for page %d: %v", pageID, err)
 		http.Error(w, "Failed to retrieve logs for page: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if logs == nil {
-		logs = []models.HTTPTrafficLog{} // Ensure empty array
+	if logs == nil { // Ensure logs is an empty slice if null
+		logs = []models.HTTPTrafficLog{}
+	}
+
+	totalPages := 0
+	if totalRecords > 0 {
+		totalPages = int(math.Ceil(float64(totalRecords) / float64(limit)))
+	}
+
+	response := struct {
+		Logs         []models.HTTPTrafficLog `json:"logs"`
+		Page         int                     `json:"page"`
+		Limit        int                     `json:"limit"`
+		TotalPages   int                     `json:"total_pages"`
+		TotalRecords int64                   `json:"total_records"`
+	}{
+		Logs:         logs,
+		Page:         page,
+		Limit:        limit,
+		TotalPages:   totalPages,
+		TotalRecords: totalRecords,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(logs)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.Error("GetLogsForPageHandler: Error encoding response for page %d: %v", pageID, err)
+	}
 }
 
 // DeletePageHandler handles requests to delete a specific page sitemap entry.

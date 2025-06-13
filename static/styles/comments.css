@@ -1,0 +1,88 @@
+/* static/styles/comments.css */
+
+/* Styles for the comment analysis table and its content */
+#commentAnalysisResultsContent table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed; /* Ensure table respects column widths */
+    margin-top: 10px; /* Or adjust as needed */
+}
+
+#commentAnalysisResultsContent th,
+#commentAnalysisResultsContent td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid #ecf0f1; /* Matches general table style */
+    vertical-align: top; /* Align content to the top for better readability with wrapped text */
+    word-wrap: break-word; /* Fallback for td content itself */
+    overflow-wrap: break-word; /* Standard for td content itself */
+}
+
+/* Define column widths */
+#commentAnalysisResultsContent table th:nth-child(1),
+#commentAnalysisResultsContent table td:nth-child(1) { /* Line# */
+    width: 5%;
+}
+#commentAnalysisResultsContent table th:nth-child(2),
+#commentAnalysisResultsContent table td:nth-child(2) { /* Type */
+    width: 10%;
+}
+#commentAnalysisResultsContent table th:nth-child(3),
+#commentAnalysisResultsContent table td:nth-child(3) { /* Comment Text */
+    width: 35%;
+}
+#commentAnalysisResultsContent table th:nth-child(4),
+#commentAnalysisResultsContent table td:nth-child(4) { /* Context Before */
+    width: 25%;
+}
+
+#commentAnalysisResultsContent th {
+    background-color: #ecf0f1; /* Matches general table style */
+    color: #34495e;
+    font-size: 0.9em;
+    text-transform: uppercase;
+}
+
+#commentAnalysisResultsContent tr:nth-child(even) {
+    background-color: #f9f9f9; /* Matches general table style */
+}
+
+#commentAnalysisResultsContent tr:hover {
+    background-color: #e8f4fd; /* Matches general table style */
+}
+
+/* Ensure text wraps within <pre> tags in the comment analysis table */
+#commentAnalysisResultsContent table td pre {
+    white-space: pre-wrap; /* Preserve whitespace but wrap lines */
+    word-wrap: break-word; /* Break long words */
+    overflow-wrap: break-word; /* Standard property for breaking long words */
+    word-break: break-all; /* More aggressive breaking for unbreakable strings */
+    margin: 0; /* Remove default pre margins if any */
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; /* Match other pre tags */
+    font-size: 0.85em; /* Match other pre tags */
+}
+
+/* Styles for sortable headers in the comments table */
+#commentAnalysisResultsContent th.sortable {
+    cursor: pointer;
+    position: relative;
+}
+
+#commentAnalysisResultsContent th.sortable:hover {
+    background-color: #e0e6eb; /* Slightly darker for hover */
+}
+
+#commentAnalysisResultsContent th.sorted-asc::after,
+#commentAnalysisResultsContent th.sorted-desc::after {
+    margin-left: 5px;
+}
+
+#commentAnalysisResultsContent th.sorted-asc::after  {
+    content: "▲";
+    font-size: 0.8em;
+}
+
+#commentAnalysisResultsContent th.sorted-desc::after {
+    content: "▼";
+    font-size: 0.8em;
+}

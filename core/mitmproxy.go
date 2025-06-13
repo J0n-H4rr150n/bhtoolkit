@@ -9,8 +9,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
-
-	//"errors" // ADDED for os.ErrNotExist
 	"fmt"
 	"io"
 	"log" // Standard log package for goproxy.Logger config
@@ -19,9 +17,7 @@ import (
 	"net/http"
 	"net/url" // ADDED: For URL parsing
 	"os"      // ADDED for os.ErrNotExist
-
-	//"path/filepath" // ADDED for state file path
-	// "regexp"        // ADDED for scope matching - Commented out as not currently used
+	// For cleaning paths
 	"regexp" // ADDED for regex matching in global exclusions
 	"strings"
 	"sync"
@@ -33,7 +29,8 @@ import (
 
 	"strconv" // For parsing target ID from string
 
-	"github.com/elazarl/goproxy"
+	// "github.com/BishopFox/jsluice" // Import jsluice library - No longer needed here if AnalyzeJSContent is removed
+	"github.com/elazarl/goproxy" // Corrected: Was missing from previous full file, but likely intended.
 	"github.com/tidwall/gjson"
 )
 
@@ -750,7 +747,7 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 
 		dbID, errUpsert := database.UpsertSynackTarget(targetMap)
 		if errUpsert != nil {
-			logger.ProxyError("Synack target list: Error upserting target with Synack ID '%s': %v", synackID, err)
+			logger.ProxyError("Synack target list: Error upserting target with Synack ID '%s': %v", synackID, errUpsert)
 			continue // Skip analytics/findings if target upsert failed
 		}
 
@@ -942,10 +939,4 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 	logger.ProxyInfo("Finished processing Synack target list. Saw %d targets.", len(currentSeenIDs))
 }
 
-// Add to your config.AppConfig struct (e.g., in config/config.go)
-// SynackConfig struct {
-//    ... other synack fields ...
-//    FindingsEnabled      bool   `mapstructure:"findings_enabled"`
-//    FindingsBaseURL      string `mapstructure:"findings_base_url"`      // e.g., "https://platform.synack.com"
-//    FindingsPathPattern  string `mapstructure:"findings_path_pattern"`  // e.g., "/api/extension/v1/listings/%s/findings"
-// }
+// --- End of JS Analysis ---

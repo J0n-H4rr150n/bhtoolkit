@@ -3,6 +3,7 @@ import { escapeHtml, escapeHtmlAttribute } from '../utils.js';
 // Module-level variables for services
 let apiService;
 let uiService;
+let localApplyUiSettingsFunc; // To store the function passed from app.js
 let stateService;
 // tableService might not be directly needed here unless settings involve table layouts directly
 
@@ -21,6 +22,7 @@ export function initSettingsView(services) {
     apiService = services.apiService;
     uiService = services.uiService;
     stateService = services.stateService;
+    localApplyUiSettingsFunc = services.applyUiSettingsFunc; // Store the passed function
     console.log("[SettingsView] Initialized.");
 }
 
@@ -138,6 +140,10 @@ async function handleSaveUISettings() {
              messageArea.textContent = 'UI settings saved successfully! Refresh may be needed for sidebar changes.';
              messageArea.classList.add('success-message');
              uiService.showModalMessage('Settings Saved', 'UI settings have been saved. A page refresh might be required to see all changes (like sidebar visibility).');
+             // Call the applyUiSettings function passed from app.js
+            if (localApplyUiSettingsFunc) {
+                localApplyUiSettingsFunc(newSettings);
+            }
         } else {
             const errorData = await response.json();
             messageArea.textContent = `Error saving UI settings: ${escapeHtml(errorData.message || response.statusText)}`;

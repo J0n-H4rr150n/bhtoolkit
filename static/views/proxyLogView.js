@@ -407,6 +407,7 @@ function openMoreActionsDropdown(event) {
             <li><a href="#proxy-log-detail?id=${logId}" data-action="view-detail">View Details</a></li>
             <li><a href="#proxy-log-detail?id=${logId}&tab=jsAnalysisTab" data-action="analyze-js">Analyze JS</a></li>
             <li><a href="#" data-action="add-to-sitemap-dropdown" data-log-id="${logId}">Add to Sitemap</a></li>
+            <li><a href="#" data-action="find-comments-dropdown" data-log-id="${logId}">Find Comments</a></li>
             <li><a href="#" data-action="send-to-findings" data-log-id="${logId}">Send to Findings (TBD)</a></li>
             <li><a href="#" data-action="send-to-modifier-dropdown" data-log-id="${logId}">Send to Modifier</a></li>
             <li><a href="#" data-action="run-gf">Run GF Patterns (TBD)</a></li>
@@ -430,6 +431,13 @@ function openMoreActionsDropdown(event) {
         openAddToSitemapModal({ currentTarget: button }); // Reuse existing modal logic, pass original button as target
         closeMoreActionsDropdown();
     });
+
+    dropdown.querySelector('a[data-action="find-comments-dropdown"]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleFindCommentsFromDropdown(logId);
+        closeMoreActionsDropdown();
+    });
+
     // Placeholder for "Send to Findings"
     dropdown.querySelector('a[data-action="send-to-findings"]').addEventListener('click', (e) => {
         e.preventDefault();
@@ -447,6 +455,11 @@ function openMoreActionsDropdown(event) {
     // Add a slight delay before attaching the outside click listener
     // to prevent it from firing immediately from the same click that opened it.
     setTimeout(() => document.addEventListener('click', closeMoreActionsDropdownOnClickOutside), 0);
+}
+
+function handleFindCommentsFromDropdown(logId) {
+    // Navigate to the detail view and activate the comments tab
+    window.location.hash = `#proxy-log-detail?id=${logId}&tab=commentsTab`;
 }
 
 function openAddToSitemapModal(event) {
@@ -1004,14 +1017,14 @@ async function handleAnalyzeJS(event) {
 
     try {
         const responseData = await apiService.analyzeJsLinks(parseInt(logIdStr, 10));
-        resultsContentDiv.innerHTML = '';
+        resultsContentDiv.innerHTML = ''; // Clear loading message before adding new content
         let currentJsAnalysisData = [];
 
         if (responseData.message) {
             const p = document.createElement('p');
             p.className = 'message-area info-message';
             p.innerHTML = escapeHtml(responseData.message);
-            resultsContentDiv.appendChild(p);
+            resultsContentDiv.appendChild(p); // Append message first
         }
         if (responseData.results && Object.keys(responseData.results).length > 0) {
             for (const category in responseData.results) {
@@ -1021,41 +1034,103 @@ async function handleAnalyzeJS(event) {
             }
         }
         stateService.updateState({ jsAnalysisDataCache: { [logIdStr]: currentJsAnalysisData } });
-        if (currentJsAnalysisData.length > 0) {
-            renderJsAnalysisTable(logIdStr);
-        } else if (!responseData.message) {
-            resultsContentDiv.innerHTML += `<p>No specific items extracted by the analysis tool.</p>`;
+        
+        // Populate filter and render table
+        populateJsAnalysisCategoryFilter(logIdStr); // Populate dropdown with new categories
+        renderJsAnalysisTable(logIdStr); // This will now use filters from state
+
+        if (currentJsAnalysisData.length === 0 && !responseData.message) {
+             // If no data and no specific message, show a generic "no items" message
+            const noItemsP = document.createElement('p');
+            noItemsP.textContent = "No specific items extracted by the analysis tool.";
+            resultsContentDiv.appendChild(noItemsP);
         }
+
     } catch (error) {
         resultsContentDiv.innerHTML = `<p class="error-message">Error analyzing log #${logIdStr}: ${escapeHtml(error.message)}</p>`;
     }
 }
 
+function populateJsAnalysisCategoryFilter(logIdStr) {
+    const filterSelect = document.getElementById('jsAnalysisCategoryFilter');
+    if (!filterSelect) return;
+
+    const appState = stateService.getState();
+    const analysisData = appState.jsAnalysisDataCache[logIdStr];
+    const currentFilterCategory = appState.jsAnalysisFilterCategory;
+
+    // Clear existing options except "All"
+    while (filterSelect.options.length > 1) {
+        filterSelect.remove(1);
+    }
+
+    if (analysisData && analysisData.length > 0) {
+        const categories = [...new Set(analysisData.map(item => item.category))].sort();
+        categories.forEach(category => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = escapeHtml(category);
+            filterSelect.appendChild(option);
+        });
+    }
+    filterSelect.value = currentFilterCategory; // Set to current filter from state
+}
+
+
 function renderJsAnalysisTable(logIdStr) {
     const resultsContentDiv = document.getElementById('jsAnalysisResultsContent');
+    const filterSelect = document.getElementById('jsAnalysisCategoryFilter');
+    const searchInput = document.getElementById('jsAnalysisSearchInput');
+
     if (!resultsContentDiv) return;
 
     const appState = stateService.getState();
     const currentLogAnalysisData = appState.jsAnalysisDataCache[logIdStr];
-    const currentSortState = appState.jsAnalysisSortState;
+    const { sortBy, sortOrder } = appState.jsAnalysisSortState;
+    const filterCategory = appState.jsAnalysisFilterCategory;
+    const searchText = appState.jsAnalysisSearchText.toLowerCase();
+
+    // Preserve existing message if any (e.g., from handleAnalyzeJS)
+    let existingMessageHTML = resultsContentDiv.querySelector('.message-area')?.outerHTML || '';
+    
+    // Update control values from state
+    if (filterSelect) filterSelect.value = filterCategory;
+    if (searchInput) searchInput.value = appState.jsAnalysisSearchText;
+
 
     if (!currentLogAnalysisData) {
-        resultsContentDiv.innerHTML = "<p>No analysis data available for this log entry.</p>";
-        return;
-    }
-    let existingMessageHTML = resultsContentDiv.querySelector('.message-area')?.outerHTML || '';
-    if (currentLogAnalysisData.length === 0) {
-        resultsContentDiv.innerHTML = existingMessageHTML + "<p>No analysis data to display.</p>";
+        resultsContentDiv.innerHTML = existingMessageHTML + "<p>No analysis data available for this log entry.</p>";
         return;
     }
 
-    const sortedData = [...currentLogAnalysisData].sort((a, b) => {
-        const valA = a[currentSortState.sortBy];
-        const valB = b[currentSortState.sortBy];
+    let processedData = [...currentLogAnalysisData];
+
+    // Apply category filter
+    if (filterCategory) {
+        processedData = processedData.filter(item => item.category === filterCategory);
+    }
+
+    // Apply search text filter
+    if (searchText) {
+        processedData = processedData.filter(item =>
+            item.category.toLowerCase().includes(searchText) ||
+            item.finding.toLowerCase().includes(searchText)
+        );
+    }
+    
+    if (processedData.length === 0) {
+        resultsContentDiv.innerHTML = existingMessageHTML + "<p>No analysis data matches the current filters.</p>";
+        return;
+    }
+
+
+    const sortedData = processedData.sort((a, b) => {
+        const valA = a[sortBy];
+        const valB = b[sortBy];
         let comparison = 0;
         if (valA > valB) comparison = 1;
         else if (valA < valB) comparison = -1;
-        return currentSortState.sortOrder === 'ASC' ? comparison : comparison * -1;
+        return sortOrder === 'ASC' ? comparison : comparison * -1;
     });
 
     let tableHTML = `<table><thead><tr>
@@ -1064,11 +1139,14 @@ function renderJsAnalysisTable(logIdStr) {
         </tr></thead><tbody>`;
     sortedData.forEach(item => tableHTML += `<tr><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.finding)}</td></tr>`);
     tableHTML += `</tbody></table>`;
+    
+    // Prepend existing message, then add table
     resultsContentDiv.innerHTML = existingMessageHTML + tableHTML;
 
+
     resultsContentDiv.querySelectorAll('th.sortable').forEach(th => {
-        th.classList.toggle('sorted-asc', currentSortState.sortBy === th.dataset.sortKey && currentSortState.sortOrder === 'ASC');
-        th.classList.toggle('sorted-desc', currentSortState.sortBy === th.dataset.sortKey && currentSortState.sortOrder === 'DESC');
+        th.classList.toggle('sorted-asc', sortBy === th.dataset.sortKey && sortOrder === 'ASC');
+        th.classList.toggle('sorted-desc', sortBy === th.dataset.sortKey && sortOrder === 'DESC');
         th.addEventListener('click', (event) => handleJsAnalysisSort(event, logIdStr));
     });
 }
@@ -1084,6 +1162,21 @@ function handleJsAnalysisSort(event, logIdStr) {
     renderJsAnalysisTable(logIdStr);
 }
 
+function handleJsAnalysisCategoryFilter(event) {
+    const logIdStr = event.target.dataset.logId;
+    const newCategory = event.target.value;
+    stateService.updateState({ jsAnalysisFilterCategory: newCategory });
+    renderJsAnalysisTable(logIdStr);
+}
+
+const handleJsAnalysisSearch = debounce((event) => {
+    const logIdStr = event.target.dataset.logId;
+    const newSearchText = event.target.value;
+    stateService.updateState({ jsAnalysisSearchText: newSearchText });
+    renderJsAnalysisTable(logIdStr);
+}, 300);
+
+
 function convertJsAnalysisToCSV(jsonData) {
     const headersConfig = [{ key: 'category', label: 'Category' }, { key: 'finding', label: 'Finding' }];
     const headerRow = headersConfig.map(h => escapeHtml(h.label)).join(',');
@@ -1094,14 +1187,28 @@ function convertJsAnalysisToCSV(jsonData) {
 function handleExportJsAnalysisToCSV(event) {
     const logIdStr = event.target.getAttribute('data-log-id');
     const appState = stateService.getState();
-    const currentLogAnalysisData = appState.jsAnalysisDataCache[logIdStr];
+    // Get data based on current filters for export
+    const currentLogAnalysisData = appState.jsAnalysisDataCache[logIdStr] || [];
+    const filterCategory = appState.jsAnalysisFilterCategory;
+    const searchText = appState.jsAnalysisSearchText.toLowerCase();
 
-    if (!currentLogAnalysisData || currentLogAnalysisData.length === 0) {
-        uiService.showModalMessage("No Data", "No JavaScript analysis data available to export.");
+    let dataToExport = [...currentLogAnalysisData];
+    if (filterCategory) {
+        dataToExport = dataToExport.filter(item => item.category === filterCategory);
+    }
+    if (searchText) {
+        dataToExport = dataToExport.filter(item =>
+            item.category.toLowerCase().includes(searchText) ||
+            item.finding.toLowerCase().includes(searchText)
+        );
+    }
+
+    if (!dataToExport || dataToExport.length === 0) {
+        uiService.showModalMessage("No Data", "No JavaScript analysis data available to export with current filters.");
         return;
     }
     uiService.showModalMessage("Exporting...", "Preparing CSV data...");
-    const csvString = convertJsAnalysisToCSV(currentLogAnalysisData);
+    const csvString = convertJsAnalysisToCSV(dataToExport);
     downloadCSV(csvString, `js_analysis_log_${logIdStr}.csv`);
     uiService.hideModal();
 }
@@ -1142,13 +1249,56 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
 
     try {
         const logEntry = await apiService.getProxyLogDetail(logId, navParams);
-        let reqHeaders = {}; try { reqHeaders = JSON.parse(logEntry.request_headers || '{}'); } catch(e) { console.warn("Error parsing request headers JSON", e); }
-        let resHeaders = {}; try { resHeaders = JSON.parse(logEntry.response_headers || '{}'); } catch(e) { console.warn("Error parsing response headers JSON", e); }
+        
+        let reqHeaders = {};
+        const rawReqHeaders = logEntry.request_headers; 
+        if (typeof rawReqHeaders === 'string') {
+            if (rawReqHeaders.trim() === '' || rawReqHeaders === "[object Object]") {
+                reqHeaders = {}; // Default for empty or malformed string
+                if (rawReqHeaders === "[object Object]") {
+                    console.warn("Request headers field contained the literal string '[object Object]', treating as empty headers.");
+                }
+            } else {
+                try {
+                    reqHeaders = JSON.parse(rawReqHeaders);
+                } catch (e) {
+                    console.warn("Error parsing request_headers JSON string:", e, "Original value:", rawReqHeaders);
+                    reqHeaders = {}; // Fallback to empty object on parse error
+                }
+            }
+        } else if (typeof rawReqHeaders === 'object' && rawReqHeaders !== null) {
+            reqHeaders = rawReqHeaders; // It's already a parsed object
+        } else {
+            reqHeaders = {}; // Default for null, undefined, or other unexpected types
+        }
+
+        let resHeaders = {};
+        const rawResHeaders = logEntry.response_headers;
+        if (typeof rawResHeaders === 'string') {
+            if (rawResHeaders.trim() === '' || rawResHeaders === "[object Object]") {
+                resHeaders = {};
+                if (rawResHeaders === "[object Object]") {
+                    console.warn("Response headers field contained the literal string '[object Object]', treating as empty headers.");
+                }
+            } else {
+                try {
+                    resHeaders = JSON.parse(rawResHeaders);
+                } catch (e) {
+                    console.warn("Error parsing response_headers JSON string:", e, "Original value:", rawResHeaders);
+                    resHeaders = {};
+                }
+            }
+        } else if (typeof rawResHeaders === 'object' && rawResHeaders !== null) {
+            resHeaders = rawResHeaders;
+        } else {
+            resHeaders = {};
+        }
 
         viewContentContainer.innerHTML = `
             <div class="log-detail-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h1>Log Entry Detail: #${logEntry.id}
                     <button id="analyzeJsBtn" class="secondary small-button" data-log-id="${logEntry.id}" style="margin-left: 15px;">Analyze JS</button>
+                    <button id="findCommentsBtn" class="secondary small-button" data-log-id="${logEntry.id}" style="margin-left: 10px;">Find Comments</button>
                     <span id="favoriteToggleBtn" class="favorite-toggle ${logEntry.is_favorite ? 'favorited' : ''}" data-log-id="${logEntry.id}" data-is-favorite="${logEntry.is_favorite}" title="Toggle Favorite" style="margin-left: 10px; font-size: 1.2em; vertical-align: middle;">${logEntry.is_favorite ? '★' : '☆'}</span>
                 </h1>
                 <div class="log-navigation">
@@ -1168,6 +1318,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 <button class="tab-button" data-tab="requestTab">Request</button>
                 <button class="tab-button" data-tab="responseTab">Response</button>
                 <button class="tab-button" data-tab="jsAnalysisTab">JS Analysis</button>
+                <button class="tab-button" data-tab="commentsTab">Comments</button> <!-- New Tab -->
             </div>
             <div id="requestTab" class="tab-content active">
                 <h3>Request Details</h3>
@@ -1185,7 +1336,29 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 <h4>Body: (${logEntry.response_body_size} bytes)</h4>
                 <pre class="body-box" id="responseBodyPre"></pre> <!-- Give it an ID -->
             </div>
-            <div id="jsAnalysisTab" class="tab-content"><h3>JavaScript Analysis Results</h3><div style="margin-bottom: 10px;"><button id="exportJsAnalysisCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button></div><div id="jsAnalysisResultsContent"><p>Click "Analyze JS" to perform analysis.</p></div></div>
+            <div id="commentsTab" class="tab-content"><h3>Response Comments</h3> <!-- New Tab Content -->
+                <div style="margin-bottom: 10px;"><button id="exportCommentsCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button></div>
+                <div id="commentAnalysisResultsContent"><p>Click "Find Comments" to search for comments in the response.</p></div>
+            </div>
+            <div id="jsAnalysisTab" class="tab-content">
+                <h3>JavaScript Analysis Results</h3>
+                <div class="js-analysis-controls" style="margin-bottom: 10px; display: flex; gap: 15px; align-items: center;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="jsAnalysisCategoryFilter" style="margin-right: 5px;">Category:</label>
+                        <select id="jsAnalysisCategoryFilter" data-log-id="${logEntry.id}">
+                            <option value="">All</option>
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex-grow:1; margin-bottom:0;">
+                        <input type="search" id="jsAnalysisSearchInput" data-log-id="${logEntry.id}" placeholder="Search findings..." style="width: 100%;">
+                    </div>
+                    <button id="exportJsAnalysisCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button>
+                </div>
+                <div id="jsAnalysisResultsContent">
+                    <p>Click "Analyze JS" to perform analysis.</p>
+                </div>
+            </div>
             <div class="notes-section" style="margin-top: 20px;"><h3>Notes:</h3><textarea id="logEntryNotes" rows="5" style="width: 100%;">${escapeHtml(logEntry.notes && logEntry.notes.Valid ? logEntry.notes.String : '')}</textarea><button id="saveLogEntryNotesBtn" class="primary" data-log-id="${logEntry.id}" style="margin-top: 10px;">Save Notes</button><div id="saveNotesMessage" class="message-area" style="margin-top: 5px;"></div></div>`;
 
         // Safely set the response body content
@@ -1217,12 +1390,24 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 document.getElementById(button.getAttribute('data-tab')).classList.add('active');
                 // If JS Analysis tab is clicked, and no data, trigger analysis
                 if (button.getAttribute('data-tab') === 'jsAnalysisTab' && !appState.jsAnalysisDataCache[String(logId)]) {
-                    document.getElementById('analyzeJsBtn')?.click();
+                    document.getElementById('analyzeJsBtn')?.dispatchEvent(new Event('click'));
+                }
+                // If Comments tab is clicked, and no data, trigger analysis
+                if (button.getAttribute('data-tab') === 'commentsTab' && !appState.commentAnalysisDataCache[String(logId)]) {
+                    document.getElementById('findCommentsBtn')?.dispatchEvent(new Event('click'));
                 }
             });
         });
+        document.getElementById('findCommentsBtn')?.addEventListener('click', handleFindCommentsForDetailView);
+        document.getElementById('exportCommentsCsvBtn')?.addEventListener('click', handleExportCommentsToCSV);
+        
+        // JS Analysis event listeners
         document.getElementById('analyzeJsBtn')?.addEventListener('click', handleAnalyzeJS);
         document.getElementById('exportJsAnalysisCsvBtn')?.addEventListener('click', handleExportJsAnalysisToCSV);
+        document.getElementById('jsAnalysisCategoryFilter')?.addEventListener('change', handleJsAnalysisCategoryFilter);
+        document.getElementById('jsAnalysisSearchInput')?.addEventListener('input', handleJsAnalysisSearch);
+
+
         document.getElementById('saveLogEntryNotesBtn').addEventListener('click', async (event) => {
             const notes = document.getElementById('logEntryNotes').value;
             const currentLogId = event.target.getAttribute('data-log-id');
@@ -1258,20 +1443,178 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
         });
 
         const logIdString = String(logId);
+        // If data is already in cache, populate filter and render table
         if (appState.jsAnalysisDataCache[logIdString] && appState.jsAnalysisDataCache[logIdString].length > 0) {
+            populateJsAnalysisCategoryFilter(logIdString);
             renderJsAnalysisTable(logIdString);
+        }
+        // New: Render comments if already in cache
+        if (appState.commentAnalysisDataCache[logIdString] && appState.commentAnalysisDataCache[logIdString].length > 0) {
+            renderCommentAnalysisTable(logIdString);
         }
 
         // Activate tab based on hash parameter
         const tabToActivate = requestedTab || 'requestTab';
         const tabButtonToActivate = document.querySelector(`.tab-button[data-tab="${tabToActivate}"]`);
         if (tabButtonToActivate) {
-            tabButtonToActivate.click(); // This will also trigger analysis if it's the JS tab and no data
-        } else {
+            tabButtonToActivate.click(); 
+        } else if (document.querySelector('.tab-button[data-tab="requestTab"]')) {
             // Default to requestTab if specified tab is invalid
             document.querySelector('.tab-button[data-tab="requestTab"]')?.click();
         }
     } catch (error) {
         viewContentContainer.innerHTML = `<h1>Log Entry Detail</h1><p class="error-message">Error loading details for Log ID ${logId}: ${escapeHtml(error.message)}</p>`;
     }
+}
+
+async function handleFindCommentsForDetailView(event) {
+    const button = event.target;
+    const logIdStr = button.getAttribute('data-log-id');
+    const resultsContentDiv = document.getElementById('commentAnalysisResultsContent');
+
+    if (!logIdStr || !resultsContentDiv) {
+        console.error("FindComments: Log ID or results container not found.");
+        if (resultsContentDiv) resultsContentDiv.innerHTML = `<p class="error-message">Error: Could not get log ID or results container for comment analysis.</p>`;
+        return;
+    }
+
+    // Ensure the "Comments" tab is active
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.querySelector('.tab-button[data-tab="commentsTab"]')?.classList.add('active');
+    document.getElementById('commentsTab')?.classList.add('active');
+
+    resultsContentDiv.innerHTML = `<p>Searching for comments in response for log entry #${logIdStr}...</p>`;
+
+    try {
+        const commentFindings = await apiService.findComments(parseInt(logIdStr, 10)); // API returns array of models.CommentFinding
+        resultsContentDiv.innerHTML = ''; // Clear loading message
+
+        stateService.updateState({ commentAnalysisDataCache: { [logIdStr]: commentFindings || [] } });
+
+        if (commentFindings && commentFindings.length > 0) {
+            renderCommentAnalysisTable(logIdStr);
+        } else {
+            resultsContentDiv.innerHTML = `<p>No comments found in the response body.</p>`;
+        }
+    } catch (error) {
+        resultsContentDiv.innerHTML = `<p class="error-message">Error finding comments for log #${logIdStr}: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+function renderCommentAnalysisTable(logIdStr) {
+    const resultsContentDiv = document.getElementById('commentAnalysisResultsContent');
+    if (!resultsContentDiv) return;
+
+    const appState = stateService.getState();
+    const currentLogCommentData = appState.commentAnalysisDataCache[logIdStr];
+    const currentSortState = appState.commentAnalysisSortState;
+
+    if (!currentLogCommentData) {
+        resultsContentDiv.innerHTML = "<p>No comment analysis data available for this log entry.</p>";
+        return;
+    }
+    if (currentLogCommentData.length === 0) {
+        resultsContentDiv.innerHTML = "<p>No comments found to display.</p>";
+        return;
+    }
+
+    // Helper function to normalize string values for display
+    function normalizeStringForDisplay(value) {
+        if (value === null || typeof value === 'undefined') {
+            return '';
+        }
+        const strValue = String(value);
+        if (strValue === "undefined") {
+            return '';
+        }
+        return strValue;
+    }
+    const sortedData = [...currentLogCommentData].sort((a, b) => {
+        // Ensure sortBy key exists on the objects, default to empty string if not
+        const valA = a[currentSortState.sortBy] !== undefined ? a[currentSortState.sortBy] : '';
+        const valB = b[currentSortState.sortBy] !== undefined ? b[currentSortState.sortBy] : '';
+        let comparison = 0;
+        if (valA > valB) comparison = 1;
+        else if (valA < valB) comparison = -1;
+        return currentSortState.sortOrder === 'ASC' ? comparison : comparison * -1;
+    });
+
+    let tableHTML = `<table><thead><tr>
+        <th class="sortable" data-sort-key="lineNumber">Line#</th> {/* sortBy uses camelCase 'lineNumber' */}
+        <th class="sortable" data-sort-key="commentType">Type</th> {/* sortBy uses camelCase 'commentType' */}
+        <th>Comment Text</th>
+        <th>Context Before</th>
+        <th>Context After</th>
+        </tr></thead><tbody>`;
+    sortedData.forEach(finding => {
+            const normalizedLineNumber = normalizeStringForDisplay(finding.lineNumber); // Use camelCase
+            const normalizedCommentText = normalizeStringForDisplay(finding.commentText); // Use camelCase
+            const normalizedCommentType = normalizeStringForDisplay(finding.commentType); // Use camelCase
+            const normalizedContextBefore = normalizeStringForDisplay(finding.contextBefore); // Use camelCase
+            const normalizedContextAfter = normalizeStringForDisplay(finding.contextAfter); // Use camelCase
+            
+            const maxCommentLength = 256;
+            const fullEscapedCommentTextForTitle = escapeHtmlAttribute(normalizedCommentText);
+            let displayCommentText;
+
+            if (normalizedCommentText.length > maxCommentLength) {
+                displayCommentText = escapeHtml(normalizedCommentText.substring(0, maxCommentLength)) + "...";
+            } else {
+                displayCommentText = escapeHtml(normalizedCommentText);
+            }
+            tableHTML += `
+                <tr>
+                    <td>${normalizedLineNumber}</td>
+                    <td>${escapeHtml(normalizedCommentType)}</td>
+                    <td title="${fullEscapedCommentTextForTitle}">${displayCommentText}</td>
+                    <td class="comment-context-cell">
+                        <pre class="context-before">${escapeHtml(normalizedContextBefore)}</pre>
+                    </td>
+                    <td class="comment-context-cell">
+                        <pre class="context-after">${escapeHtml(normalizedContextAfter)}</pre>
+                    </td>
+                </tr>`;
+    });
+    tableHTML += `</tbody></table>`;
+    resultsContentDiv.innerHTML = tableHTML;
+
+    resultsContentDiv.querySelectorAll('th.sortable').forEach(th => {
+        th.classList.toggle('sorted-asc', currentSortState.sortBy === th.dataset.sortKey && currentSortState.sortOrder === 'ASC');
+        th.classList.toggle('sorted-desc', currentSortState.sortBy === th.dataset.sortKey && currentSortState.sortOrder === 'DESC');
+        th.addEventListener('click', (event) => handleCommentAnalysisSort(event, logIdStr));
+    });
+}
+
+function handleCommentAnalysisSort(event, logIdStr) {
+    const newSortBy = event.target.dataset.sortKey;
+    const appState = stateService.getState();
+    let newSortOrder = 'ASC';
+    if (appState.commentAnalysisSortState.sortBy === newSortBy) {
+        newSortOrder = appState.commentAnalysisSortState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+    }
+    stateService.updateState({ commentAnalysisSortState: { sortBy: newSortBy, sortOrder: newSortOrder } });
+    renderCommentAnalysisTable(logIdStr);
+}
+
+
+function convertCommentAnalysisToCSV(jsonData) {
+    const headersConfig = [
+        { key: 'lineNumber', label: 'Line Number' },
+        { key: 'commentType', label: 'Comment Type' },
+        { key: 'commentText', label: 'Comment Text' },
+        { key: 'contextBefore', label: 'Context Before' },
+        { key: 'contextAfter', label: 'Context After' },
+    ];
+    const headerRow = headersConfig.map(h => escapeHtml(h.label)).join(',');
+    const dataRows = jsonData.map(item => headersConfig.map(header => escapeHtml(String(item[header.key]))).join(','));
+    return [headerRow].concat(dataRows).join('\n');
+}
+
+function handleExportCommentsToCSV(event) {
+    const logIdStr = event.target.getAttribute('data-log-id');
+    const appState = stateService.getState();
+    const currentLogCommentData = appState.commentAnalysisDataCache[logIdStr];
+    if (!currentLogCommentData || currentLogCommentData.length === 0) { uiService.showModalMessage("No Data", "No comment data available to export."); return; }
+    uiService.showModalMessage("Exporting...", "Preparing CSV data..."); const csvString = convertCommentAnalysisToCSV(currentLogCommentData); downloadCSV(csvString, `comments_log_${logIdStr}.csv`); uiService.hideModal();
 }

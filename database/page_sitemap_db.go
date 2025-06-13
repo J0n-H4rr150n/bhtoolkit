@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 	"toolkit/logger"
 	"toolkit/models"
@@ -187,6 +188,152 @@ func GetLogsForPage(pageID int64) ([]models.HTTPTrafficLog, error) {
 		logs = append(logs, h)
 	}
 	return logs, rows.Err()
+}
+
+// GetLogsForPagePaginatedAndSorted retrieves paginated and sorted HTTPTrafficLog entries for a page.
+func GetLogsForPagePaginatedAndSorted(pageID int64, page int, limit int, sortBy string, sortOrder string) ([]models.HTTPTrafficLog, int64, error) {
+	var logs []models.HTTPTrafficLog
+	var totalRecords int64
+
+	// Count total records for the given pageID (without pagination/sorting)
+	countQuery := `SELECT COUNT(htl.id)
+	               FROM http_traffic_log htl
+	               JOIN page_http_logs phl ON htl.id = phl.http_traffic_log_id
+	               WHERE phl.page_id = ?`
+	err := DB.QueryRow(countQuery, pageID).Scan(&totalRecords)
+	if err != nil {
+		logger.Error("GetLogsForPagePaginatedAndSorted: Error counting logs for page %d: %v", pageID, err)
+		return nil, 0, fmt.Errorf("counting logs for page %d: %w", pageID, err)
+	}
+
+	if totalRecords == 0 {
+		return logs, 0, nil // No logs, return empty slice and 0 total
+	}
+
+	offset := (page - 1) * limit
+
+	// sortBy is already validated in the handler, but good practice to have a mapping here too or ensure it's safe.
+	// For this example, we assume sortBy is a direct column name from the validated list in the handler.
+	// The handler maps frontend keys to DB columns like "timestamp", "request_method", etc.
+	// All these columns are on the http_traffic_log table (aliased as htl).
+	dbSortColumn := "htl." + sortBy // Prepend alias
+
+	// Ensure sortOrder is either ASC or DESC (already done in handler, but good for safety)
+	dbSortOrder := "ASC"
+	if strings.ToUpper(sortOrder) == "DESC" {
+		dbSortOrder = "DESC"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			htl.id, htl.target_id, htl.timestamp, htl.request_method, htl.request_url,
+			htl.request_http_version, htl.request_headers, htl.request_body,
+			htl.response_status_code, htl.response_reason_phrase, htl.response_http_version,
+			htl.response_headers, htl.response_body, htl.response_content_type,
+			htl.response_body_size, htl.duration_ms, htl.client_ip, htl.server_ip,
+			htl.is_https, htl.is_page_candidate, htl.notes, htl.is_favorite
+		FROM http_traffic_log htl
+		JOIN page_http_logs phl ON htl.id = phl.http_traffic_log_id
+		WHERE phl.page_id = ?
+		ORDER BY %s %s, htl.id %s
+		LIMIT ? OFFSET ?
+	`, dbSortColumn, dbSortOrder, dbSortOrder) // Added htl.id for tie-breaking
+
+	rows, err := DB.Query(query, pageID, limit, offset)
+	if err != nil {
+		logger.Error("GetLogsForPagePaginatedAndSorted: Error querying logs for page %d: %v", pageID, err)
+		return nil, 0, fmt.Errorf("querying logs for page %d: %w", pageID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var h models.HTTPTrafficLog
+		var targetIDNullable sql.NullInt64 // Use sql.NullInt64 for target_id
+		var timestampStr string
+
+		// Declare sql.Null types for all potentially nullable fields
+		var requestHTTPVersionNullable sql.NullString
+		var responseStatusCodeNullable sql.NullInt64
+		var responseReasonPhraseNullable sql.NullString
+		var responseHTTPVersionNullable sql.NullString
+		var responseHeadersNullable sql.NullString
+		var responseContentTypeNullable sql.NullString
+		var responseBodySizeNullable sql.NullInt64
+		var durationMsNullable sql.NullInt64
+		var clientIPNullable sql.NullString
+		var serverIPNullable sql.NullString
+
+		// Use sql.Null types for all potentially nullable fields to prevent scan errors
+		// This scan matches the SELECT statement precisely.
+		err := rows.Scan(
+			&h.ID, &targetIDNullable, &timestampStr, &h.RequestMethod, &h.RequestURL,
+			&requestHTTPVersionNullable, &h.RequestHeaders, &h.RequestBody,
+			&responseStatusCodeNullable, &responseReasonPhraseNullable, &responseHTTPVersionNullable,
+			&responseHeadersNullable, &h.ResponseBody, &responseContentTypeNullable,
+			&responseBodySizeNullable, &durationMsNullable, &clientIPNullable, &serverIPNullable,
+			&h.IsHTTPS, &h.IsPageCandidate, &h.Notes, &h.IsFavorite,
+		)
+		if err != nil {
+			logger.Error("GetLogsForPagePaginatedAndSorted: Error scanning log for page %d: %v", pageID, err)
+			return nil, totalRecords, fmt.Errorf("scanning log for page %d: %w", pageID, err)
+		}
+		if targetIDNullable.Valid {
+			h.TargetID = &targetIDNullable.Int64
+		}
+		// Parse timestamp, handling potential errors more gracefully
+		parsedTime, parseErr := time.Parse(time.RFC3339, timestampStr)
+		if parseErr != nil {
+			// Attempt to parse with a common alternative format if RFC3339 fails
+			parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr)
+			if parseErr != nil {
+				logger.Warn("GetLogsForPagePaginatedAndSorted: Could not parse timestamp string '%s' for log ID %d: %v. Using zero time.", timestampStr, h.ID, parseErr)
+				h.Timestamp = time.Time{} // Set to zero value if parsing fails
+			} else {
+				h.Timestamp = parsedTime
+			}
+		} else {
+			h.Timestamp = parsedTime
+		}
+
+		// Assign values from sql.Null types to the model
+		if requestHTTPVersionNullable.Valid {
+			h.RequestHTTPVersion = requestHTTPVersionNullable.String
+		}
+		if responseStatusCodeNullable.Valid {
+			h.ResponseStatusCode = int(responseStatusCodeNullable.Int64)
+		}
+		if responseReasonPhraseNullable.Valid {
+			h.ResponseReasonPhrase = responseReasonPhraseNullable.String
+		}
+		if responseHTTPVersionNullable.Valid {
+			h.ResponseHTTPVersion = responseHTTPVersionNullable.String
+		}
+		if responseHeadersNullable.Valid {
+			h.ResponseHeaders = responseHeadersNullable.String
+		}
+		if responseContentTypeNullable.Valid {
+			h.ResponseContentType = responseContentTypeNullable.String
+		}
+		if responseBodySizeNullable.Valid {
+			h.ResponseBodySize = responseBodySizeNullable.Int64
+		}
+		if durationMsNullable.Valid {
+			h.DurationMs = durationMsNullable.Int64
+		}
+		if clientIPNullable.Valid {
+			h.ClientIP = clientIPNullable.String
+		}
+		if serverIPNullable.Valid {
+			h.ServerIP = serverIPNullable.String
+		}
+
+		// Note: h.RequestMethod, h.RequestURL, h.RequestHeaders, h.Notes are already sql.NullString in the model
+		// h.RequestBody and h.ResponseBody are []byte, which become nil if DB value is NULL.
+		// Boolean fields (IsHTTPS, IsPageCandidate, IsFavorite) become false if DB value is NULL.
+
+		logs = append(logs, h)
+	}
+	return logs, totalRecords, rows.Err()
 }
 
 // UpdatePagesOrder updates the display_order for a list of pages.

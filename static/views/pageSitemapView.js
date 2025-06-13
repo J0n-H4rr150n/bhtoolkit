@@ -76,6 +76,7 @@ export async function loadPageSitemapView(mainViewContainer) {
                 <div id="pageLogsList">
                     <p>Select a page from the list to view its associated HTTP logs.</p>
                 </div>
+                <div id="pageLogsPaginationControls" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
             </div>
         </div>
     `;
@@ -139,7 +140,7 @@ async function fetchAndDisplayRecordedPages(targetId) {
                     // Highlight selected item
                     sortableList.querySelectorAll('.page-sitemap-item').forEach(li => li.classList.remove('active'));
                     e.currentTarget.classList.add('active');
-                    document.getElementById('deleteSelectedPageBtn').style.display = 'inline-block'; // Show delete button
+                    if (document.getElementById('deleteSelectedPageBtn')) document.getElementById('deleteSelectedPageBtn').style.display = 'inline-block'; 
                     fetchAndDisplayLogsForPage(pageId, pageName);
                 });
                 item.addEventListener('dragstart', handlePageDragStart);
@@ -157,7 +158,7 @@ async function fetchAndDisplayRecordedPages(targetId) {
         }
         // Ensure delete button is hidden if no page is selected initially or list is empty
         if (!recordedPagesListDiv.querySelector('.page-sitemap-item.active')) {
-            document.getElementById('deleteSelectedPageBtn').style.display = 'none';
+            if (document.getElementById('deleteSelectedPageBtn')) document.getElementById('deleteSelectedPageBtn').style.display = 'none';
         }
     } catch (error) {
         console.error("Error fetching recorded pages:", error);
@@ -287,31 +288,72 @@ async function fetchAndDisplayLogsForPage(pageId, pageName) {
     const pageLogsListDiv = document.getElementById('pageLogsList');
 
     if (!selectedPageNameDiv || !pageLogsListDiv) {
-        console.error("Required divs for displaying page logs not found.");
+        console.error("PageSitemapView: Required divs for displaying page logs not found in fetchAndDisplayLogsForPage.");
         return;
     }
+
+    const appState = stateService.getState();
+    const { currentPage, limit, sortBy, sortOrder } = appState.paginationState.pageSitemapLogs;
 
     selectedPageNameDiv.textContent = `Displaying logs for: ${escapeHtml(pageName)} (ID: ${pageId})`;
     pageLogsListDiv.innerHTML = `<p>Loading logs for page ID ${pageId}...</p>`;
 
     try {
-        const logs = await apiService.getLogsForPageSitemapEntry(pageId);
-        if (logs && logs.length > 0) {
-            // For now, a simple table. Could be enhanced with sorting, filtering, resizable columns later.
-            let tableHTML = `
-                <table class="page-sitemap-logs-table">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Timestamp</th>
-                            <th>Method</th>
-                            <th>URL</th>
-                            <th>Status</th>
-                            <th>Size (B)</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
+        const params = { page: currentPage, limit, sort_by: sortBy, sort_order: sortOrder };
+        const apiResponseData = await apiService.getLogsForPageSitemapEntry(pageId, params);
+        
+        let logs = [];
+        let responsePage = 1;
+        let responseTotalPages = 1;
+        let responseTotalRecords = 0;
+
+        if (Array.isArray(apiResponseData)) {
+            // Backend returned a direct array of logs
+            logs = apiResponseData;
+            responsePage = 1; // Assume page 1 if only an array is returned
+            responseTotalPages = 1; // Assume 1 page
+            responseTotalRecords = logs.length; // Total records is the length of the array
+            console.warn("[PageSitemapView] API returned a direct array of logs. Pagination/sorting features might be limited.");
+        } else if (apiResponseData && typeof apiResponseData === 'object' && apiResponseData.logs) {
+            // Backend returned an object with logs and pagination info
+            logs = apiResponseData.logs || [];
+            responsePage = apiResponseData.page || 1;
+            responseTotalPages = apiResponseData.total_pages || 1;
+            responseTotalRecords = apiResponseData.total_records || 0;
+        }
+
+        stateService.updateState({
+            paginationState: {
+                ...appState.paginationState,
+                pageSitemapLogs: {
+                    ...appState.paginationState.pageSitemapLogs,
+                    currentPage: responsePage,
+                    totalPages: responseTotalPages,
+                    totalRecords: responseTotalRecords,
+                }
+            }
+        });
+
+        if (logs.length > 0) {
+            const headers = [
+                { label: '#', key: null, sortable: false },
+                { label: 'Timestamp', key: 'timestamp', sortable: true },
+                { label: 'Method', key: 'request_method', sortable: true },
+                { label: 'URL', key: 'request_url', sortable: true },
+                { label: 'Status', key: 'response_status_code', sortable: true },
+                { label: 'Size (B)', key: 'response_body_size', sortable: true },
+                { label: 'Actions', key: null, sortable: false }
+            ];
+            let tableHTML = `<table class="page-sitemap-logs-table"><thead><tr>`;
+            headers.forEach(header => {
+                let thClass = header.sortable ? 'sortable' : '';
+                if (header.key === sortBy) {
+                    thClass += sortOrder === 'ASC' ? ' sorted-asc' : ' sorted-desc';
+                }
+                tableHTML += `<th class="${thClass}" ${header.sortable ? `data-sort-key="${header.key}"` : ''}>${escapeHtml(header.label)}</th>`;
+            });
+            tableHTML += `</tr></thead><tbody>`;
+
             logs.forEach((log, index) => {
                 const ts = log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A';
                 const requestMethod = log.request_method && log.request_method.Valid ? log.request_method.String : 'N/A';
@@ -319,7 +361,7 @@ async function fetchAndDisplayLogsForPage(pageId, pageName) {
                 tableHTML += `
                     <tr>
                         <td>${index + 1}</td>
-                        <td>${ts}</td>
+                        <td>${escapeHtml(ts)}</td>
                         <td>${escapeHtml(requestMethod)}</td>
                         <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(requestURL)}">${escapeHtml(requestURL)}</td>
                         <td>${log.response_status_code || '-'}</td>
@@ -332,6 +374,10 @@ async function fetchAndDisplayLogsForPage(pageId, pageName) {
             });
             tableHTML += `</tbody></table>`;
             pageLogsListDiv.innerHTML = tableHTML;
+
+            pageLogsListDiv.querySelectorAll('th.sortable').forEach(th => {
+                th.addEventListener('click', (e) => handlePageSitemapLogsSort(e, pageId, pageName));
+            });
 
             pageLogsListDiv.querySelectorAll('.view-log-detail').forEach(button => {
                 button.addEventListener('click', (e) => {
@@ -357,10 +403,84 @@ async function fetchAndDisplayLogsForPage(pageId, pageName) {
         } else {
             pageLogsListDiv.innerHTML = '<p>No HTTP logs associated with this page recording.</p>';
         }
+        renderPageSitemapLogsPagination(document.getElementById('pageLogsPaginationControls'), pageId, pageName);
+
     } catch (error) {
         console.error(`Error fetching logs for page ID ${pageId}:`, error);
         pageLogsListDiv.innerHTML = `<p class="error-message">Error loading logs: ${escapeHtml(error.message)}</p>`;
     }
+}
+
+function handlePageSitemapLogsSort(event, pageId, pageName) {
+    const newSortBy = event.currentTarget.dataset.sortKey;
+    if (!newSortBy) return;
+
+    const appState = stateService.getState();
+    const currentSortState = appState.paginationState.pageSitemapLogs;
+    let newSortOrder = 'ASC';
+
+    if (currentSortState.sortBy === newSortBy) {
+        newSortOrder = currentSortState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+    }
+
+    stateService.updateState({
+        paginationState: {
+            ...appState.paginationState,
+            pageSitemapLogs: {
+                ...currentSortState,
+                sortBy: newSortBy,
+                sortOrder: newSortOrder,
+                currentPage: 1 // Reset to first page on sort change
+            }
+        }
+    });
+    fetchAndDisplayLogsForPage(pageId, pageName);
+}
+
+function renderPageSitemapLogsPagination(container, pageId, pageName) {
+    if (!container) {
+        container = document.getElementById('pageLogsPaginationControls');
+        if (!container) return; 
+    }
+    const appState = stateService.getState();
+    const { currentPage, totalPages, totalRecords } = appState.paginationState.pageSitemapLogs;
+
+    let paginationHTML = '';
+    if (totalPages <= 1) {
+        container.innerHTML = totalRecords > 0 ? `<p>${totalRecords} total log(s) found.</p>` : '';
+        return;
+    }
+    paginationHTML += `<p>Page ${currentPage} of ${totalPages} (${totalRecords} total logs)</p>`;
+
+    const prevButton = document.createElement('button');
+    prevButton.className = 'secondary';
+    prevButton.style.marginRight = '5px';
+    prevButton.innerHTML = '&laquo; Previous';
+    if (currentPage <= 1) prevButton.disabled = true;
+    prevButton.addEventListener('click', () => {
+        if (currentPage > 1) {
+            const s = stateService.getState();
+            stateService.updateState({ paginationState: { ...s.paginationState, pageSitemapLogs: {...s.paginationState.pageSitemapLogs, currentPage: currentPage - 1}}});
+            fetchAndDisplayLogsForPage(pageId, pageName);
+        }
+    });
+
+    const nextButton = document.createElement('button');
+    nextButton.className = 'secondary';
+    nextButton.innerHTML = 'Next &raquo;';
+    if (currentPage >= totalPages) nextButton.disabled = true;
+    nextButton.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+            const s = stateService.getState();
+            stateService.updateState({ paginationState: { ...s.paginationState, pageSitemapLogs: {...s.paginationState.pageSitemapLogs, currentPage: currentPage + 1}}});
+            fetchAndDisplayLogsForPage(pageId, pageName);
+        }
+    });
+
+    container.innerHTML = ''; 
+    container.appendChild(document.createRange().createContextualFragment(paginationHTML));
+    if (currentPage > 1) container.appendChild(prevButton);
+    if (currentPage < totalPages) container.appendChild(nextButton);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

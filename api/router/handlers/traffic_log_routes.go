@@ -62,4 +62,7 @@ func RegisterTrafficLogRoutes(r chi.Router) {
 		}
 		DeleteTrafficLogsForTargetHandler(w, req, targetID) // Existing handler
 	})
+
+	// Route for analyzing comments in a log entry's response body
+	r.Post("/traffic-log/analyze/comments", AnalyzeCommentsHandler) // AnalyzeCommentsHandler is in traffic_log_handlers.go
 }

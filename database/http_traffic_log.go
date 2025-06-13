@@ -43,7 +43,18 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 		args = append(args, "%"+filters.FilterContentType+"%")
 	}
 	if filters.FilterSearchText != "" {
-		searchClause := `(LOWER(request_url) LIKE LOWER(?) OR UPPER(request_method) LIKE UPPER(?) OR LOWER(response_content_type) LIKE LOWER(?) OR CAST(response_status_code AS TEXT) LIKE ?)`
+		// Expand search to include headers and bodies.
+		// SQLite's LIKE operator works on BLOBs containing text.
+		searchClause := `(
+			LOWER(request_url) LIKE LOWER(?) OR
+			UPPER(request_method) LIKE UPPER(?) OR
+			LOWER(response_content_type) LIKE LOWER(?) OR
+			CAST(response_status_code AS TEXT) LIKE ? OR
+			LOWER(request_headers) LIKE LOWER(?) OR -- Search request headers (JSON string)
+			request_body LIKE ? OR -- Search request body (BLOB, assumes text content)
+			LOWER(response_headers) LIKE LOWER(?) OR -- Search response headers (JSON string)
+			response_body LIKE ? -- Search response body (BLOB, assumes text content)
+		)`
 		whereClauses = append(whereClauses, searchClause)
 		searchPattern := "%" + filters.FilterSearchText + "%"
 		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern)

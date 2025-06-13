@@ -103,7 +103,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSynackView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initChecklistView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initChecklistTemplateView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
-    initSettingsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
+    initSettingsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, applyUiSettingsFunc: applyUiSettings });
     initSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initModifierView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initPageSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
@@ -514,8 +514,19 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    function applyUiSettings(settings) {
-        // ... (existing code)
+    function applyUiSettings(settings) { 
+        // console.log('[App.js] applyUiSettings called with settings:', JSON.parse(JSON.stringify(settings)));
+        const showSynack = settings && typeof settings === 'object' && settings.showSynackSection === true;
+        // console.log('[App.js] applyUiSettings - showSynack evaluated to:', showSynack);
+
+        const synackSection = document.getElementById('synack-sidebar-section');
+
+        if (synackSection) {
+            // console.log(`[App.js] Toggling 'hidden' on synack-sidebar-section to ${!showSynack}`);
+            synackSection.classList.toggle('hidden', !showSynack);
+        } else {
+            console.warn('[App.js] synack-sidebar-section not found');
+        }
     }
 
     function displayAddFindingForm(targetId) {
@@ -831,16 +842,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     async function fetchAndSetInitialCurrentTarget() {
-        const showSynack = settings && settings.showSynackSection === true;
-        const synackHeader = document.getElementById('synack-sidebar-header');
-        const synackTargetsItem = document.querySelector('.sidebar-item[data-view="synack-targets"]');
-        const synackAnalyticsItem = document.querySelector('.sidebar-item[data-view="synack-analytics"]');
-        if (synackHeader) synackHeader.classList.toggle('hidden', !showSynack);
-        if (synackTargetsItem) synackTargetsItem.classList.toggle('hidden', !showSynack);
-        if (synackAnalyticsItem) synackAnalyticsItem.classList.toggle('hidden', !showSynack);
-    }
-
-    async function fetchAndSetInitialCurrentTarget() {
         const currentTargetDisplay = document.getElementById('currentPlatformTarget');
         let fetchedCurrentTargetId = null;
         let fetchedCurrentTargetName = 'None';
@@ -875,7 +876,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 currentTargetName: fetchedCurrentTargetName,
                 globalTableLayouts: fetchedGlobalTableLayouts
             });
-            applyUiSettings(fetchedUiSettings);
+            applyUiSettings(fetchedUiSettings); // This is the crucial call
 
             if (currentTargetDisplay) {
                 const appState = getState(); 

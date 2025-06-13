@@ -5,13 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os" // Added for diagnostic printing to stderr
+	"path/filepath" // For cleaning paths
+	"regexp"
 	"sort"
 	"strings"
 	"toolkit/database"
 	"toolkit/logger"
 
 	"github.com/BishopFox/jsluice" // Correct casing
+)
+
+var (
+	// Regexes for AnalyzeJSContent
+	// Define a regex to capture Angular routerLink paths
+	// This regex looks for routerLink="...", routerLink='...', or [routerLink]="..."
+	routerLinkRegexGlobal = regexp.MustCompile(`(?:routerLink|\[routerLink\])\s*=\s*["'](/[^"']+)["']`)
+	// Regex for general interesting string literals that look like paths
+	generalPathRegexGlobal = regexp.MustCompile(`["'](/[\w\/-]{3,})["']`)
 )
 
 // processSlice sorts a slice of strings and removes duplicates.
@@ -35,6 +45,9 @@ func processSlice(items []string) []string {
 func AnalyzeJSContent(jsContentBytes []byte, httpLogID int64) (map[string][]string, error) {
 	logger.Info("Analyzing JS content for log ID %d (%d bytes)", httpLogID, len(jsContentBytes))
 	results := make(map[string][]string)
+	// Convert jsContent to string for custom regex operations
+	jsContentStr := string(jsContentBytes)
+
 	analyzer := jsluice.NewAnalyzer(jsContentBytes)
 
 	// --- Fetch TargetID associated with this log entry ---
@@ -91,34 +104,78 @@ func AnalyzeJSContent(jsContentBytes []byte, httpLogID int64) (map[string][]stri
 		results["URLs"] = processSlice(urlsFound)
 	}
 
-	// Extract Secrets - DIAGNOSTIC VERSION
+	// Extract Secrets
 	secrets := []string{}
-	logger.Debug("Attempting to get secrets...")
 	secretMatches := analyzer.GetSecrets()
-	logger.Debug("Found %d potential secret matches.", len(secretMatches))
-
-	for i, secretMatch := range secretMatches {
+	for _, secretMatch := range secretMatches {
 		if secretMatch == nil {
-			logger.Debug("Secret match %d is nil, skipping.", i)
 			continue
 		}
-		// --- DIAGNOSTIC PRINT ---
-		// Print the type and the detailed structure of the secretMatch variable to stderr
-		fmt.Fprintf(os.Stderr, "[DIAGNOSTIC] Secret Match %d Type: %T\n", i, secretMatch)
-		fmt.Fprintf(os.Stderr, "[DIAGNOSTIC] Secret Match %d Value: %+v\n", i, secretMatch)
-		// --- END DIAGNOSTIC PRINT ---
+		// Construct a descriptive string for the secret
+		var secretDescParts []string
+		if secretMatch.Kind != "" {
+			secretDescParts = append(secretDescParts, fmt.Sprintf("Kind: %s", secretMatch.Kind))
+		}
+		// The actual matched data is in the 'Data' field.
+		// It's of type 'any', so we'll format it as a string.
+		// Specific matchers might put a string directly, or a map.
+		if secretMatch.Data != nil {
+			secretDescParts = append(secretDescParts, fmt.Sprintf("Data: %v", secretMatch.Data))
+		}
 
-		// Comment out the problematic line for now to allow compilation
-		// secrets = append(secrets, fmt.Sprintf("Potential Secret: Kind='%s', Value='%s' (Context: %s)", secretMatch.Kind, secretMatch.Value.DecodedString(), secretMatch.Context))
-		// secrets = append(secrets, fmt.Sprintf("Potential Secret: Description='%s', Match='%s' (Context: %s)", secretMatch.Description, secretMatch.Match, secretMatch.Context))
-		// secrets = append(secrets, fmt.Sprintf("Potential Secret: Kind='%s', Match='%s' (Context: %s)", secretMatch.Finding.Kind, secretMatch.Finding.Match, secretMatch.Context))
-
-		// Replace with a placeholder using the debug output
-		secrets = append(secrets, fmt.Sprintf("Raw Secret Match %d: %+v", i, secretMatch))
-
+		// Context is also 'any'
+		if secretMatch.Context != nil {
+			// Truncate long contexts for display
+			contextDisplay := fmt.Sprintf("%v", secretMatch.Context) // Convert 'any' to string
+			if len(contextDisplay) > 100 {
+				contextDisplay = contextDisplay[:97] + "..."
+			}
+			secretDescParts = append(secretDescParts, fmt.Sprintf("Context: %s", contextDisplay))
+		}
+		if len(secretDescParts) > 0 { // Only add if we have some parts
+			secrets = append(secrets, strings.Join(secretDescParts, ", "))
+		}
 	}
-	if len(secrets) > 0 {
-		results["Secrets (Raw Debug)"] = processSlice(secrets) // Change key to indicate debug output
+
+	// Extract Generic Strings (can be noisy, but might catch other things)
+	var genericStrings []string
+	// Use a tree-sitter query to find all string literals
+	analyzer.Query("(string) @string", func(n *jsluice.Node) {
+		// n.RawString() gets the content of the string literal, including quotes.
+		// n.DecodedString() attempts to decode escape sequences.
+		// For generic strings, DecodedString is usually what we want.
+		genericStrings = append(genericStrings, n.DecodedString())
+	})
+	if len(genericStrings) > 0 {
+		results["Generic Strings"] = processSlice(genericStrings)
+	}
+
+	// Apply custom regex for Angular routerLink
+	routerLinkMatches := routerLinkRegexGlobal.FindAllStringSubmatch(jsContentStr, -1)
+	var foundRouterLinks []string
+	for _, match := range routerLinkMatches {
+		if len(match) > 1 && match[1] != "" {
+			cleanedPath := filepath.Clean(match[1])
+			if cleanedPath != "/" && !strings.HasPrefix(cleanedPath, "/") {
+				cleanedPath = "/" + cleanedPath
+			}
+			foundRouterLinks = append(foundRouterLinks, cleanedPath)
+		}
+	}
+	if len(foundRouterLinks) > 0 {
+		results["Angular RouterLinks (Regex)"] = processSlice(foundRouterLinks)
+	}
+
+	// Apply custom regex for general path-like strings
+	generalPathMatches := generalPathRegexGlobal.FindAllStringSubmatch(jsContentStr, -1)
+	var foundGeneralPaths []string
+	for _, match := range generalPathMatches {
+		if len(match) > 1 && match[1] != "" {
+			foundGeneralPaths = append(foundGeneralPaths, filepath.Clean(match[1]))
+		}
+	}
+	if len(foundGeneralPaths) > 0 {
+		results["Potential Paths (Regex)"] = processSlice(foundGeneralPaths)
 	}
 
 	// TODO: Add extraction for other interesting things jsluice might find
