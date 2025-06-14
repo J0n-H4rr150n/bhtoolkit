@@ -266,6 +266,44 @@ async function handleCopySelectedItemsToTarget() {
     }
 }
 
+async function handleCopyAllTemplateItemsToTarget() {
+    const messageArea = document.getElementById('copyTemplateItemsMessage'); // Reuse existing message area
+    if (!messageArea) {
+        console.error("copyTemplateItemsMessage element not found.");
+        uiService.showModalMessage("UI Error", "Could not find the message area on the page.");
+        return;
+    }
+    messageArea.textContent = '';
+    messageArea.className = 'message-area';
+
+    const appState = stateService.getState();
+    const currentTemplateId = appState.currentChecklistTemplateId;
+    const currentTargetId = appState.currentTargetId;
+    const currentTargetName = appState.currentTargetName;
+
+    if (!currentTemplateId) {
+        uiService.showModalMessage("Selection Needed", "Please select a template first.");
+        return;
+    }
+
+    if (!currentTargetId) {
+        const msg = 'Please set a current target before copying items. You can set a target from the "Targets" list or the "Current Target" view using the 📍 button.';
+        messageArea.textContent = msg;
+        messageArea.classList.add('error-message');
+        uiService.showModalMessage("Action Required", msg);
+        return;
+    }
+
+    uiService.showModalMessage("Copying All Items...", `Attempting to copy all items from the selected template to target "${escapeHtml(currentTargetName)}" (ID: ${currentTargetId})...`);
+
+    try {
+        const responseData = await apiService.copyAllTemplateItemsToTarget(currentTemplateId, currentTargetId); // Assumes this API method exists
+        uiService.showModalMessage("Copy Complete", `Successfully copied ${responseData.items_copied} item(s) to target "${escapeHtml(currentTargetName)}".`);
+    } catch (error) {
+        console.error("Error copying all checklist items:", error);
+        uiService.showModalMessage("Copy Error", `Failed to copy all items: ${escapeHtml(error.message)}`);
+    }
+}
 /**
  * Loads the checklist templates view.
  * @param {HTMLElement} mainViewContainer - The main container element for the view.
@@ -294,20 +332,28 @@ export async function loadChecklistTemplatesView(mainViewContainer) {
             </select>
         </div>
         <div id="checklistTemplateMessage" class="message-area" style="margin-bottom: 15px;"></div>
+        <div style="margin-bottom: 15px;"> <!-- Moved this block up -->
+            <button id="copySelectedTemplateItemsBtn" class="primary" style="margin-right: 10px;" ${!currentTargetId ? 'disabled title="Set a current target first"' : ''}>
+                Copy Selected to Current Target
+            </button>
+            <button id="copyAllTemplateItemsBtn" class="primary" ${!currentTargetId || !appState.currentChecklistTemplateId ? 'disabled title="Select a template and set a current target first"' : ''}>Copy All to Current Target</button>
+            <div id="copyTemplateItemsMessage" class="message-area" style="margin-top: 10px;"></div>
+        </div>
         <div id="checklistTemplateItemsTableContainer">
             <p>Please select a template to view its items.</p>
         </div>
         <div id="checklistTemplatePaginationControls" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
-        <button id="copySelectedTemplateItemsBtn" class="primary" style="margin-top: 20px;" ${!currentTargetId ? 'disabled title="Set a current target first"' : ''}>
-            Copy Selected to Current Target
-        </button>
-        <div id="copyTemplateItemsMessage" class="message-area" style="margin-top: 10px;"></div>
     `;
 
     await fetchAndPopulateChecklistTemplatesDropdown();
     const copyBtn = document.getElementById('copySelectedTemplateItemsBtn');
     if (copyBtn) {
         copyBtn.addEventListener('click', handleCopySelectedItemsToTarget);
+    }
+
+    const copyAllBtn = document.getElementById('copyAllTemplateItemsBtn');
+    if (copyAllBtn) {
+        copyAllBtn.addEventListener('click', handleCopyAllTemplateItemsToTarget);
     }
 
     if (appState.currentChecklistTemplateId) {

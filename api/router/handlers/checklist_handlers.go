@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"toolkit/database"
@@ -14,7 +15,7 @@ import (
 	"toolkit/models"
 )
 
-// GetChecklistItemsHandler retrieves all checklist items for a given target.
+// GetChecklistItemsHandler retrieves checklist items for a given target, with pagination, sorting, and filtering.
 func GetChecklistItemsHandler(w http.ResponseWriter, r *http.Request, targetID int64) {
 	if r.Method != http.MethodGet {
 		logger.Error("GetChecklistItemsHandler: MethodNotAllowed: %s for target %d", r.Method, targetID)
@@ -22,15 +23,64 @@ func GetChecklistItemsHandler(w http.ResponseWriter, r *http.Request, targetID i
 		return
 	}
 
-	items, err := database.GetChecklistItemsByTargetID(targetID)
+	// Pagination parameters
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+	sortBy := r.URL.Query().Get("sort_by")
+	sortOrder := r.URL.Query().Get("sort_order")
+	filter := r.URL.Query().Get("filter")
+	showIncompleteOnlyStr := r.URL.Query().Get("show_incomplete_only")
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		limit = 25 // Default limit
+	} else if limit > 200 { // Max limit
+		limit = 200
+	}
+	offset := (page - 1) * limit
+
+	if sortBy == "" {
+		sortBy = "created_at" // Default sort column
+	}
+	if sortOrder == "" {
+		sortOrder = "asc" // Default sort order
+	}
+
+	showIncompleteOnly := true            // Default to true
+	if showIncompleteOnlyStr == "false" { // Only set to false if explicitly "false"
+		showIncompleteOnly = false
+	}
+
+	items, totalRecords, totalCompletedRecordsForFilter, err := database.GetChecklistItemsByTargetIDPaginated(targetID, limit, offset, sortBy, sortOrder, filter, showIncompleteOnly)
 	if err != nil {
-		logger.Error("GetChecklistItemsHandler: Error fetching checklist items for target %d: %v", targetID, err)
+		// Error already logged in database function
 		http.Error(w, "Failed to retrieve checklist items", http.StatusInternalServerError)
 		return
 	}
 
+	totalPages := 0
+	if totalRecords > 0 {
+		totalPages = (int(totalRecords) + limit - 1) / limit
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
+	json.NewEncoder(w).Encode(models.PaginatedTargetChecklistItemsResponse{
+		Page:                           page,
+		Limit:                          limit,
+		TotalRecords:                   totalRecords,
+		TotalCompletedRecordsForFilter: totalCompletedRecordsForFilter, // Add the new field
+		TotalPages:                     totalPages,
+		Items:                          items,
+		SortBy:                         sortBy,
+		SortOrder:                      sortOrder,
+		Filter:                         filter,
+		ShowIncompleteOnly:             showIncompleteOnly, // Echo back the filter state
+	})
 }
 
 // AddChecklistItemHandler adds a new checklist item for a target.
@@ -277,4 +327,25 @@ func CopyTemplateItemsToTargetHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 	logger.Info("CopyTemplateItemsToTargetHandler: For target %d, copied %d, skipped %d items. Errors: %d", req.TargetID, copiedCount, skippedCount, len(errorMessages))
+}
+
+// DeleteAllChecklistItemsForTargetHandler handles requests to delete all checklist items for a specific target.
+func DeleteAllChecklistItemsForTargetHandler(w http.ResponseWriter, r *http.Request, targetID int64) {
+	if r.Method != http.MethodDelete {
+		logger.Error("DeleteAllChecklistItemsForTargetHandler: MethodNotAllowed: %s for target %d", r.Method, targetID)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	err := database.DeleteAllChecklistItemsForTarget(targetID)
+	if err != nil {
+		logger.Error("DeleteAllChecklistItemsForTargetHandler: Error deleting all checklist items for target %d: %v", targetID, err)
+		http.Error(w, "Failed to delete all checklist items", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("Successfully deleted all checklist items for target ID %d", targetID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK) // Or http.StatusNoContent (204)
+	json.NewEncoder(w).Encode(map[string]string{"message": "All checklist items deleted successfully for the target."})
 }

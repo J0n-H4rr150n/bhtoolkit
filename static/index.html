@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="styles/comments.css">
     <link rel="stylesheet" href="styles/visualizerView.css">
     <script src="js/vendor/cytoscape/3.29.2/cytoscape.min.js"></script>
+    <script src="js/vendor/showdown/2.1.0/showdown.min.js"></script>
 </head>
 <body>
 
@@ -119,6 +120,12 @@
                     <span class="sidebar-item-text">Settings</span>
                 </a>
             </div>
+
+            <!-- Version Display Area -->
+            <div class="sidebar-version-display" style="padding: 10px 15px; text-align: center; margin-top: auto;">
+                <span id="appVersionDisplay" style="font-size: 0.8em; color: #7f8c8d;"></span>
+            </div>
+            
         </aside>
 
         <main class="main-content" id="mainContent">

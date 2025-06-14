@@ -24,7 +24,7 @@ async function handleResponse(response) {
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.indexOf("application/json") !== -1) {
             const responseJson = await response.json();
-            console.log("[ApiService] handleResponse:", responseJson);
+            console.log("[ApiService] handleResponse (url, status, json):", response.url, response.status, JSON.parse(JSON.stringify(responseJson)));
             return responseJson;
         }
         return {}; // Return empty object for non-JSON or empty successful responses
@@ -250,12 +250,14 @@ export async function deleteScopeRule(ruleId) {
 }
 
 /**
- * Fetches checklist items for a target.
+ * Fetches checklist items for a target with pagination, sorting, and filtering.
  * @param {number|string} targetId - The ID of the target.
- * @returns {Promise<Array<Object>>}
+ * @param {Object} params - Query parameters (page, limit, sort_by, sort_order, filter).
+ * @returns {Promise<Object>} - API response containing checklist items and pagination info.
  */
-export async function getChecklistItems(targetId) {
-    const response = await fetch(`${API_BASE}/target/${targetId}/checklist-items`);
+export async function getChecklistItems(targetId, params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${API_BASE}/target/${targetId}/checklist-items?${query}`);
     return handleResponse(response);
 }
 
@@ -295,6 +297,18 @@ export async function updateChecklistItem(itemId, data) {
  */
 export async function deleteChecklistItem(itemId) {
     const response = await fetch(`${API_BASE}/checklist-items/${itemId}`, {
+        method: 'DELETE'
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes all checklist items for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>}
+ */
+export async function deleteAllChecklistItemsForTarget(targetId) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/checklist-items/all`, { // New endpoint
         method: 'DELETE'
     });
     return handleResponse(response);
@@ -484,6 +498,22 @@ export async function copyChecklistTemplateItemsToTarget(payload) {
     });
     return handleResponse(response);
 }
+
+/**
+ * Copies all items from a checklist template to a target's checklist.
+ * @param {number|string} templateId - The ID of the checklist template.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response (e.g., a success message and count of items copied).
+ */
+export async function copyAllTemplateItemsToTarget(templateId, targetId) {
+    const response = await fetch(`${API_BASE}/checklist-templates/copy-all-to-target`, { // New endpoint
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: templateId, target_id: targetId })
+    });
+    return handleResponse(response);
+}
+
 
 /**
  * Adds a manual entry to the sitemap.
@@ -831,6 +861,30 @@ export async function deleteModifierTask(taskId) {
 }
 
 /**
+ * Deletes all modifier tasks for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response.
+ */
+export async function deleteModifierTasksForTarget(targetId) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/target/${targetId}`, {
+        method: 'DELETE',
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes all modifier tasks for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response.
+ */
+export async function deleteAllModifierTasksForTarget(targetId) {
+    const response = await fetch(`${API_BASE}/modifier/tasks/target/${targetId}`, {
+        method: 'DELETE',
+    });
+    return handleResponse(response);
+}
+
+/**
  * Finds comments in a proxy log entry's response body.
  * @param {number} httpLogId - The ID of the HTTP log entry.
  * @returns {Promise<Array<Object>>} - A promise that resolves with an array of comment findings.
@@ -863,5 +917,29 @@ export async function getSitemapGraphData(targetId) {
  */
 export async function getPageSitemapGraphData(targetId) {
     const response = await fetch(`${API_BASE}/visualizer/page-sitemap-graph?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
+/**
+ * Sends a list of URLs to the backend to be requested through the proxy.
+ * @param {Object} payload - Data containing target_id and an array of URLs.
+ *                         Expected: { target_id: number, urls: string[] }
+ * @returns {Promise<Object>} - A promise that resolves with the backend's response.
+ */
+export async function sendPathsToProxy(payload) {
+    const response = await fetch(`${API_BASE}/proxy/send-requests`, { // New endpoint
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches the application version from the backend.
+ * @returns {Promise<Object>} - A promise that resolves with an object like { version: "1.0.0" }.
+ */
+export async function getVersion() {
+    const response = await fetch(`${API_BASE}/version`);
     return handleResponse(response);
 }

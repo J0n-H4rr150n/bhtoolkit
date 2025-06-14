@@ -1,11 +1,17 @@
 package database
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
+
+	// "regexp" // No longer needed for simple difficulty extraction from old notes for Juice Shop
+	"sort"
+	"strings" // Added for time.Now() in seedInitialChecklistTemplates
 	"toolkit/logger"
 	"toolkit/models"
 
@@ -142,14 +148,35 @@ func seedInitialChecklistTemplates() error {
 		{Name: "API Security Top 10 (OWASP)", Description: sql.NullString{String: "Checklist based on OWASP API Security Top 10 vulnerabilities.", Valid: true}},
 		{Name: "Tool Commands", Description: sql.NullString{String: "Commands for various tools.", Valid: true}},
 		{Name: "Tool Commands with Proxy", Description: sql.NullString{String: "Commands for various tools with proxy support.", Valid: true}},
+		// OWASP Juice Shop Challenges template will be added dynamically if data is loaded
 	}
 
-	itemsMap := map[string][]struct {
+	type challengeItem struct {
 		ItemText        string
 		ItemCommandText string
 		Notes           string
 		DisplayOrder    int
-	}{
+		Difficulty      int // For sorting
+	}
+
+	// Struct to unmarshal the provided JSON data for Juice Shop challenges
+	type JuiceShopChallengeData struct {
+		Name          string   `json:"name"`
+		Category      string   `json:"category"`
+		Description   string   `json:"description"`
+		Difficulty    int      `json:"difficulty"`
+		Hint          string   `json:"hint"`
+		HintURL       string   `json:"hintUrl"`
+		MitigationURL *string  `json:"mitigationUrl"` // Use pointer for nullable string
+		Key           string   `json:"key"`
+		Tags          []string `json:"tags,omitempty"`
+		DisabledEnv   []string `json:"disabledEnv,omitempty"`
+		Tutorial      *struct {
+			Order int `json:"order"`
+		} `json:"tutorial,omitempty"` // Use pointer for nullable object
+	}
+
+	itemsMap := map[string][]challengeItem{
 		"Basic Web Application Scan": {
 			{ItemText: "Identify application entry points (URLs, forms, parameters).", DisplayOrder: 1, Notes: "Map out the application surface."},
 			{ItemText: "Check for common misconfigurations (default credentials, exposed admin panels).", DisplayOrder: 2, Notes: "Use tools like Nikto, Dirb."},
@@ -176,7 +203,88 @@ func seedInitialChecklistTemplates() error {
 			{ItemText: "Subfinder - Enumerate Subdomains", ItemCommandText: "subfinder -d <target_domain>", DisplayOrder: 4, Notes: "Passive subdomain enumeration."},
 			{ItemText: "Amass - Active Subdomain Enum", ItemCommandText: "amass enum -active -d <target_domain> -brute -w /path/to/subdomain_wordlist.txt", DisplayOrder: 5, Notes: "More comprehensive, active enumeration."},
 		},
+		// "OWASP Juice Shop Challenges" will be populated from JSON
 	}
+
+	// --- Enrich OWASP Juice Shop Challenges Notes ---
+	jsonFilePath := filepath.Join("database", "seed", "owasp_juice_shop_challenges.json")
+	jsonDataBytes, errFile := ioutil.ReadFile(jsonFilePath)
+	if errFile != nil {
+		logger.Error("seedInitialChecklistTemplates: Failed to read owasp_juice_shop_challenges.json: %v. Skipping Juice Shop template.", errFile)
+	} else {
+		var allChallengeData []JuiceShopChallengeData
+		err := json.Unmarshal(jsonDataBytes, &allChallengeData)
+		if err != nil {
+			logger.Error("seedInitialChecklistTemplates: Failed to unmarshal Juice Shop challenges JSON: %v. Skipping Juice Shop template.", err)
+		} else {
+			var enrichedJuiceShopItems []challengeItem
+			for _, detailedData := range allChallengeData {
+				var newNotesBuilder bytes.Buffer
+				newNotesBuilder.WriteString(fmt.Sprintf("Category: %s\n", detailedData.Category))
+				newNotesBuilder.WriteString(fmt.Sprintf("Difficulty: %d\n", detailedData.Difficulty))
+				if detailedData.Description != "" {
+					newNotesBuilder.WriteString(fmt.Sprintf("Description: %s\n", detailedData.Description))
+				}
+				if detailedData.Hint != "" {
+					newNotesBuilder.WriteString(fmt.Sprintf("Hint: %s\n", detailedData.Hint))
+				}
+				if detailedData.HintURL != "" {
+					newNotesBuilder.WriteString(fmt.Sprintf("Hint URL: %s\n", detailedData.HintURL))
+				}
+				if detailedData.MitigationURL != nil && *detailedData.MitigationURL != "" {
+					newNotesBuilder.WriteString(fmt.Sprintf("Mitigation URL: %s\n", *detailedData.MitigationURL))
+				}
+				if len(detailedData.Tags) > 0 {
+					newNotesBuilder.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(detailedData.Tags, ", ")))
+				}
+				if detailedData.Key != "" {
+					newNotesBuilder.WriteString(fmt.Sprintf("Key: %s\n", detailedData.Key))
+				}
+				if len(detailedData.DisabledEnv) > 0 {
+					newNotesBuilder.WriteString(fmt.Sprintf("Disabled Env: %s\n", strings.Join(detailedData.DisabledEnv, ", ")))
+				}
+				if detailedData.Tutorial != nil {
+					newNotesBuilder.WriteString(fmt.Sprintf("Tutorial Order: %d\n", detailedData.Tutorial.Order))
+				}
+
+				enrichedJuiceShopItems = append(enrichedJuiceShopItems, challengeItem{
+					ItemText:   detailedData.Name,
+					Notes:      strings.TrimSpace(newNotesBuilder.String()),
+					Difficulty: detailedData.Difficulty,
+				})
+			}
+
+			// Add the "OWASP Juice Shop Challenges" template definition if not already present
+			juiceShopTemplateName := "OWASP Juice Shop Challenges"
+			foundJuiceShopTemplate := false
+			for _, t := range templates {
+				if t.Name == juiceShopTemplateName {
+					foundJuiceShopTemplate = true
+					break
+				}
+			}
+			if !foundJuiceShopTemplate {
+				templates = append(templates, models.ChecklistTemplate{
+					Name:        juiceShopTemplateName,
+					Description: sql.NullString{String: "A comprehensive list of OWASP Juice Shop challenges with detailed information, sourced from official data.", Valid: true},
+				})
+			}
+
+			itemsMap[juiceShopTemplateName] = enrichedJuiceShopItems
+
+			// Sort the enriched challenges
+			sort.SliceStable(itemsMap[juiceShopTemplateName], func(i, j int) bool {
+				itemI := itemsMap[juiceShopTemplateName][i]
+				itemJ := itemsMap[juiceShopTemplateName][j]
+				if itemI.Difficulty != itemJ.Difficulty {
+					return itemI.Difficulty < itemJ.Difficulty
+				}
+				return strings.ToLower(itemI.ItemText) < strings.ToLower(itemJ.ItemText)
+			})
+			logger.Info("Successfully loaded and processed %d OWASP Juice Shop challenges from JSON.", len(enrichedJuiceShopItems))
+		}
+	}
+	// --- End of Enrichment ---
 
 	for _, t := range templates {
 		res, err := DB.Exec("INSERT OR IGNORE INTO checklist_templates (name, description) VALUES (?, ?)", t.Name, t.Description)
@@ -185,19 +293,27 @@ func seedInitialChecklistTemplates() error {
 		}
 		templateID, _ := res.LastInsertId()
 
-		if templateID == 0 {
+		if templateID == 0 { // If IGNORE happened, get existing ID
+			logger.Info("Template '%s' likely already exists, attempting to fetch its ID.", t.Name)
 			err := DB.QueryRow("SELECT id FROM checklist_templates WHERE name = ?", t.Name).Scan(&templateID)
 			if err != nil {
-				logger.Info("Could not retrieve existing template ID for '%s' during seeding: %v", t.Name, err)
+				logger.Error("Could not retrieve existing template ID for '%s' during seeding: %v. Skipping items for this template.", t.Name, err)
 				continue
 			}
 		}
-		if templateID > 0 && itemsMap[t.Name] != nil {
-			for _, item := range itemsMap[t.Name] {
-				itemNotes := models.NullString(item.Notes)
+
+		if templateID > 0 {
+			itemsForTemplate, ok := itemsMap[t.Name]
+			if !ok || itemsForTemplate == nil { // Check if key exists and if slice is not nil
+				continue
+			}
+			for i, item := range itemsForTemplate {
+				itemNotes := models.NullString(item.Notes) // Use the enriched notes
 				itemCommand := models.NullString(item.ItemCommandText)
-				_, err := DB.Exec("INSERT OR IGNORE INTO checklist_template_items (template_id, item_text, item_command_text, notes, display_order) VALUES (?, ?, ?, ?, ?)", templateID, item.ItemText, itemCommand, itemNotes, item.DisplayOrder)
+				currentDisplayOrder := i + 1 // Re-assign display order after sorting
+				_, err := DB.Exec("INSERT OR IGNORE INTO checklist_template_items (template_id, item_text, item_command_text, notes, display_order) VALUES (?, ?, ?, ?, ?)", templateID, item.ItemText, itemCommand, itemNotes, currentDisplayOrder)
 				if err != nil {
+					// Log error but continue seeding other items/templates
 					logger.Info("Could not seed item '%s' for template '%s': %v", item.ItemText, t.Name, err)
 				}
 			}
@@ -235,6 +351,119 @@ func GetChecklistItemsByTargetID(targetID int64) ([]models.TargetChecklistItem, 
 		return nil, fmt.Errorf("iterating checklist items for target %d: %w", targetID, err)
 	}
 	return items, nil
+}
+
+// GetChecklistItemsByTargetIDPaginated retrieves a paginated, sorted, and filtered list of checklist items for a target.
+// It returns the items, total records matching filters, total completed records matching filters, and an error.
+func GetChecklistItemsByTargetIDPaginated(targetID int64, limit int, offset int, sortBy string, sortOrder string, filter string, showIncompleteOnly bool) ([]models.TargetChecklistItem, int64, int64, error) {
+	var items []models.TargetChecklistItem
+	var totalCompletedRecordsForFilter int64
+	var totalRecords int64
+
+	// Validate sortBy column to prevent SQL injection
+	allowedSortColumns := map[string]string{
+		"id":                "id",
+		"item_text":         "LOWER(item_text)", // Sort case-insensitively
+		"item_command_text": "LOWER(item_command_text)",
+		"notes":             "LOWER(notes)",
+		"is_completed":      "is_completed",
+		"created_at":        "created_at",
+		"updated_at":        "updated_at",
+	}
+	dbSortBy, ok := allowedSortColumns[sortBy]
+	if !ok {
+		dbSortBy = "created_at" // Default sort column
+	}
+
+	if strings.ToUpper(sortOrder) != "ASC" && strings.ToUpper(sortOrder) != "DESC" {
+		sortOrder = "ASC"
+	}
+
+	var whereClauses []string
+	var args []interface{}
+
+	// Assuming the table `target_checklist_items` is the primary table here and not aliased.
+	// If it were aliased (e.g., "tci"), you'd use "tci.target_id = ?"
+	// For now, assuming no alias is needed for target_id in this specific query context.
+	// Explicitly state the table name for clarity, even if not strictly ambiguous in this specific query.
+	// This helps if the query is ever expanded or combined.
+	whereClauses = append(whereClauses, "target_checklist_items.target_id = ?")
+	args = append(args, targetID)
+
+	if filter != "" {
+		filterPattern := "%" + strings.ToLower(filter) + "%" // Filter case-insensitively
+		whereClauses = append(whereClauses, "(LOWER(item_text) LIKE ? OR LOWER(item_command_text) LIKE ? OR LOWER(notes) LIKE ?)")
+		args = append(args, filterPattern, filterPattern, filterPattern)
+	}
+
+	if showIncompleteOnly {
+		whereClauses = append(whereClauses, "is_completed = 0") // Or is_completed = FALSE depending on SQLite version/bool handling
+	}
+
+	whereCondition := ""
+	if len(whereClauses) > 0 {
+		whereCondition = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Use the table name in COUNT for clarity, though COUNT(*) would also work.
+	countQuery := fmt.Sprintf("SELECT COUNT(target_checklist_items.id) FROM target_checklist_items %s", whereCondition)
+	err := DB.QueryRow(countQuery, args...).Scan(&totalRecords)
+	if err != nil {
+		logger.Error("GetChecklistItemsByTargetIDPaginated: Error counting total records for target %d: %v", targetID, err)
+		return nil, 0, 0, fmt.Errorf("counting total checklist items for target %d: %w", targetID, err)
+	}
+
+	if totalRecords == 0 {
+		return items, 0, 0, nil
+	}
+
+	// Count completed items matching the filter (excluding showIncompleteOnly for this specific count)
+	completedWhereClauses := []string{"target_checklist_items.target_id = ?", "is_completed = 1"} // Start with target_id and is_completed
+	completedArgs := []interface{}{targetID}
+	if filter != "" { // Apply text filter if present
+		filterPattern := "%" + strings.ToLower(filter) + "%"
+		completedWhereClauses = append(completedWhereClauses, "(LOWER(item_text) LIKE ? OR LOWER(item_command_text) LIKE ? OR LOWER(notes) LIKE ?)")
+		completedArgs = append(completedArgs, filterPattern, filterPattern, filterPattern)
+	}
+	completedCountQuery := fmt.Sprintf("SELECT COUNT(target_checklist_items.id) FROM target_checklist_items WHERE %s", strings.Join(completedWhereClauses, " AND "))
+	DB.QueryRow(completedCountQuery, completedArgs...).Scan(&totalCompletedRecordsForFilter) // Error handling for this can be added if critical
+
+	queryArgs := make([]interface{}, len(args)) // Args for fetching the actual items
+	copy(queryArgs, args)
+	queryArgs = append(queryArgs, limit, offset)
+
+	query := fmt.Sprintf(`
+		SELECT id, target_id, item_text, item_command_text, notes, is_completed, created_at, updated_at
+		FROM target_checklist_items  -- No alias needed here as it's the only table
+		%s
+		ORDER BY %s %s, id %s
+		LIMIT ? OFFSET ?
+	`, whereCondition, dbSortBy, sortOrder, sortOrder)
+
+	rows, err := DB.Query(query, queryArgs...)
+	if err != nil {
+		logger.Error("GetChecklistItemsByTargetIDPaginated: Error querying for target %d: %v. Query: %s, Args: %v", targetID, err, query, queryArgs)
+		return nil, totalRecords, totalCompletedRecordsForFilter, fmt.Errorf("querying checklist items for target %d: %w", targetID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item models.TargetChecklistItem
+		var notes sql.NullString
+		var commandText sql.NullString
+		if err := rows.Scan(&item.ID, &item.TargetID, &item.ItemText, &commandText, &notes, &item.IsCompleted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			logger.Error("GetChecklistItemsByTargetIDPaginated: Error scanning row for target %d: %v", targetID, err)
+			return nil, totalRecords, totalCompletedRecordsForFilter, fmt.Errorf("scanning checklist item for target %d: %w", targetID, err)
+		}
+		item.Notes = notes
+		item.ItemCommandText = commandText
+		items = append(items, item)
+	}
+	if err = rows.Err(); err != nil {
+		logger.Error("GetChecklistItemsByTargetIDPaginated: Error iterating rows for target %d: %v", targetID, err)
+		return nil, totalRecords, totalCompletedRecordsForFilter, fmt.Errorf("iterating checklist items for target %d: %w", targetID, err)
+	}
+	return items, totalRecords, totalCompletedRecordsForFilter, nil
 }
 
 func GetChecklistItemByID(itemID int64) (models.TargetChecklistItem, error) {
@@ -401,8 +630,6 @@ func GetAllNotesPaginated(limit int, offset int, sortByColumn string, sortOrder 
 		sortOrder = "DESC"
 	}
 
-	// Build ORDER BY clause safely to prevent SQL injection.
-	// sortByColumn and sortOrder are validated above.
 	var orderByClause string
 	switch sortByColumn {
 	case "title":
@@ -412,10 +639,8 @@ func GetAllNotesPaginated(limit int, offset int, sortByColumn string, sortOrder 
 	case "updated_at":
 		orderByClause = "ORDER BY updated_at " + sortOrder + ", id " + sortOrder
 	case "id":
-		orderByClause = "ORDER BY id " + sortOrder // Secondary sort by id is redundant if primary is id
+		orderByClause = "ORDER BY id " + sortOrder
 	default:
-		// This case should ideally not be reached due to the validation above.
-		// Defaulting to a known safe order as a fallback.
 		orderByClause = "ORDER BY updated_at DESC, id DESC"
 	}
 
@@ -453,4 +678,85 @@ func UpdateNote(note models.Note) error {
 func DeleteNote(noteID int64) error {
 	_, err := DB.Exec("DELETE FROM notes WHERE id = ?", noteID)
 	return err
+}
+
+func CopyAllTemplateItemsToTarget(templateID int64, targetID int64) (int64, error) {
+	tx, err := DB.Begin()
+	if err != nil {
+		logger.Error("CopyAllTemplateItemsToTarget: Failed to begin transaction for template %d to target %d: %v", templateID, targetID, err)
+		return 0, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		SELECT item_text, item_command_text, notes
+		FROM checklist_template_items
+		WHERE template_id = ?
+		ORDER BY display_order ASC
+	`, templateID)
+	if err != nil {
+		logger.Error("CopyAllTemplateItemsToTarget: Error querying items for template %d: %v", templateID, err)
+		return 0, fmt.Errorf("querying items for template %d: %w", templateID, err)
+	}
+	defer rows.Close()
+
+	var itemsCopiedCount int64 = 0
+	stmt, errPrep := tx.Prepare(`
+		INSERT OR IGNORE INTO target_checklist_items (target_id, item_text, item_command_text, notes, is_completed, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if errPrep != nil {
+		return itemsCopiedCount, fmt.Errorf("preparing add checklist item statement (tx): %w", errPrep)
+	}
+	defer stmt.Close()
+
+	for rows.Next() {
+		var itemText string
+		var itemCommandText sql.NullString
+		var notes sql.NullString
+		if errScan := rows.Scan(&itemText, &itemCommandText, &notes); errScan != nil {
+			logger.Error("CopyAllTemplateItemsToTarget: Error scanning template item for template %d: %v", templateID, errScan)
+			return itemsCopiedCount, fmt.Errorf("scanning template item: %w", errScan)
+		}
+
+		result, errExec := stmt.Exec(targetID, itemText, itemCommandText, notes, false)
+		if errExec != nil {
+			// Don't close stmt here, it's deferred for the whole function
+			return itemsCopiedCount, fmt.Errorf("executing add checklist item statement for target %d (tx): %w", targetID, errExec)
+		}
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected > 0 {
+			itemsCopiedCount++
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		logger.Error("CopyAllTemplateItemsToTarget: Error iterating template items for template %d: %v", templateID, err)
+		return itemsCopiedCount, fmt.Errorf("iterating template items: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		logger.Error("CopyAllTemplateItemsToTarget: Failed to commit transaction for template %d to target %d: %v", templateID, targetID, err)
+		return itemsCopiedCount, fmt.Errorf("committing transaction: %w", err)
+	}
+
+	logger.Info("Successfully copied %d items from template %d to target %d.", itemsCopiedCount, templateID, targetID)
+	return itemsCopiedCount, nil
+}
+
+// DeleteAllChecklistItemsForTarget removes all checklist items associated with a given target_id.
+func DeleteAllChecklistItemsForTarget(targetID int64) error {
+	stmt, err := DB.Prepare("DELETE FROM target_checklist_items WHERE target_id = ?")
+	if err != nil {
+		return fmt.Errorf("preparing delete all checklist items statement for target %d: %w", targetID, err)
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(targetID)
+	if err != nil {
+		return fmt.Errorf("executing delete all checklist items for target %d: %w", targetID, err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	logger.Info("Deleted %d checklist items for target ID %d", rowsAffected, targetID)
+	return nil
 }

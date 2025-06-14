@@ -359,10 +359,107 @@ button.danger:hover {
     border-radius: 4px;
 }
 
+/* Styles for Target Checklist Table in checklistView.js */
+
+/* For the 'Notes' column content - apply to the TD itself */
+td.checklist-item-notes {
+    word-wrap: break-word;     /* Fallback for older browsers */
+    overflow-wrap: break-word; /* Standard property to break long words/strings */
+    white-space: pre-wrap;     /* Preserves whitespace (like newlines) but allows wrapping */
+                               /* This is important if your notes have multiple lines */
+}
+
+/* For the 'Command' column content - apply to the PRE tag inside the TD */
+td.checklist-item-command-text pre.command-text {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;     /* Crucial for <pre> to allow wrapping while preserving formatting */
+    max-width: 100%;           /* Ensures the <pre> tag itself doesn't expand its parent td */
+}
+
+/*
+   General rule for all cells in tables with `table-layout: fixed;`
+   (which your checklist table uses) to prevent overflow.
+*/
+table[style*="table-layout: fixed;"] td {
+    overflow: hidden; /* Hides content that overflows the cell's boundaries */
+    /* text-overflow: ellipsis; */ /* Optional: shows '...' for overflowed text. You might enable this if you prefer truncation over just hiding. */
+}
+
 .error-message {
     color: #c0392b;
     background-color: #fdd;
     border: 1px solid #fbb;
+}
+
+.markdown-rendered-notes {
+    word-wrap: break-word;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    min-height: 100px;
+    line-height: 1.6; /* Improve readability of paragraphs */
+}
+
+.markdown-rendered-notes h1,
+.markdown-rendered-notes h2,
+.markdown-rendered-notes h3,
+.markdown-rendered-notes h4,
+.markdown-rendered-notes h5,
+.markdown-rendered-notes h6 {
+    margin-top: 0.8em;
+    margin-bottom: 0.4em;
+    line-height: 1.2;
+}
+.markdown-rendered-notes ul,
+.markdown-rendered-notes ol {
+    margin-left: 20px;
+    margin-bottom: 1em;
+}
+.markdown-rendered-notes p {
+    margin-bottom: 0.8em;
+}
+.markdown-rendered-notes code { /* Inline code */
+    background-color: #e9ecef;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.9em;
+}
+.markdown-rendered-notes pre { /* Code blocks */
+    background-color: #e9ecef;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto; /* Allow horizontal scrolling for wide code blocks */
+    margin-bottom: 1em;
+}
+.markdown-rendered-notes pre code {
+    background-color: transparent; /* Reset background for code inside pre */
+    padding: 0;
+    font-size: 1em; /* Reset font size if pre has its own */
+}
+.markdown-rendered-notes blockquote {
+    border-left: 3px solid #bdc3c7; /* Softer color for blockquote border */
+    padding-left: 15px;
+    margin-left: 0;
+    margin-bottom: 1em;
+    color: #555;
+    font-style: italic;
+}
+.markdown-rendered-notes table {
+    border-collapse: collapse;
+    width: auto; /* Let table size itself, or set to 100% if desired */
+    margin-bottom: 1em;
+}
+.markdown-rendered-notes th,
+.markdown-rendered-notes td {
+    border: 1px solid #dfe2e5; /* Standard table border */
+    padding: 6px 13px;
+}
+.markdown-rendered-notes th {
+    font-weight: 600;
+    background-color: #f1f3f5; /* Lighter header for nested tables */
 }
 
 .success-message {
@@ -402,8 +499,8 @@ button.danger:hover {
     padding: 25px;
     border-radius: 8px;
     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-    width: 90%; /* Keep width responsive for smaller screens */
-    max-width: 750px; /* Increased max-width for wider modal */
+    width: 90%; 
+    max-width: 850px; /* Increased max-width for wider modal */
     text-align: center;
     transform: scale(0.9);
     transition: transform 0.3s ease;
@@ -482,6 +579,17 @@ button.danger:hover {
     margin: 0 2px;
     vertical-align: middle;
 }
+/* Specifically target the clear current target button to remove its background */
+button#clearCurrentTargetBtn.action-button.danger {
+    background-color: transparent;
+    color: #e74c3c; /* Keep the red color for the X icon itself */
+}
+
+.action-button.danger:hover {
+    color: #c0392b; /* Or a slightly different shade for hover */
+    opacity: 0.8;
+}
+
 
 .action-button:hover {
     opacity: 0.7;
@@ -490,6 +598,19 @@ button.danger:hover {
 td.platform-actions-cell,
 td.target-actions-cell {
     white-space: nowrap;
+}
+
+/* Style for the Proxy Log "ACTIONS" column */
+.proxy-log-actions-column {
+    min-width: 200px; 
+    /* You might also want to ensure content doesn't wrap if actions are short: */
+    white-space: nowrap; 
+}
+
+/* Ensure the TD for the actions column allows its content to be visible if it overflows */
+/* This is important when white-space: nowrap is used and content might exceed cell width */
+td.proxy-log-actions-column {
+    overflow: visible;
 }
 
 .breadcrumb-container {
@@ -595,6 +716,15 @@ td.target-actions-cell {
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
     font-size: 0.9em;
 }
+
+/* Add padding to the target notes textarea for better cursor visibility */
+#targetNotesTextarea {
+    padding: 8px 10px;
+    border: 1px solid #bdc3c7; /* Match form-group textarea style */
+    border-radius: 4px;       /* Match form-group textarea style */
+    box-sizing: border-box;   /* Ensure padding doesn't add to width if width is 100% */
+}
+
 
 .favorite-toggle {
     cursor: pointer;
@@ -792,4 +922,41 @@ td.checklist-item-command-text pre.command-text {
 }
 .left-sidebar.collapsed .flyout-menu .sidebar-item-text {
     display: inline !important; /* Ensure text is visible */
+}
+
+/* Pagination Controls */
+.pagination-controls {
+    display: flex;
+    justify-content: center; /* Center the items */
+    align-items: center;
+    padding: 10px 0;
+    font-size: 0.9em;
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+}
+
+.pagination-controls button,
+.pagination-controls select,
+.pagination-controls input[type="number"] {
+    padding: 5px 10px;
+    margin: 0 2px; /* Reduced margin */
+    border: 1px solid #ccc;
+    /* background-color: #f0f0f0; */ /* Removed to allow primary/secondary to take effect */
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.95em;
+}
+
+.pagination-controls button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.pagination-controls input[type="number"] {
+    width: 60px; /* Slightly wider for page numbers */
+    text-align: center;
+}
+
+.target-detail-item {
+    font-size: 0.9em;
+    color: #555;
 }

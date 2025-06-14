@@ -305,6 +305,11 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer httpResponse.Body.Close()
 
+	// Always set these basic response details, even if body reading fails later
+	apiResponse.StatusCode = httpResponse.StatusCode
+	apiResponse.StatusText = httpResponse.Status
+	apiResponse.Headers = httpResponse.Header // Start with original headers
+
 	var responseBodyBytes []byte
 	var readErr error
 	removedContentEncodingHeaders := false
@@ -322,13 +327,16 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 	case "gzip":
 		logger.Info("ExecuteModifiedRequestHandler: Decompressing Gzip body.")
 		gzReader, gzErr := gzip.NewReader(httpResponse.Body)
-		if gzErr != nil {
-			logger.Error("ExecuteModifiedRequestHandler: Failed to create gzip reader: %v. Reading as is.", gzErr)
-			responseBodyBytes, readErr = io.ReadAll(httpResponse.Body) // Read original body
+		if gzErr != nil { // If gzip.NewReader itself fails
+			logger.Error("ExecuteModifiedRequestHandler: Failed to create gzip reader: %v. This indicates a problem with the gzip stream.", gzErr)
+			readErr = gzErr // Propagate the error from gzip.NewReader
+			// responseBodyBytes will remain empty or nil, which is fine as readErr is set
 		} else {
 			responseBodyBytes, readErr = io.ReadAll(gzReader)
-			gzReader.Close() // Important to close the gzip reader
-			removedContentEncodingHeaders = true
+			gzReader.Close()    // Important to close the gzip reader
+			if readErr == nil { // Only set if decompression and read were successful
+				removedContentEncodingHeaders = true
+			}
 		}
 	default:
 		logger.Info("ExecuteModifiedRequestHandler: No/Unknown Content-Encoding ('%s'), reading body as is.", contentEncoding)
@@ -337,20 +345,18 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 
 	if readErr != nil {
 		logger.Error("ExecuteModifiedRequestHandler: Error reading/decompressing response body: %v", readErr)
-		apiResponse.Error = "Error reading response body: " + readErr.Error()
+		// If an error occurred during body read/decompression, set an error message
+		// and ensure the body is empty or indicates an error, rather than sending potentially corrupt data.
+		apiResponse.Error = "Error reading or decompressing response body: " + readErr.Error()
+		apiResponse.Body = "" // Send an empty body if read failed
 		// Populate other fields even if body reading failed
 		apiResponse.StatusCode = httpResponse.StatusCode
 		apiResponse.StatusText = httpResponse.Status
 		apiResponse.Headers = httpResponse.Header
-		// apiResponse.Body will be empty or from a partial read if error occurred mid-read
-		// The current code will set apiResponse.Body to base64 of whatever responseBodyBytes contains.
 	} else {
 		apiResponse.Body = base64.StdEncoding.EncodeToString(responseBodyBytes)
 	}
 
-	apiResponse.StatusCode = httpResponse.StatusCode
-	apiResponse.StatusText = httpResponse.Status
-	apiResponse.Headers = httpResponse.Header
 	if removedContentEncodingHeaders {
 		// If we decompressed, the Content-Encoding and Content-Length headers are no longer valid for the data we're sending.
 		newHeaders := make(http.Header)
@@ -381,22 +387,28 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 		TargetID:             targetIDForLog,
 		Timestamp:            startTime,
 		RequestMethod:        models.NullString(strings.ToUpper(payload.Method)),
-		RequestURL:           models.NullString(payload.URL),
-		RequestHTTPVersion:   httpRequest.Proto, // From the created request
+		RequestURL:           models.NullString(payload.URL),       // This was already correct
+		RequestHTTPVersion:   models.NullString(httpRequest.Proto), // Corrected
 		RequestHeaders:       models.NullString(string(reqHeadersForLogJSON)),
 		RequestBody:          []byte(payload.Body),
 		ResponseStatusCode:   apiResponse.StatusCode,
-		ResponseReasonPhrase: strings.TrimPrefix(apiResponse.StatusText, fmt.Sprintf("%d ", apiResponse.StatusCode)),
-		ResponseHTTPVersion:  httpResponse.Proto,            // From the actual response
-		ResponseHeaders:      string(respHeadersForLogJSON), // Assign string directly
-		ResponseBody:         responseBodyBytes,             // Decompressed body
-		ResponseContentType:  httpResponse.Header.Get("Content-Type"),
+		ResponseReasonPhrase: models.NullString(strings.TrimPrefix(apiResponse.StatusText, fmt.Sprintf("%d ", apiResponse.StatusCode))), // Corrected
+		ResponseHTTPVersion:  models.NullString(httpResponse.Proto),                                                                     // Corrected
+		ResponseHeaders:      models.NullString(string(respHeadersForLogJSON)),                                                          // Corrected
+		ResponseBody:         responseBodyBytes,                                                                                         // Decompressed body
+		ResponseContentType:  models.NullString(httpResponse.Header.Get("Content-Type")),                                                // Corrected
 		ResponseBodySize:     int64(len(responseBodyBytes)),
 		DurationMs:           durationMs,
 		IsHTTPS:              strings.HasPrefix(strings.ToLower(payload.URL), "https://"),
 		IsPageCandidate:      strings.Contains(strings.ToLower(httpResponse.Header.Get("Content-Type")), "text/html"),
-		SourceModifierTaskID: payload.TaskID,
+		LogSource:            models.NullString("Modifier"),         // Set log source
+		PageSitemapID:        sql.NullInt64{Valid: false},           // No direct page sitemap association here
+		SourceModifierTaskID: sql.NullInt64{Int64: 0, Valid: false}, // Default to invalid
 	}
+	if payload.TaskID != nil {
+		logEntry.SourceModifierTaskID = sql.NullInt64{Int64: *payload.TaskID, Valid: true}
+	}
+
 	if logID, dbLogErr := database.LogExecutedModifierRequest(logEntry); dbLogErr != nil {
 		logger.Error("ExecuteModifiedRequestHandler: Failed to log executed modified request: %v", dbLogErr)
 		// Continue to send response to client even if logging fails
@@ -407,6 +419,18 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 				logger.Error("ExecuteModifiedRequestHandler: Failed to update modifier task %d with last_executed_log_id %d: %v", *payload.TaskID, logID, updateErr)
 			}
 		}
+	}
+
+	// After all processing, before sending the response:
+	logger.Debug("ExecuteModifiedRequestHandler: Final apiResponse being sent to frontend: StatusCode=%d, StatusText='%s', HeadersCount=%d, BodyLength(Base64)=%d, Error='%s'",
+		apiResponse.StatusCode, apiResponse.StatusText, len(apiResponse.Headers), len(apiResponse.Body), apiResponse.Error)
+	if len(apiResponse.Headers) == 0 && apiResponse.StatusCode != 0 && apiResponse.Error == "" { // If status is set, no error, but headers are empty
+		logger.Warn("ExecuteModifiedRequestHandler: apiResponse.Headers is empty but StatusCode is %d and no error reported. Original httpResponse.Header count: %d", apiResponse.StatusCode, len(httpResponse.Header))
+		// For deeper debugging, you can marshal and log the actual headers:
+		// originalHeadersJSON, _ := json.Marshal(httpResponse.Header)
+		// logger.Debug("ExecuteModifiedRequestHandler: Original httpResponse.Header: %s", string(originalHeadersJSON))
+		// apiResponseHeadersJSON, _ := json.Marshal(apiResponse.Headers)
+		// logger.Debug("ExecuteModifiedRequestHandler: Final apiResponse.Headers: %s", string(apiResponseHeadersJSON))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -518,4 +542,36 @@ func UpdateModifierTasksOrderHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Task order updated successfully."})
 	logger.Info("Successfully updated display order for %d modifier tasks.", len(orders))
+}
+
+// DeleteAllModifierTasksForTargetHandler handles requests to delete all modifier tasks for a specific target.
+func DeleteAllModifierTasksForTargetHandler(w http.ResponseWriter, r *http.Request) {
+	targetIDStr := chi.URLParam(r, "target_id")
+	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+	if err != nil {
+		logger.Error("DeleteAllModifierTasksForTargetHandler: Invalid target_id in path: %v", err)
+		http.Error(w, "Invalid target_id in path", http.StatusBadRequest)
+		return
+	}
+
+	if targetID == 0 {
+		logger.Error("DeleteAllModifierTasksForTargetHandler: target_id cannot be zero.")
+		http.Error(w, "target_id cannot be zero", http.StatusBadRequest)
+		return
+	}
+
+	rowsAffected, err := database.DeleteModifierTasksByTargetID(targetID)
+	if err != nil {
+		logger.Error("DeleteAllModifierTasksForTargetHandler: Error deleting tasks for target %d: %v", targetID, err)
+		http.Error(w, "Failed to delete modifier tasks for target", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("Successfully deleted %d modifier tasks for target ID %d", rowsAffected, targetID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       fmt.Sprintf("Successfully deleted %d modifier tasks for target ID %d.", rowsAffected, targetID),
+		"rows_affected": rowsAffected,
+	})
 }

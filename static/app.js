@@ -145,6 +145,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         cancelChecklistItemEditFunc: cancelActiveChecklistItemEdit
     });
 
+    function localFormatHeadersForFinding(headersObj) { // Helper for formatting headers in finding description
+        if (!headersObj || Object.keys(headersObj).length === 0) return '(No Headers)';
+        return Object.entries(headersObj)
+            .map(([key, value]) => `${escapeHtml(key)}: ${escapeHtml(Array.isArray(value) ? value.join(', ') : value)}`)
+            .join('\n');
+    }
+
     async function loadCurrentTargetView(targetIdFromParam = null, tabToMakeActive = 'checklistTab') {
         const appState = getState();
         const targetIdToLoad = targetIdFromParam !== null ? parseInt(targetIdFromParam, 10) : appState.currentTargetId;
@@ -165,15 +172,18 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (!viewContentContainer) { console.error("viewContentContainer not found!"); return; }
                 viewContentContainer.innerHTML = `
                     <h1>Target: ${escapeHtml(target.codename)}</h1>
-                    <div style="margin-top: 20px;">
-                        ${target.id === appState.currentTargetId
-                            ? '<button id="clearCurrentTargetBtn" class="secondary">Clear This as Current Target</button>'
-                            : `<button class="action-button set-current-target primary" data-id="${target.id}" data-name="${escapeHtml(target.codename)}">Set as Current Target</button>`}
+                    <div style="display: flex; align-items: center; gap: 15px; margin-top: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            ${target.id === appState.currentTargetId
+                                ? '<button id="clearCurrentTargetBtn" class="action-button" title="Clear This as Current Target" style="font-size: 1.2em; padding: 2px 5px; color: #e74c3c;">❌</button>'
+                                : `<button class="action-button set-current-target primary" data-id="${target.id}" data-name="${escapeHtml(target.codename)}" title="Set as Current Target" style="font-size:1.2em; padding: 2px 5px;">📍</button>`}
+                            <span style="font-weight: bold;">${escapeHtml(target.codename)}</span>
+                        </div>
+                        <span class="target-detail-item"><strong>ID:</strong> ${target.id}</span>
+                        <span class="target-detail-item"><strong>Slug:</strong> ${escapeHtml(target.slug)}</span>
+                        <span class="target-detail-item"><strong>Platform:</strong> ${escapeHtml(platformNameForBreadcrumb)} (ID: ${target.platform_id})</span>
                     </div>
-                    <p><strong>ID:</strong> ${target.id}</p>
-                    <p><strong>Slug:</strong> ${escapeHtml(target.slug)}</p>
                     <p><strong>Link:</strong> <a href="${escapeHtml(target.link)}" target="_blank">${escapeHtml(target.link)}</a></p>
-                    <p><strong>Platform ID:</strong> ${target.platform_id} (${escapeHtml(platformNameForBreadcrumb)})</p>
 
                     <div class="tabs" style="margin-top: 20px;">
                         <button class="tab-button" data-tab="checklistTab">Checklist</button>
@@ -192,11 +202,20 @@ document.addEventListener('DOMContentLoaded', async function() {
                         <div id="targetNotesSection" data-target-id="${target.id}" data-current-link="${escapeHtml(target.link)}">
                             <div class="notes-display-mode">
                                 <p><strong>Notes:</strong> <button id="editTargetNotesBtn" class="action-button inline-edit-button" title="Edit Notes">✏️</button></p>
-                                <pre id="targetNotesContent" style="white-space: pre-wrap; word-wrap: break-word; padding: 10px; background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; min-height: 100px;">${escapeHtml(target.notes || '(None)')}</pre>
+                                <div id="targetNotesContent" class="markdown-rendered-notes" data-raw-notes="${escapeHtmlAttribute(target.notes || '')}">
+                                    ${(() => {
+                                        // Ensure Showdown is loaded
+                                        if (typeof showdown !== 'undefined') {
+                                            const converter = new showdown.Converter({ tables: true, simpleLineBreaks: true, ghCompatibleHeaderId: true });
+                                            return target.notes ? converter.makeHtml(target.notes) : '<p>(None)</p>';
+                                        }
+                                        return `<p>${escapeHtml(target.notes || '(None)')}</p>`; // Fallback if Showdown not loaded
+                                    })()}
+                                </div>
                             </div>
                             <div class="notes-edit-mode" style="display:none;">
                                 <p><strong>Edit Notes:</strong></p>
-                                <textarea id="targetNotesTextarea" rows="10" style="width: 100%; margin-bottom: 10px;"></textarea>
+                                <textarea id="targetNotesTextarea" rows="20" style="width: 100%; margin-bottom: 10px;"></textarea>
                                 <button id="saveTargetNotesBtn" class="primary small-button">Save Notes</button>
                                 <button id="cancelTargetNotesBtn" class="secondary small-button">Cancel</button>
                                 <div id="saveTargetNotesMessage" class="message-area" style="margin-top: 5px;"></div>
@@ -274,8 +293,22 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
                 setActiveTab(tabIdForActivation);
                 document.querySelectorAll('.tabs .tab-button').forEach(button => button.addEventListener('click', handleTabSwitch));
+                
+                // After other content is loaded and tabs are set up:
                 fetchAndDisplayChecklistItems(target.id);
                 fetchAndDisplayTargetFindings(target.id); // New function call
+
+                // Check for action to pre-fill "Add Finding" form
+                const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+                const action = hashParams.get('action');
+                const fromLogId = hashParams.get('from_log_id');
+
+                if (action === 'addFinding' && fromLogId) {
+                    // Ensure findings tab is active if we are adding a finding
+                    // This might override tabToMakeActive if it was different, which is intended.
+                    setActiveTab('findingsTab'); 
+                    await displayAddFindingForm(target.id, { http_traffic_log_id: fromLogId });
+                }
 
              } catch(error) {
                  console.error("Error fetching target details:", error);
@@ -395,16 +428,49 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
+    // Module-level variable to store the target notes keydown listener
+    let targetNotesKeydownListener = null;
+
     function handleEditTargetNotes() {
         const notesSection = document.getElementById('targetNotesSection');
         const displayMode = notesSection.querySelector('.notes-display-mode');
         const editMode = notesSection.querySelector('.notes-edit-mode');
-        const notesContent = document.getElementById('targetNotesContent');
+        const notesContentDiv = document.getElementById('targetNotesContent');
         const notesTextarea = document.getElementById('targetNotesTextarea');
-        notesTextarea.value = notesContent.textContent === '(None)' ? '' : notesContent.textContent;
+
+        // Get raw Markdown from the data attribute
+        const rawNotes = notesContentDiv.getAttribute('data-raw-notes');
+        notesTextarea.value = rawNotes || '';
+
         displayMode.style.display = 'none';
         editMode.style.display = 'block';
         notesTextarea.focus();
+
+        // Remove previous listener if any, then add new one
+        if (targetNotesKeydownListener) {
+            notesTextarea.removeEventListener('keydown', targetNotesKeydownListener);
+        }
+
+        targetNotesKeydownListener = function(event) {
+            if (event.key === 'Escape') {
+                event.preventDefault(); // Prevent any other escape behavior
+                cancelTargetNotesEdit();
+                return;
+            }
+
+            if (event.key === 'Enter') {
+                if (event.ctrlKey || event.metaKey) { // Ctrl+Enter or Cmd+Enter to save
+                    event.preventDefault(); // Prevent newline
+                    document.getElementById('saveTargetNotesBtn').click(); // Trigger save
+                } else if (event.shiftKey) {
+                    // Shift+Enter: Allow default behavior (newline).
+                } else {
+                    // Just Enter: Allow default behavior (newline).
+                    // event.stopPropagation(); // Uncomment if plain Enter still causes unexpected behavior
+                }
+            }
+        };
+        notesTextarea.addEventListener('keydown', targetNotesKeydownListener);
     }
 
     async function handleSaveTargetNotes() {
@@ -419,7 +485,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         const payload = { link: currentLink, notes: newNotes };
         try {
             const updatedTarget = await apiService.updateTarget(targetId, payload);
-            document.getElementById('targetNotesContent').textContent = updatedTarget.notes || '(None)';
+            const notesDisplayDiv = document.getElementById('targetNotesContent');
+            const rawNotes = updatedTarget.notes || '';
+            if (typeof showdown !== 'undefined') {
+                const converter = new showdown.Converter({ tables: true, simpleLineBreaks: true, ghCompatibleHeaderId: true });
+                notesDisplayDiv.innerHTML = rawNotes ? converter.makeHtml(rawNotes) : '<p>(None)</p>';
+            } else {
+                notesDisplayDiv.innerHTML = `<p>${escapeHtml(rawNotes || '(None)')}</p>`; // Fallback
+            }
+            notesDisplayDiv.setAttribute('data-raw-notes', escapeHtmlAttribute(rawNotes));
+
             notesSection.setAttribute('data-current-link', escapeHtml(updatedTarget.link));
             messageArea.textContent = 'Notes updated successfully!';
             messageArea.classList.add('success-message');
@@ -434,9 +509,20 @@ document.addEventListener('DOMContentLoaded', async function() {
         const notesSection = document.getElementById('targetNotesSection');
         const displayMode = notesSection.querySelector('.notes-display-mode');
         const editMode = notesSection.querySelector('.notes-edit-mode');
-        document.getElementById('saveTargetNotesMessage').textContent = '';
+        const messageArea = document.getElementById('saveTargetNotesMessage');
+        const notesTextarea = document.getElementById('targetNotesTextarea');
+
+        if (messageArea) {
+            messageArea.textContent = '';
+            messageArea.className = 'message-area'; // Reset classes
+        }
         displayMode.style.display = 'block';
         editMode.style.display = 'none';
+
+        if (notesTextarea && targetNotesKeydownListener) {
+            notesTextarea.removeEventListener('keydown', targetNotesKeydownListener);
+            targetNotesKeydownListener = null;
+        }
     }
 
     async function handleDeleteScopeRule(event) {
@@ -529,49 +615,108 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    function displayAddFindingForm(targetId) {
-        console.log("[App.js] displayAddFindingForm called with targetId:", targetId); // Log the targetId
+    async function displayAddFindingForm(targetId, prefillData = null) {
+        console.log("[App.js] displayAddFindingForm called with targetId:", targetId, "and prefillData:", prefillData);
         const findingsContentDiv = document.getElementById('targetFindingsContent');
         if (!findingsContentDiv) {
             console.error("Cannot display add finding form: targetFindingsContent div not found!");
-            uiService.showModalMessage("Error", "UI element missing, cannot display form.");
+            showModalMessage("Error", "UI element missing, cannot display form.");
             return;
         }
 
-        // Simple way to show form: replace content. A modal would be better for UX.
+        let initialTitle = '';
+        let initialDescription = '';
+        let initialPayload = '';
+        let initialHttpLogId = prefillData?.http_traffic_log_id || '';
+        let initialSeverity = 'Medium'; // Default severity
+        let initialStatus = 'Open';     // Default status
+
+        if (prefillData && prefillData.http_traffic_log_id) {
+            showModalMessage("Loading...", "Fetching log details for pre-fill...", true, 1500);
+            try {
+                const logEntry = await apiService.getProxyLogDetail(prefillData.http_traffic_log_id);
+                // The loading modal will auto-close due to the timeout (1500ms)
+
+                let pathForTitle = 'N/A';
+                try { pathForTitle = new URL(logEntry.request_url?.String).pathname; } catch (e) { pathForTitle = logEntry.request_url?.String || 'N/A'; }
+                initialTitle = `Finding from Log ${logEntry.id}: ${logEntry.request_method?.String || 'N/A'} ${pathForTitle}`;
+
+                let reqHeadersObj = {};
+                if (logEntry.request_headers && logEntry.request_headers.Valid && logEntry.request_headers.String) {
+                    try { reqHeadersObj = JSON.parse(logEntry.request_headers.String); } catch (e) { /* ignore */ }
+                }
+                let requestContentTypeForBody = '';
+                for (const key in reqHeadersObj) {
+                    if (key.toLowerCase() === 'content-type') {
+                        requestContentTypeForBody = Array.isArray(reqHeadersObj[key]) ? reqHeadersObj[key][0] : reqHeadersObj[key];
+                        break;
+                    }
+                }
+
+                const formatBodyForDesc = (base64Body, contentType) => {
+                    //if (!base64Body) return '(Empty Body)';
+                    if (!base64Body) return '';
+                    try { 
+                        const text = atob(base64Body); 
+                        return text.length > 500 ? text.substring(0, 500) + '...' : text; 
+                    } 
+                    catch (e) 
+                    { 
+                        return ''; 
+                        //return '(Error decoding body)'; 
+                    }
+                };
+                
+                let resHeadersObj = {};
+                if (logEntry.response_headers && logEntry.response_headers.Valid && logEntry.response_headers.String) {
+                    try { resHeadersObj = JSON.parse(logEntry.response_headers.String); } catch (e) { /* ignore */ }
+                }
+
+
+                initialDescription = `Source Log ID: ${logEntry.id}\nURL: ${logEntry.request_url?.String || 'N/A'}\nMethod: ${logEntry.request_method?.String || 'N/A'}\nStatus: ${logEntry.response_status_code || 'N/A'}\n\n--- Request ---\nHeaders:\n${localFormatHeadersForFinding(reqHeadersObj)}\nBody:\n${formatBodyForDesc(logEntry.request_body, requestContentTypeForBody)}\n\n--- Response ---\nHeaders:\n${localFormatHeadersForFinding(resHeadersObj)}\nBody:\n${formatBodyForDesc(logEntry.response_body, logEntry.response_content_type?.String)}`;
+                
+                if (requestContentTypeForBody && (requestContentTypeForBody.includes('json') || requestContentTypeForBody.includes('xml') || requestContentTypeForBody.includes('text') || requestContentTypeForBody.includes('form'))) {
+                    try { initialPayload = atob(logEntry.request_body); } catch(e) { initialPayload = '(Error decoding request body)';}
+                } else if (logEntry.request_body) { initialPayload = '(Request body is potentially binary or has no Content-Type)'; }
+            } catch (err) {
+                console.error("Error fetching log details for prefill:", err);
+                showModalMessage("Error", "Could not fetch log details for pre-filling finding.");
+            }
+        }
+
         findingsContentDiv.innerHTML = `
             <h3>Add New Finding</h3>
             <form id="addFindingForm">
                 <input type="hidden" name="target_id" value="${targetId}">
                 <div class="form-group">
                     <label for="findingTitle">Title:</label>
-                    <input type="text" id="findingTitle" name="title" required>
+                    <input type="text" id="findingTitle" name="title" value="${escapeHtmlAttribute(initialTitle)}" required>
                 </div>
                 <div class="form-group">
                     <label for="findingDescription">Description:</label>
-                    <textarea id="findingDescription" name="description" rows="5"></textarea>
+                    <textarea id="findingDescription" name="description" rows="5">${escapeHtml(initialDescription)}</textarea>
                 </div>
                 <div class="form-group">
                     <label for="findingPayload">Payload:</label>
-                    <textarea id="findingPayload" name="payload" rows="3"></textarea>
+                    <textarea id="findingPayload" name="payload" rows="3">${escapeHtml(initialPayload)}</textarea>
                 </div>
                 <div class="form-group">
                     <label for="findingSeverity">Severity:</label>
                     <select id="findingSeverity" name="severity">
-                        <option value="Informational">Informational</option>
-                        <option value="Low">Low</option>
-                        <option value="Medium" selected>Medium</option>
-                        <option value="High">High</option>
-                        <option value="Critical">Critical</option>
+                        <option value="Informational" ${initialSeverity === 'Informational' ? 'selected' : ''}>Informational</option>
+                        <option value="Low" ${initialSeverity === 'Low' ? 'selected' : ''}>Low</option>
+                        <option value="Medium" ${initialSeverity === 'Medium' ? 'selected' : ''}>Medium</option>
+                        <option value="High" ${initialSeverity === 'High' ? 'selected' : ''}>High</option>
+                        <option value="Critical" ${initialSeverity === 'Critical' ? 'selected' : ''}>Critical</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label for="findingStatus">Status:</label>
                     <select id="findingStatus" name="status">
-                        <option value="Open" selected>Open</option>
-                        <option value="Closed">Closed</option>
-                        <option value="Remediated">Remediated</option>
-                        <option value="Accepted Risk">Accepted Risk</option>
+                        <option value="Open" ${initialStatus === 'Open' ? 'selected' : ''}>Open</option>
+                        <option value="Closed" ${initialStatus === 'Closed' ? 'selected' : ''}>Closed</option>
+                        <option value="Remediated" ${initialStatus === 'Remediated' ? 'selected' : ''}>Remediated</option>
+                        <option value="Accepted Risk" ${initialStatus === 'Accepted Risk' ? 'selected' : ''}>Accepted Risk</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -588,7 +733,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 </div>
                 <div class="form-group">
                     <label for="findingHttpLogId">Associated HTTP Log ID (Optional):</label>
-                    <input type="number" id="findingHttpLogId" name="http_traffic_log_id">
+                    <input type="number" id="findingHttpLogId" name="http_traffic_log_id" value="${initialHttpLogId}">
                 </div>
                 <div class="form-actions">
                     <button type="submit" class="primary">Save Finding</button>
@@ -682,7 +827,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                     <div class="detail-item">Discovered:</div><div class="detail-value">${new Date(finding.discovered_at).toLocaleString()}</div>
                     <div class="detail-item">Last Updated:</div><div class="detail-value">${new Date(finding.updated_at).toLocaleString()}</div>
 
-                    <div class="detail-item">HTTP Log ID:</div><div class="detail-value">${finding.http_traffic_log_id.Valid ? finding.http_traffic_log_id.Int64 : 'N/A'}</div>
+                    <div class="detail-item">HTTP Log ID:</div>
+                    <div class="detail-value">
+                        ${finding.http_traffic_log_id.Valid 
+                            ? `<a href="#proxy-log-detail?id=${finding.http_traffic_log_id.Int64}" title="View Log ID ${finding.http_traffic_log_id.Int64}">${finding.http_traffic_log_id.Int64}</a>`
+                            : 'N/A'}
+                    </div>
                 </div>
 
                 <div class="finding-detail-full-width">
@@ -886,4 +1036,21 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.log('[App.js] fetchAndSetInitialCurrentTarget completed. State initialized with targetId:', getState().currentTargetId);
         }
     }
+
+    async function displayAppVersion() {
+        try {
+            const versionData = await apiService.getVersion();
+            const versionDisplay = document.getElementById('appVersionDisplay');
+            if (versionDisplay && versionData && versionData.version) {
+                versionDisplay.textContent = `v${versionData.version}`;
+            }
+        } catch (error) {
+            console.error("Failed to fetch app version:", error);
+            const versionDisplay = document.getElementById('appVersionDisplay');
+            if (versionDisplay) {
+                versionDisplay.textContent = 'v?.?.?'; // Fallback display
+            }
+        }
+    }
+    displayAppVersion(); // Call this after services are initialized
 });

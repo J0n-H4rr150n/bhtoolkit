@@ -29,32 +29,101 @@ function formatHeaders(headers) {
 }
 
 function formatBody(body, contentType = '') {
-    if (!body) return '(Empty body)';
+    //if (!body) return '(Empty body)';
+    if (!body) return '';
     try {
-        const textContent = atob(body);
+        const decodedText = atob(body); // Assuming body is always base64 string from backend
+        // If after decoding, the text is empty or only whitespace, treat it as an empty body.
+        // This handles cases where the body might be " ", "\n", etc.
+        if (decodedText.trim() === '') {
+            //return '(Empty body)';
+            return '';
+        }
 
-        if (contentType.toLowerCase().includes('json')) {
+        const lowerContentType = contentType.toLowerCase();
+
+        if (lowerContentType.includes('json')) {
             try {
                 // If it's JSON, pretty-print it.
-                // JSON.stringify itself will escape special characters within strings.
-                // The output of JSON.stringify is safe to be set as textContent.
-                return JSON.stringify(JSON.parse(textContent), null, 2);
+                return JSON.stringify(JSON.parse(decodedText), null, 2);
             } catch (e) {
                 // If JSON parsing fails, treat it as plain text and escape it.
-                // Replace control characters for better readability.
-                return escapeHtml(textContent.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
+                return escapeHtml(decodedText.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
             }
+        } else if (
+            lowerContentType === '' || // Treat empty contentType as potentially displayable text
+            lowerContentType.includes('javascript') || // Existing conditions
+            lowerContentType.includes('text') || // Catches text/plain, text/html, text/css etc.
+            lowerContentType.includes('xml') ||
+            lowerContentType.includes('svg') // SVG is XML-based and often text
+        ) {
+            // For JavaScript, HTML, CSS, XML, plain text, display as escaped text
+            return escapeHtml(decodedText.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
         }
-        // For non-JSON content, escape HTML entities.
-        // Also replace control characters with a '.' for better readability.
-        return escapeHtml(textContent.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
+        // For other content types (e.g., images, binary), show a placeholder or truncated raw (escaped)
+        // Since we've already decoded, showing a placeholder for non-text is better.
+        return `(Binary or non-displayable content type: ${escapeHtml(contentType)})`;
     } catch (e) {
-        // If atob fails (not valid Base64), or for any other error,
-        // display the raw body (truncated) after escaping it.
-        // This ensures that even malformed base64 is treated as text.
-        return escapeHtml(body.substring(0, 2000) + (body.length > 2000 ? "\n... (truncated)" : ""));
+        // If atob fails (not valid Base64)
+        console.error("Error decoding base64 body:", e);
+        // Display '(Empty body)' as requested, instead of the detailed error.
+        //return '(Empty body)';
+        return '';
     }
 }
+
+async function handleLogAddAsFinding(logId) {
+    const appState = stateService.getState();
+    const currentTargetId = appState.currentTargetId;
+
+    if (!currentTargetId) {
+        uiService.showModalMessage("Error", "No current target set. Cannot add finding.");
+        return;
+    }
+    if (!logId) {
+        uiService.showModalMessage("Error", "Log ID is missing for 'Add as Finding'.");
+        return;
+    }
+
+    // Navigate to the current target's findings tab and pass the logId for pre-filling
+    // The 'action=addFinding' will be picked up by app.js to trigger the form
+    // The 'from_log_id' will be used to fetch details and pre-fill
+    const newHash = `#current-target?id=${currentTargetId}&tab=findingsTab&action=addFinding&from_log_id=${logId}`;
+    window.location.hash = newHash;
+}
+
+async function handleViewAssociatedFindingDetailFromProxyLog(findingId) {
+    if (!apiService || !uiService) {
+        console.error("Services not available for viewing finding detail from proxy log.");
+        alert("Error: UI services not available.");
+        return;
+    }
+    try {
+        const finding = await apiService.getFindingDetails(findingId); // Assumes this function exists in apiService
+        
+        let detailHTML = `
+            <div class="finding-details-grid">
+                <div class="detail-item">Severity:</div><div class="detail-value">${escapeHtml(finding.severity.String || 'N/A')}</div>
+                <div class="detail-item">Status:</div><div class="detail-value">${escapeHtml(finding.status)}</div>
+                <div class="detail-item">ID:</div><div class="detail-value">${finding.id}</div>
+                <div class="detail-item">Target ID:</div><div class="detail-value">${finding.target_id}</div>
+                <div class="detail-item">CVSS Score:</div><div class="detail-value">${finding.cvss_score.Valid ? finding.cvss_score.Float64 : 'N/A'}</div>
+                <div class="detail-item">CWE ID:</div><div class="detail-value">${finding.cwe_id.Valid ? finding.cwe_id.Int64 : 'N/A'}</div>
+                <div class="detail-item">Discovered:</div><div class="detail-value">${new Date(finding.discovered_at).toLocaleString()}</div>
+                <div class="detail-item">Last Updated:</div><div class="detail-value">${new Date(finding.updated_at).toLocaleString()}</div>
+                <div class="detail-item">HTTP Log ID:</div><div class="detail-value">${finding.http_traffic_log_id.Valid ? finding.http_traffic_log_id.Int64 : 'N/A'}</div>
+            </div>
+            <div class="finding-detail-full-width"><p><strong>Description:</strong></p><pre>${escapeHtml(finding.description.String || 'N/A')}</pre></div>
+            <div class="finding-detail-full-width"><p><strong>Payload:</strong></p><pre>${escapeHtml(finding.payload.String || 'N/A')}</pre></div>
+            <div class="finding-detail-full-width"><p><strong>References:</strong></p><pre>${escapeHtml(finding.finding_references.String || 'N/A')}</pre></div>
+        `;
+        uiService.showModalMessage(`Finding: ${escapeHtml(finding.title)}`, detailHTML);
+    } catch (error) {
+        console.error("Error fetching finding details from proxy log view:", error);
+        uiService.showModalMessage("Error", `Could not load details for finding ID ${findingId}: ${error.message}`);
+    }
+}
+
 
 async function handleProxyLogFavoriteToggle(event) {
     const button = event.currentTarget;
@@ -141,7 +210,7 @@ function handleProxyLogSort(event) {
 function renderProxyLogPagination(container) {
     if (!container) return;
     const appState = stateService.getState();
-    const { currentPage, totalPages, totalRecords, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = appState.paginationState.proxyLog;
+    const { currentPage, totalPages, totalRecords, limit, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = appState.paginationState.proxyLog;
     let paginationHTML = '';
 
     if (totalPages <= 1) {
@@ -149,25 +218,58 @@ function renderProxyLogPagination(container) {
         return;
     }
     paginationHTML += `<p>Page ${currentPage} of ${totalPages} (${totalRecords} total logs)</p>`;
-    const buildHash = (page) => `#proxy-log?page=${page}&sort_by=${sortBy}&sort_order=${sortOrder}&favorites_only=${filterFavoritesOnly}&method=${encodeURIComponent(filterMethod)}&status=${encodeURIComponent(filterStatus)}&type=${encodeURIComponent(filterContentType)}&search=${encodeURIComponent(filterSearchText)}`;
+    const buildHash = (page, newLimit = limit) => `#proxy-log?page=${page}&limit=${newLimit}&sort_by=${sortBy}&sort_order=${sortOrder}&favorites_only=${filterFavoritesOnly}&method=${encodeURIComponent(filterMethod)}&status=${encodeURIComponent(filterStatus)}&type=${encodeURIComponent(filterContentType)}&search=${encodeURIComponent(filterSearchText)}`;
+
+    const firstButton = document.createElement('button');
+    firstButton.style.marginRight = '5px';
+    firstButton.innerHTML = '&laquo; First';
+    firstButton.disabled = (currentPage <= 1);
+    firstButton.className = firstButton.disabled ? 'secondary small-button' : 'primary small-button';
+    firstButton.addEventListener('click', () => { if (currentPage > 1) window.location.hash = buildHash(1); });
 
     const prevButton = document.createElement('button');
-    prevButton.className = 'secondary';
     prevButton.style.marginRight = '5px';
     prevButton.innerHTML = '&laquo; Previous';
-    if (currentPage <= 1) prevButton.disabled = true;
+    prevButton.disabled = (currentPage <= 1);
+    prevButton.className = prevButton.disabled ? 'secondary' : 'primary';
     prevButton.addEventListener('click', () => { if (currentPage > 1) window.location.hash = buildHash(currentPage - 1); });
 
     const nextButton = document.createElement('button');
-    nextButton.className = 'secondary';
+    nextButton.style.marginRight = '5px'; // Added margin for spacing from Last button
     nextButton.innerHTML = 'Next &raquo;';
-    if (currentPage >= totalPages) nextButton.disabled = true;
+    nextButton.disabled = (currentPage >= totalPages);
+    nextButton.className = nextButton.disabled ? 'secondary' : 'primary';
     nextButton.addEventListener('click', () => { if (currentPage < totalPages) window.location.hash = buildHash(currentPage + 1); });
+
+    const lastButton = document.createElement('button');
+    lastButton.innerHTML = 'Last &raquo;';
+    lastButton.disabled = (currentPage >= totalPages);
+    lastButton.className = lastButton.disabled ? 'secondary small-button' : 'primary small-button';
+    lastButton.addEventListener('click', () => { if (currentPage < totalPages) window.location.hash = buildHash(totalPages); });
+
+    const itemsPerPageSelect = document.createElement('select');
+    itemsPerPageSelect.id = 'proxyLogItemsPerPageSelect';
+    itemsPerPageSelect.style.marginLeft = '15px';
+    [5, 10, 15, 25, 50, 100, 200].forEach(val => {
+        const option = document.createElement('option');
+        option.value = val;
+        option.textContent = `${val} per page`;
+        if (limit === val) option.selected = true;
+        itemsPerPageSelect.appendChild(option);
+    });
+    itemsPerPageSelect.addEventListener('change', (e) => {
+        const newLimit = parseInt(e.target.value, 10);
+        window.location.hash = buildHash(1, newLimit); // Go to page 1 with new limit
+    });
 
     container.innerHTML = '';
     container.appendChild(document.createRange().createContextualFragment(paginationHTML));
-    if (currentPage > 1) container.appendChild(prevButton);
-    if (currentPage < totalPages) container.appendChild(nextButton);
+    // Always append all buttons
+    container.appendChild(firstButton);
+    container.appendChild(prevButton);
+    container.appendChild(nextButton);
+    container.appendChild(lastButton);
+    container.appendChild(itemsPerPageSelect);
 }
 
 function handleViewLogDetail(event) {
@@ -207,22 +309,36 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
         return;
     }
 
-    const appState = stateService.getState(); // Still get currentTargetId etc. from global state
+    const appState = stateService.getState();
     const { currentTargetId, currentTargetName } = appState;
+    const defaultProxyLogPaginationState = appState.paginationState.proxyLog;
+    const globalTableLayouts = appState.globalTableLayouts || {};
+    const tableKey = 'proxyLogTable';
+    const savedLayoutForThisTable = globalTableLayouts[tableKey];
+
+    // Ensure all parameters are correctly typed, especially limit and currentPage
+    const baseParams = passedParams || defaultProxyLogPaginationState;
+    const validatedParams = {
+        ...baseParams,
+        // Prioritize saved pageSize, then passed param, then default state
+        limit: savedLayoutForThisTable?.pageSize ? parseInt(savedLayoutForThisTable.pageSize, 10) : (baseParams.limit ? parseInt(baseParams.limit, 10) : defaultProxyLogPaginationState.limit),
+        currentPage: baseParams.currentPage ? parseInt(baseParams.currentPage, 10) : defaultProxyLogPaginationState.currentPage
+    };
+    if (isNaN(validatedParams.limit) || validatedParams.limit <= 0) validatedParams.limit = defaultProxyLogPaginationState.limit;
+    if (isNaN(validatedParams.currentPage) || validatedParams.currentPage <= 0) validatedParams.currentPage = defaultProxyLogPaginationState.currentPage;
 
     // Use passedParams if available, otherwise fallback to global state (for initial load or non-filter-driven reloads)
-    const activeParams = passedParams || appState.paginationState.proxyLog;
-    const { currentPage, limit, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = activeParams;
+    const { currentPage, limit, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = validatedParams;
 
-    console.log(`[ProxyLogView] fetchAndDisplayProxyLogs using filterMethod: "${filterMethod}"`, activeParams);
-    const globalTableLayouts = appState.globalTableLayouts;
-    const tableKey = 'proxyLogTable';
-    const columnConfig = appState.paginationState.proxyLogTableLayout;
+    console.log(`[ProxyLogView] fetchAndDisplayProxyLogs using filterMethod: "${filterMethod}"`, validatedParams);
+    // const globalTableLayouts = appState.globalTableLayouts; // Already declared above
+    // const tableKey = 'proxyLogTable'; // Already declared above
+    const columnDefinitions = appState.paginationState.proxyLogTableLayout; // This holds default visibility, labels etc.
 
     listDiv.innerHTML = `<p>Fetching proxy logs for target ${escapeHtml(currentTargetName)} (ID: ${currentTargetId}), page ${currentPage}, sort by ${sortBy} ${sortOrder}...</p>`;
 
     try {
-        const params = {
+        const paramsForAPI = {
             target_id: currentTargetId,
             page: currentPage,
             limit: limit,
@@ -234,56 +350,73 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
             type: filterContentType,
             search: filterSearchText
         };
-        const apiResponse = await apiService.getProxyLog(params);
+        const apiResponse = await apiService.getProxyLog(paramsForAPI);
         const logs = apiResponse.logs || [];
 
         stateService.updateState({
             paginationState: {
+                ...appState.paginationState, // Preserve other pagination states (e.g., for checklist)
                 proxyLog: {
-                    ...appState.paginationState.proxyLog,
+                    // Use the validated parameters (which have numeric limit and currentPage)
+                    ...validatedParams,
+                    // Then, override with pagination details from the API response
                     currentPage: apiResponse.page || 1,
                     totalPages: apiResponse.total_pages || 1,
                     totalRecords: apiResponse.total_records || 0,
                 }
             }
         });
-
         const distinctMethods = (apiResponse.distinct_values?.method || []).filter(val => val !== null && String(val).trim() !== '');
         const distinctStatuses = (apiResponse.distinct_values?.status || []).filter(val => val !== null && String(val).trim() !== '');
         const distinctContentTypes = (apiResponse.distinct_values?.type || []).filter(val => val !== null && val !== '' && String(val).toLowerCase() !== 'all');
 
-        const savedTableWidths = globalTableLayouts[tableKey] || {};
-        const sortableHeaders = [
-            { key: 'index', label: '#', sortKey: 'id', filter: false }, // Changed key from '#' to 'index'
-            { key: 'timestamp', label: 'Timestamp', sortKey: 'timestamp', filter: false },
-            { key: 'method', label: 'Method', sortKey: 'request_method', filter: true },
-            { key: 'url', label: 'URL', sortKey: 'request_url', filter: false },
-            { key: 'status', label: 'Status', sortKey: 'response_status_code', filter: true },
-            { key: 'type', label: 'Content-Type', sortKey: 'response_content_type', filter: true },
-            { key: 'size', label: 'Size (B)', sortKey: 'response_body_size', filter: false },
-            { key: 'actions', label: 'Actions', sortKey: null, filter: false }
+        const savedLayout = globalTableLayouts[tableKey] || { columns: {}, pageSize: validatedParams.limit };
+        const savedColumnSettings = savedLayout.columns || {};
+
+        // Define headers based on columnDefinitions, respecting visibility
+        const displayableHeaders = [ // Order matters for display
+            { key: 'index', sortKey: 'id', filter: false },
+            { key: 'timestamp', sortKey: 'timestamp', filter: false },
+            { key: 'method', sortKey: 'request_method', filter: true },
+            { key: 'page_name', sortKey: 'page_sitemap_name', filter: false },
+            { key: 'url', sortKey: 'request_url', filter: false },
+            { key: 'status', sortKey: 'response_status_code', filter: true },
+            { key: 'type', sortKey: 'response_content_type', filter: true },
+            { key: 'size', sortKey: 'response_body_size', filter: false },
+            { key: 'actions', sortKey: null, filter: false }
         ];
 
         // For debugging, let's log what layouts are available when rendering
         console.log("[ProxyLogView] fetchAndDisplayProxyLogs - globalTableLayouts:", JSON.parse(JSON.stringify(globalTableLayouts)));
         console.log("[ProxyLogView] fetchAndDisplayProxyLogs - tableKey:", tableKey);
-        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - savedTableWidths for this tableKey:", JSON.parse(JSON.stringify(savedTableWidths)));
-        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - columnConfig (defaults from state):", JSON.parse(JSON.stringify(columnConfig)));
+        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - savedLayout for this tableKey:", JSON.parse(JSON.stringify(savedLayout)));
+        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - columnDefinitions (defaults from state):", JSON.parse(JSON.stringify(columnDefinitions)));
 
         if (logs.length > 0) {
             let tableHTML = `<table style="table-layout: fixed;"><thead id="proxyLogTableHead"><tr>`;
-            sortableHeaders.forEach(h => {
+            displayableHeaders.forEach(h => {
+                const colDef = columnDefinitions[h.key];
+                const savedColSetting = savedColumnSettings[h.key];
+                const isVisible = savedColSetting ? savedColSetting.visible : (colDef ? colDef.visible : true); // Default to true if not in saved or default config
+
+                if (!isVisible) return; // Skip rendering this column
+
                 let classes = h.sortKey ? 'sortable' : '';
                 if (h.sortKey === sortBy) classes += sortOrder === 'ASC' ? ' sorted-asc' : ' sorted-desc';
                 let filterDropdownHTML = '';
                 const colKey = h.key; // Use the key directly
                 let thStyleWidth;
-                if (colKey === 'actions') {
-                    thStyleWidth = '110px'; // Fixed width for the Actions column
-                } else {
-                    thStyleWidth = savedTableWidths[colKey] || columnConfig[colKey]?.default || 'auto';
+                
+                // Use saved width if available, otherwise default width from columnDefinitions
+                thStyleWidth = savedColSetting?.width || colDef?.default || 'auto';
+                if (colDef?.nonResizable) { // Apply fixed width for non-resizable like 'actions'
+                    thStyleWidth = colDef.default; 
                 }
 
+                // Add the specific class for the actions column header
+                if (colKey === 'actions') {
+                    classes += ' proxy-log-actions-column';
+                }
                 if (h.filter) {
                     let options = [];
                     let currentFilterValue = '';
@@ -296,35 +429,79 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                     filterDropdownHTML = `<br><select class="proxy-log-filter" data-filter-key="${h.key}" style="margin-top: 5px; width: 90%;">${options.map(opt => `<option value="${escapeHtmlAttribute(String(opt))}" ${String(opt) === String(currentFilterValue) ? 'selected' : ''}>${opt === '' ? 'All' : escapeHtmlAttribute(String(opt))}</option>`).join('')}</select>`;
                 }
                 // Log the width calculation for each header
-                console.log(`[ProxyLogView] Header: ${h.label}, colKey: '${colKey}', savedWidth: '${savedTableWidths[colKey]}', defaultWidth: '${columnConfig[colKey]?.default}', finalWidth: '${thStyleWidth}'`);
+                console.log(`[ProxyLogView] Header: ${colDef?.label || h.key}, colKey: '${colKey}', savedWidth: '${savedColSetting?.width}', defaultWidth: '${colDef?.default}', finalWidth: '${thStyleWidth}'`);
 
-                tableHTML += `<th style="width: ${thStyleWidth};" class="${classes}" ${h.sortKey ? `data-sort-key="${h.sortKey}"` : ''} data-col-key="${colKey}" id="${columnConfig[colKey]?.id || 'col-proxylog-' + colKey}">${h.label}${filterDropdownHTML}</th>`;
+                tableHTML += `<th class="${classes}" style="width: ${thStyleWidth};" ${h.sortKey ? `data-sort-key="${h.sortKey}"` : ''} data-col-key="${colKey}" id="${colDef?.id || 'col-proxylog-' + colKey}">${colDef?.label || h.key}${filterDropdownHTML}</th>`;
             });
             tableHTML += `</tr></thead><tbody>`;
             logs.forEach((log, index) => {
                 let itemIndex;
-                const { totalRecords: currentTotalRecords, currentPage: currentDisplayPage } = appState.paginationState.proxyLog;
+                // Use total_records directly from the apiResponse for this rendering pass
+                // as appState.paginationState.proxyLog.totalRecords might not be updated yet
+                // for this specific execution context of fetchAndDisplayProxyLogs.
+                const recordsCountForThisRender = apiResponse.total_records || 0;
+                const { currentPage: currentDisplayPage, limit: currentLimit } = appState.paginationState.proxyLog;
+
+                // DEBUGGING: Log values used for itemIndex calculation
+                console.log(`[ProxyLogView] Calculating itemIndex: recordsCountForThisRender=${recordsCountForThisRender}, currentPage=${currentDisplayPage}, limit=${currentLimit}, index=${index}, sortBy=${sortBy}, sortOrder=${sortOrder}`);
+
+                // Corrected logic for descending ID sort
+                // The goal is to show the highest ID as #1 on page 1, then count down.
                 if (sortBy === 'id' && sortOrder === 'DESC') {
-                    itemIndex = currentTotalRecords - ((currentDisplayPage - 1) * limit) - index;
+                    itemIndex = recordsCountForThisRender - ((currentDisplayPage - 1) * currentLimit) - index;
+                } else if (sortBy === 'id' && sortOrder === 'ASC') { // Handle ascending ID sort for index
+                    itemIndex = (currentDisplayPage - 1) * currentLimit + index + 1;
+                    // If you want to display the actual ID, you'd use log.id here instead of a calculated index
                 } else {
-                    itemIndex = (currentDisplayPage - 1) * limit + index + 1;
+                    itemIndex = (currentDisplayPage - 1) * currentLimit + index + 1;
                 }
-                const requestURLString = log.request_url?.String || ''; // Access the string value, default to empty string if null/invalid
+                // Use full URL with fragment if available, otherwise fall back to request_url
+                const requestURLString = (log.request_full_url_with_fragment && log.request_full_url_with_fragment.Valid && log.request_full_url_with_fragment.String)
+                                           ? log.request_full_url_with_fragment.String
+                                           : (log.request_url?.String || '');
+                // Log the log object to inspect its contents, especially request_full_url_with_fragment
+                console.log('[ProxyLogView] Log object for list view (ID ' + log.id + '):', JSON.parse(JSON.stringify(log)));
                 const safeURL = escapeHtml(requestURLString);
+                const pageNameDisplay = (log.page_sitemap_id?.Valid && log.page_sitemap_name?.Valid && log.page_sitemap_name.String)
+                    ? `<a href="#page-sitemap?page_id=${log.page_sitemap_id.Int64}" title="View Page: ${escapeHtmlAttribute(log.page_sitemap_name.String)}">${escapeHtml(log.page_sitemap_name.String)}</a>`
+                    : '-';
+                const logSourceDisplay = log.log_source?.Valid ? escapeHtml(log.log_source.String) : 'mitmproxy';
+
                 const ts = log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A';
-                tableHTML += `<tr>
-                    <td>${itemIndex}</td><td>${ts}</td><td>${escapeHtml(log.request_method?.String || '')}</td>
-                    <td class="proxy-log-url-cell" title="${safeURL}">${safeURL}</td>
-                    <td>${log.response_status_code || '-'}</td>
-                    <td title="${escapeHtmlAttribute(log.response_content_type || '-')}">${escapeHtml(log.response_content_type?.substring(0,30) || '-')}${log.response_content_type && log.response_content_type.length > 30 ? '...' : ''}</td>
-                    <td>${log.response_body_size || 0}</td>
-                    <td class="actions-cell">
-                        <span class="favorite-toggle table-row-favorite-toggle ${log.is_favorite ? 'favorited' : ''}" data-log-id="${log.id}" data-is-favorite="${log.is_favorite ? 'true' : 'false'}" title="Toggle Favorite" style="cursor: pointer; margin-right: 8px; font-size: 1.2em; vertical-align: middle;">${log.is_favorite ? '★' : '☆'}</span>
-                        <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button> <!-- log.request_method is sql.NullString -->
-                        <button class="action-button add-to-sitemap" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="Add to Sitemap">🗺️</button> <!-- log.request_url is sql.NullString -->
-                        <button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="More Actions">⋮</button> <!-- log.request_url is sql.NullString -->
-                    </td></tr>`;
+                tableHTML += `<tr>`;
+                displayableHeaders.forEach(h => {
+                    const colDef = columnDefinitions[h.key];
+                    const savedColSetting = savedColumnSettings[h.key];
+                    const isVisible = savedColSetting ? savedColSetting.visible : (colDef ? colDef.visible : true);
+
+                    if (!isVisible) return;
+
+                    switch(h.key) {
+                        case 'index': tableHTML += `<td>${itemIndex}</td>`; break;
+                        case 'timestamp': tableHTML += `<td>${ts}</td>`; break;
+                        case 'method': tableHTML += `<td>${escapeHtml(log.request_method?.String || '')}</td>`; break;
+                        case 'page_name': tableHTML += `<td>${pageNameDisplay}</td>`; break;
+                        case 'url': tableHTML += `<td class="proxy-log-url-cell" title="${safeURL}">${safeURL}</td>`; break;
+                        case 'status': tableHTML += `<td>${log.response_status_code || '-'}</td>`; break;
+                        case 'type':
+                            tableHTML += `<td title="${escapeHtmlAttribute(log.response_content_type?.String || '-')}">` +
+                                         `${escapeHtml(log.response_content_type?.Valid && log.response_content_type.String ? log.response_content_type.String.substring(0,30) : '-')}` +
+                                         `${log.response_content_type?.Valid && log.response_content_type.String && log.response_content_type.String.length > 30 ? '...' : ''}` +
+                                         `</td>`;
+                            break;
+                        case 'size': tableHTML += `<td>${log.response_body_size || 0}</td>`; break;
+                        case 'actions':
+                            tableHTML += `<td class="actions-cell proxy-log-actions-column">
+                                <span class="favorite-toggle table-row-favorite-toggle ${log.is_favorite ? 'favorited' : ''}" data-log-id="${log.id}" data-is-favorite="${log.is_favorite ? 'true' : 'false'}" title="Toggle Favorite" style="cursor: pointer; margin-right: 8px; font-size: 1.2em; vertical-align: middle;">${log.is_favorite ? '★' : '☆'}</span>
+                                <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button>
+                                <button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="More Actions">⋮</button>
+                            </td>`;
+                            break;
+                    }
+                });
+                tableHTML += `</tr>`;
             });
+
             tableHTML += `</tbody></table>`;
             listDiv.innerHTML = tableHTML;
             // For debugging, you can uncomment the next line to see the HTML being set:
@@ -350,7 +527,10 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                 });
 
                 if (tableService) {
-                    tableService.makeTableColumnsResizable('proxyLogTableHead');
+                    // Pass columnDefinitions to makeTableColumnsResizable
+                    // so it knows which columns are non-resizable
+                    const currentColumnDefinitions = stateService.getState().paginationState.proxyLogTableLayout;
+                    tableService.makeTableColumnsResizable('proxyLogTableHead', currentColumnDefinitions);
                 }
             } else if (logs.length > 0) {
                 console.error("[ProxyLogView] Table head 'proxyLogTableHead' not found after rendering table (using requestAnimationFrame).");
@@ -358,9 +538,8 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
 
             listDiv.querySelectorAll('.view-log-detail').forEach(button => button.addEventListener('click', handleViewLogDetail));
             listDiv.querySelectorAll('.table-row-favorite-toggle').forEach(starBtn => starBtn.addEventListener('click', handleProxyLogFavoriteToggle));
-            listDiv.querySelectorAll('.add-to-sitemap').forEach(button => button.addEventListener('click', openAddToSitemapModal));
             listDiv.querySelectorAll('.more-actions').forEach(button => button.addEventListener('click', openMoreActionsDropdown));
-        }, 0);
+        });
 
     } catch (error) {
         listDiv.innerHTML = `<p class="error-message">Error loading proxy logs: ${escapeHtml(error.message)}</p>`;
@@ -406,11 +585,10 @@ function openMoreActionsDropdown(event) {
         <ul>
             <li><a href="#proxy-log-detail?id=${logId}" data-action="view-detail">View Details</a></li>
             <li><a href="#proxy-log-detail?id=${logId}&tab=jsAnalysisTab" data-action="analyze-js">Analyze JS</a></li>
-            <li><a href="#" data-action="add-to-sitemap-dropdown" data-log-id="${logId}">Add to Sitemap</a></li>
             <li><a href="#" data-action="find-comments-dropdown" data-log-id="${logId}">Find Comments</a></li>
             <li><a href="#" data-action="send-to-findings" data-log-id="${logId}">Send to Findings (TBD)</a></li>
             <li><a href="#" data-action="send-to-modifier-dropdown" data-log-id="${logId}">Send to Modifier</a></li>
-            <li><a href="#" data-action="run-gf">Run GF Patterns (TBD)</a></li>
+            <li><a href="#" data-action="add-as-finding" data-log-id="${logId}">Add as Finding</a></li>
         </ul>
     `;
 
@@ -425,16 +603,15 @@ function openMoreActionsDropdown(event) {
          dropdown.style.left = '5px'; // Adjust if it overflows left
     }
 
-
-    dropdown.querySelector('a[data-action="add-to-sitemap-dropdown"]').addEventListener('click', (e) => {
-        e.preventDefault();
-        openAddToSitemapModal({ currentTarget: button }); // Reuse existing modal logic, pass original button as target
-        closeMoreActionsDropdown();
-    });
-
     dropdown.querySelector('a[data-action="find-comments-dropdown"]')?.addEventListener('click', (e) => {
         e.preventDefault();
         handleFindCommentsFromDropdown(logId);
+        closeMoreActionsDropdown();
+    });
+
+    dropdown.querySelector('a[data-action="add-as-finding"]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleLogAddAsFinding(logId); // New handler
         closeMoreActionsDropdown();
     });
 
@@ -457,58 +634,90 @@ function openMoreActionsDropdown(event) {
     setTimeout(() => document.addEventListener('click', closeMoreActionsDropdownOnClickOutside), 0);
 }
 
+// --- Functions for Proxy Log Detail View More Actions Dropdown ---
+function closeDetailViewMoreActionsDropdown() {
+    const existingDropdown = document.getElementById('proxyLogDetailMoreActionsDropdown');
+    if (existingDropdown) {
+        existingDropdown.remove();
+    }
+    document.removeEventListener('click', closeDetailViewMoreActionsDropdownOnClickOutside);
+}
+
+function closeDetailViewMoreActionsDropdownOnClickOutside(event) {
+    const dropdown = document.getElementById('proxyLogDetailMoreActionsDropdown');
+    const moreActionsButton = event.target.closest('#proxyLogDetailMoreActionsBtn');
+
+    console.log('[ProxyLogView] closeDetailViewMoreActionsDropdownOnClickOutside called.');
+    console.log('  - event.target:', event.target);
+    console.log('  - dropdown exists:', !!dropdown);
+    if (dropdown) {
+        console.log('  - dropdown.contains(event.target):', dropdown.contains(event.target));
+    }
+    console.log('  - moreActionsButton (closest #proxyLogDetailMoreActionsBtn):', moreActionsButton);
+
+    if (dropdown && !dropdown.contains(event.target) && !moreActionsButton) {
+        console.log('  - Condition MET. Closing dropdown.');
+        closeDetailViewMoreActionsDropdown();
+    } else {
+        console.log('  - Condition NOT MET. Not closing dropdown.');
+    }
+}
+
+function openDetailViewMoreActionsDropdown(event, logId) {
+    event.stopPropagation();
+    closeDetailViewMoreActionsDropdown(); // Close any existing detail view dropdown
+
+    const button = event.currentTarget;
+    const dropdown = document.createElement('div');
+
+    dropdown.id = 'proxyLogDetailMoreActionsDropdown';
+    dropdown.className = 'actions-dropdown-menu'; // Use existing styling
+
+    const rect = button.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + window.scrollY}px`;
+    // Position it to the left, aligning its right edge with the button's right edge, or slightly offset
+    dropdown.style.left = `${rect.left + window.scrollX}px`;
+
+    dropdown.innerHTML = `
+        <ul>
+            <li><a href="#" data-action="analyze-js-detail" data-log-id="${logId}">Analyze JS</a></li>
+            <li><a href="#" data-action="find-comments-detail" data-log-id="${logId}">Find Comments</a></li>
+            <li><a href="#" data-action="send-to-modifier-detail" data-log-id="${logId}">Send to Modifier</a></li>
+            <li><a href="#" data-action="add-as-finding-detail" data-log-id="${logId}">Add as Finding</a></li>
+        </ul>
+    `;
+
+    document.body.appendChild(dropdown);
+
+    // Event listeners for dropdown items
+    dropdown.querySelector('a[data-action="analyze-js-detail"]').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelector('.tab-button[data-tab="jsAnalysisTab"]')?.click(); // Switch tab
+        closeDetailViewMoreActionsDropdown();
+    });
+    dropdown.querySelector('a[data-action="find-comments-detail"]').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelector('.tab-button[data-tab="commentsTab"]')?.click(); // Switch tab
+        closeDetailViewMoreActionsDropdown();
+    });
+    dropdown.querySelector('a[data-action="send-to-modifier-detail"]').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await handleSendLogToModifier(logId); // Reuse existing function
+        closeDetailViewMoreActionsDropdown();
+    });
+    dropdown.querySelector('a[data-action="add-as-finding-detail"]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleLogAddAsFinding(logId); // Reuse the same handler
+        closeDetailViewMoreActionsDropdown();
+    });
+
+    setTimeout(() => document.addEventListener('click', closeDetailViewMoreActionsDropdownOnClickOutside), 0);
+}
+// --- End of Functions for Proxy Log Detail View More Actions Dropdown ---
+
 function handleFindCommentsFromDropdown(logId) {
     // Navigate to the detail view and activate the comments tab
     window.location.hash = `#proxy-log-detail?id=${logId}&tab=commentsTab`;
-}
-
-function openAddToSitemapModal(event) {
-    const button = event.currentTarget;
-    const logId = button.getAttribute('data-log-id');
-    const logMethod = button.getAttribute('data-log-method');
-    const logPath = button.getAttribute('data-log-path');
-
-    // Create modal HTML
-    const modalHTML = `
-        <div id="addToSitemapModal" class="modal-overlay" style="display:flex;">
-            <div class="modal-content" style="width: 500px;">
-                <div class="modal-header">
-                    <h2>Add to Sitemap</h2>
-                    <span class="modal-close-btn" id="closeAddToSitemapModalBtn">&times;</span>
-                </div>
-                <div class="modal-body">
-                    <p><strong>Log Entry:</strong> ${escapeHtml(logMethod)} ${escapeHtml(logPath)}</p>
-                    <input type="hidden" id="sitemapLogId" value="${logId}">
-                    <div class="form-group">
-                        <label for="sitemapFolderPath">Folder Path:</label>
-                        <input type="text" id="sitemapFolderPath" name="sitemapFolderPath" value="/" required>
-                        <small>Define a hierarchical path (e.g., /api/v1/users/). The actual endpoint will be listed under this.</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="sitemapNotes">Notes (Optional):</label>
-                        <textarea id="sitemapNotes" name="sitemapNotes" rows="3"></textarea>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button id="cancelAddToSitemapBtn" class="secondary">Cancel</button>
-                    <button id="saveToSitemapBtn" class="primary">Save to Sitemap</button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Append modal to body (or a dedicated modal container if you have one)
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-
-    // Add event listeners
-    document.getElementById('closeAddToSitemapModalBtn').addEventListener('click', closeAddToSitemapModal);
-    document.getElementById('cancelAddToSitemapBtn').addEventListener('click', closeAddToSitemapModal);
-    document.getElementById('saveToSitemapBtn').addEventListener('click', handleSaveSitemapEntry);
-    document.getElementById('addToSitemapModal').addEventListener('click', (e) => {
-        if (e.target.id === 'addToSitemapModal') { // Click on overlay
-            closeAddToSitemapModal();
-        }
-    });
 }
 
 function closeAddToSitemapModal() {
@@ -567,14 +776,23 @@ async function handleDeleteAllTargetLogs() {
 
 async function handleRefreshProxyLog() {
     console.log("[ProxyLogView] Refresh button clicked.");
-    uiService.showModalMessage("Refreshing...", "Reloading proxy logs with current filters...", true); // true for auto-hide
+    const statusMessageEl = document.getElementById('proxyLogRefreshStatusMessage');
+
+    if (statusMessageEl) {
+        statusMessageEl.textContent = 'Refreshing logs...';
+        statusMessageEl.className = 'message-area info-message'; // Use info for in-progress
+        statusMessageEl.style.display = 'inline';
+    }
+
     const currentProxyLogParams = stateService.getState().paginationState.proxyLog;
     await fetchAndDisplayProxyLogs(currentProxyLogParams);
-    // The modal will auto-hide if uiService is set up for it,
-    // otherwise, you might need a uiService.hideModal() or similar if fetchAndDisplayProxyLogs doesn't handle it.
-    // For now, assuming a short-lived message.
-}
 
+    if (statusMessageEl) {
+        statusMessageEl.textContent = 'Logs refreshed!';
+        statusMessageEl.className = 'message-area success-message'; // Use success for completion
+        setTimeout(() => { statusMessageEl.style.display = 'none'; statusMessageEl.textContent = ''; }, 2000); // Hide after 2 seconds
+    }
+}
 
 async function triggerAndFetchParamAnalysis(targetId, targetName) {
     const paramAnalysisContentDiv = document.getElementById('paramAnalysisContent');
@@ -905,9 +1123,11 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
             <div style="margin-bottom: 10px;">
                 <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs" style="margin-right: 10px;">🔄</button>
                 <button id="saveProxyLogLayoutBtn" class="secondary small-button" style="margin-right: 10px;">Save Column Layout</button>
+                <button id="customizeProxyLogColumnsBtn" class="secondary small-button" style="margin-right: 10px;">Customize Columns</button>
                 <button id="deleteAllTargetLogsBtn" class="secondary small-button" ${!currentTargetId ? 'disabled title="No target selected"' : `title="Delete all logs for ${escapeHtml(currentTargetName)}"`}>
                     Delete All Logs for Target
                 </button>
+                <span id="proxyLogRefreshStatusMessage" class="message-area" style="margin-left: 10px; display: none;"></span>
             </div>
             <div id="proxyLogListContainer">Loading proxy logs...</div>
             <div id="proxyLogPaginationControlsContainer" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
@@ -984,9 +1204,7 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
     document.getElementById('filterFavoritesToggle')?.addEventListener('change', handleProxyLogFavoriteFilterChange);
     document.getElementById('proxyLogSearchInput')?.addEventListener('input', debounce(handleProxyLogSearch, 300));
     document.getElementById('saveProxyLogLayoutBtn')?.addEventListener('click', () => {
-        if (tableService) {
-            tableService.saveCurrentTableLayout(tableKey, 'proxyLogTableHead');
-        }
+        prepareAndSaveProxyLogLayout();
     });
     const deleteAllBtn = document.getElementById('deleteAllTargetLogsBtn');
     if (deleteAllBtn) {
@@ -995,6 +1213,10 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
     const refreshBtn = document.getElementById('refreshProxyLogBtn');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', handleRefreshProxyLog); // Listener remains the same
+    }
+    const customizeColsBtn = document.getElementById('customizeProxyLogColumnsBtn');
+    if (customizeColsBtn) {
+        customizeColsBtn.addEventListener('click', openCustomizeColumnsModal);
     }
 }
 
@@ -1034,7 +1256,7 @@ async function handleAnalyzeJS(event) {
             }
         }
         stateService.updateState({ jsAnalysisDataCache: { [logIdStr]: currentJsAnalysisData } });
-        
+
         // Populate filter and render table
         populateJsAnalysisCategoryFilter(logIdStr); // Populate dropdown with new categories
         renderJsAnalysisTable(logIdStr); // This will now use filters from state
@@ -1081,6 +1303,7 @@ function renderJsAnalysisTable(logIdStr) {
     const resultsContentDiv = document.getElementById('jsAnalysisResultsContent');
     const filterSelect = document.getElementById('jsAnalysisCategoryFilter');
     const searchInput = document.getElementById('jsAnalysisSearchInput');
+    const pathSenderControls = document.getElementById('jsAnalysisPathSenderControls');
 
     if (!resultsContentDiv) return;
 
@@ -1092,10 +1315,17 @@ function renderJsAnalysisTable(logIdStr) {
 
     // Preserve existing message if any (e.g., from handleAnalyzeJS)
     let existingMessageHTML = resultsContentDiv.querySelector('.message-area')?.outerHTML || '';
-    
+
     // Update control values from state
     if (filterSelect) filterSelect.value = filterCategory;
     if (searchInput) searchInput.value = appState.jsAnalysisSearchText;
+
+    // Show path sender controls only if "Potential Paths (Regex)" is selected or no category is selected (All)
+    // And only if there's a current target set
+    const currentTargetId = stateService.getState().currentTargetId;
+    if (pathSenderControls) {
+         pathSenderControls.style.display = (currentTargetId && (!filterCategory || filterCategory === "Potential Paths (Regex)")) ? 'flex' : 'none';
+    }
 
 
     if (!currentLogAnalysisData) {
@@ -1117,7 +1347,7 @@ function renderJsAnalysisTable(logIdStr) {
             item.finding.toLowerCase().includes(searchText)
         );
     }
-    
+
     if (processedData.length === 0) {
         resultsContentDiv.innerHTML = existingMessageHTML + "<p>No analysis data matches the current filters.</p>";
         return;
@@ -1133,13 +1363,26 @@ function renderJsAnalysisTable(logIdStr) {
         return sortOrder === 'ASC' ? comparison : comparison * -1;
     });
 
-    let tableHTML = `<table><thead><tr>
-        <th class="sortable" data-sort-key="category">Category</th>
-        <th class="sortable" data-sort-key="finding">Finding</th>
-        </tr></thead><tbody>`;
-    sortedData.forEach(item => tableHTML += `<tr><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.finding)}</td></tr>`);
+    let tableHTML = `<table><thead><tr>`;
+    // Add checkbox header if "Potential Paths (Regex)" is visible
+    if (!filterCategory || filterCategory === "Potential Paths (Regex)") {
+        tableHTML += `<th style="width: 30px;"><input type="checkbox" id="selectAllJsPathsCheckbox" title="Select/Deselect All Visible Paths"></th>`;
+    }
+    tableHTML += `<th class="sortable" data-sort-key="category">Category</th>
+                  <th class="sortable" data-sort-key="finding">Finding</th>
+                  </tr></thead><tbody>`;
+
+    sortedData.forEach(item => {
+        tableHTML += `<tr>`;
+        if (!filterCategory || filterCategory === "Potential Paths (Regex)") {
+            // Only add checkbox if the item is actually from the "Potential Paths (Regex)" category
+            const checkboxHTML = item.category === "Potential Paths (Regex)" ? `<input type="checkbox" class="js-path-checkbox" data-path="${escapeHtmlAttribute(item.finding)}">` : '';
+            tableHTML += `<td>${checkboxHTML}</td>`;
+        }
+        tableHTML += `<td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.finding)}</td></tr>`;
+    });
     tableHTML += `</tbody></table>`;
-    
+
     // Prepend existing message, then add table
     resultsContentDiv.innerHTML = existingMessageHTML + tableHTML;
 
@@ -1149,6 +1392,13 @@ function renderJsAnalysisTable(logIdStr) {
         th.classList.toggle('sorted-desc', sortBy === th.dataset.sortKey && sortOrder === 'DESC');
         th.addEventListener('click', (event) => handleJsAnalysisSort(event, logIdStr));
     });
+
+    // Add event listener for "Select All" checkbox if it exists
+    const selectAllCheckbox = document.getElementById('selectAllJsPathsCheckbox');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', handleSelectAllJsPaths);
+    }
+
 }
 
 function handleJsAnalysisSort(event, logIdStr) {
@@ -1175,6 +1425,13 @@ const handleJsAnalysisSearch = debounce((event) => {
     stateService.updateState({ jsAnalysisSearchText: newSearchText });
     renderJsAnalysisTable(logIdStr);
 }, 300);
+
+function handleSelectAllJsPaths(event) {
+    const isChecked = event.target.checked;
+    document.querySelectorAll('.js-path-checkbox').forEach(checkbox => {
+        checkbox.checked = isChecked;
+    });
+}
 
 
 function convertJsAnalysisToCSV(jsonData) {
@@ -1249,70 +1506,104 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
 
     try {
         const logEntry = await apiService.getProxyLogDetail(logId, navParams);
-        
-        let reqHeaders = {};
-        const rawReqHeaders = logEntry.request_headers; 
-        if (typeof rawReqHeaders === 'string') {
-            if (rawReqHeaders.trim() === '' || rawReqHeaders === "[object Object]") {
-                reqHeaders = {}; // Default for empty or malformed string
-                if (rawReqHeaders === "[object Object]") {
-                    console.warn("Request headers field contained the literal string '[object Object]', treating as empty headers.");
-                }
-            } else {
-                try {
-                    reqHeaders = JSON.parse(rawReqHeaders);
-                } catch (e) {
-                    console.warn("Error parsing request_headers JSON string:", e, "Original value:", rawReqHeaders);
-                    reqHeaders = {}; // Fallback to empty object on parse error
-                }
-            }
-        } else if (typeof rawReqHeaders === 'object' && rawReqHeaders !== null) {
-            reqHeaders = rawReqHeaders; // It's already a parsed object
+
+        // --- DEBUGGING STARTS ---
+        console.log("[ProxyLogDetailView] Log Entry Data:", JSON.parse(JSON.stringify(logEntry)));
+        if (logEntry.request_full_url_with_fragment) {
+            console.log("[ProxyLogDetailView] logEntry.request_full_url_with_fragment exists:", logEntry.request_full_url_with_fragment);
+            console.log("[ProxyLogDetailView] logEntry.request_full_url_with_fragment.Valid:", logEntry.request_full_url_with_fragment.Valid);
+            console.log("[ProxyLogDetailView] logEntry.request_full_url_with_fragment.String:", logEntry.request_full_url_with_fragment.String);
         } else {
-            reqHeaders = {}; // Default for null, undefined, or other unexpected types
+            console.log("[ProxyLogDetailView] logEntry.request_full_url_with_fragment is null or undefined.");
+        }
+        console.log("[ProxyLogDetailView] logEntry.request_url?.String:", logEntry.request_url?.String);
+        // --- DEBUGGING ENDS ---
+
+        let reqHeaders = {};
+        if (logEntry.request_headers && logEntry.request_headers.Valid && logEntry.request_headers.String) {
+            try {
+                reqHeaders = JSON.parse(logEntry.request_headers.String);
+            } catch (e) {
+                console.warn("Error parsing request_headers JSON string:", e, "Original value:", logEntry.request_headers.String);
+                // reqHeaders remains {}
+            }
         }
 
         let resHeaders = {};
-        const rawResHeaders = logEntry.response_headers;
-        if (typeof rawResHeaders === 'string') {
-            if (rawResHeaders.trim() === '' || rawResHeaders === "[object Object]") {
-                resHeaders = {};
-                if (rawResHeaders === "[object Object]") {
-                    console.warn("Response headers field contained the literal string '[object Object]', treating as empty headers.");
-                }
-            } else {
-                try {
-                    resHeaders = JSON.parse(rawResHeaders);
-                } catch (e) {
-                    console.warn("Error parsing response_headers JSON string:", e, "Original value:", rawResHeaders);
-                    resHeaders = {};
-                }
+        if (logEntry.response_headers && logEntry.response_headers.Valid && logEntry.response_headers.String) {
+            try {
+                resHeaders = JSON.parse(logEntry.response_headers.String);
+            } catch (e) {
+                console.warn("Error parsing response_headers JSON string:", e, "Original value:", logEntry.response_headers.String);
+                // resHeaders remains {}
             }
-        } else if (typeof rawResHeaders === 'object' && rawResHeaders !== null) {
-            resHeaders = rawResHeaders;
-        } else {
-            resHeaders = {};
+        }
+
+        const requestHttpVersionDisplay = (logEntry.request_http_version && logEntry.request_http_version.Valid)
+            ? logEntry.request_http_version.String
+            : 'N/A';
+        const responseHttpVersionDisplay = (logEntry.response_http_version && logEntry.response_http_version.Valid)
+            ? logEntry.response_http_version.String
+            : 'N/A';
+
+        // Log the entire logEntry to inspect its structure, especially associated_findings
+        console.log("[ProxyLogDetailView] Received logEntry from API:", JSON.parse(JSON.stringify(logEntry)));
+
+        let associatedFindingsHTML = '';
+        if (logEntry.associated_findings && logEntry.associated_findings.length > 0) {
+            associatedFindingsHTML = `
+                <div class="associated-findings-section" style="margin-bottom: 15px; padding: 10px; background-color: #e9ecef; border-radius: 4px;">
+                    <h4 style="margin-top:0; margin-bottom: 5px;">Associated Findings:</h4>
+                    <ul style="list-style-type: disc; margin-left: 20px; padding-left: 0;">`;
+            logEntry.associated_findings.forEach(finding => {
+                associatedFindingsHTML += `<li><a href="#" class="view-associated-finding" data-finding-id="${finding.id}" title="View Finding: ${escapeHtmlAttribute(finding.title)}">${escapeHtml(finding.title)} (ID: ${finding.id})</a></li>`;
+            });
+            associatedFindingsHTML += `</ul>
+                </div>`;
+        }
+
+        // Determine request content type from parsed headers for formatBody
+        let requestContentTypeForBody = '';
+        if (reqHeaders['Content-Type']) {
+            requestContentTypeForBody = Array.isArray(reqHeaders['Content-Type']) ? reqHeaders['Content-Type'][0] : reqHeaders['Content-Type'];
+        } else if (reqHeaders['content-type']) { // Check for lowercase
+            requestContentTypeForBody = Array.isArray(reqHeaders['content-type']) ? reqHeaders['content-type'][0] : reqHeaders['content-type'];
         }
 
         viewContentContainer.innerHTML = `
             <div class="log-detail-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h1>Log Entry Detail: #${logEntry.id}
-                    <button id="analyzeJsBtn" class="secondary small-button" data-log-id="${logEntry.id}" style="margin-left: 15px;">Analyze JS</button>
-                    <button id="findCommentsBtn" class="secondary small-button" data-log-id="${logEntry.id}" style="margin-left: 10px;">Find Comments</button>
-                    <span id="favoriteToggleBtn" class="favorite-toggle ${logEntry.is_favorite ? 'favorited' : ''}" data-log-id="${logEntry.id}" data-is-favorite="${logEntry.is_favorite}" title="Toggle Favorite" style="margin-left: 10px; font-size: 1.2em; vertical-align: middle;">${logEntry.is_favorite ? '★' : '☆'}</span>
-                </h1>
+                <div style="display: flex; align-items: center;">
+                    <button id="proxyLogDetailMoreActionsBtn" class="action-button" data-log-id="${logEntry.id}" title="More Actions" style="font-size: 1.5em; margin-right: 10px; padding: 0 5px;">⋮</button>
+                    <h1>Log Entry Detail: #${logEntry.id}
+                        <button id="analyzeJsBtn" class="secondary small-button" data-log-id="${logEntry.id}" style="margin-left: 15px;">Analyze JS</button>
+                        <button id="findCommentsBtn" class="secondary small-button" data-log-id="${logEntry.id}" style="margin-left: 10px;">Find Comments</button>
+                        <span id="favoriteToggleBtn" class="favorite-toggle ${logEntry.is_favorite ? 'favorited' : ''}" data-log-id="${logEntry.id}" data-is-favorite="${logEntry.is_favorite}" title="Toggle Favorite" style="margin-left: 10px; font-size: 1.2em; vertical-align: middle;">${logEntry.is_favorite ? '★' : '☆'}</span>
+                    </h1>
+                </div>
                 <div class="log-navigation">
                     ${logEntry.prev_log_id ? `<button id="prevLogBtn" class="secondary" data-log-id="${logEntry.prev_log_id}" title="Previous Log Entry">&laquo; Previous</button>` : ''}
                     ${logEntry.next_log_id ? `<button id="nextLogBtn" class="secondary" data-log-id="${logEntry.next_log_id}" title="Next Log Entry" style="margin-left: ${logEntry.prev_log_id ? '5px' : '0'};">Next &raquo;</button>` : ''}
                 </div>
             </div>
+            ${associatedFindingsHTML}
             <div class="log-meta-info" style="margin-bottom: 15px; padding: 10px; background-color: #f9f9f9; border-radius: 4px;">
                 <p><strong>Timestamp:</strong> ${new Date(logEntry.timestamp).toLocaleString()}</p>
-                <p><strong>URL:</strong> ${escapeHtml(logEntry.request_url?.String || '')}</p> <!-- Access .String -->
+                ${/* Display Page Name in detail view if available - MOVED UP */''}
+                ${(logEntry.page_sitemap_id?.Valid && logEntry.page_sitemap_name?.Valid && logEntry.page_sitemap_name.String) ? `<p><strong>Associated Page:</strong> <a href="#page-sitemap?page_id=${logEntry.page_sitemap_id.Int64}" title="View Page: ${escapeHtmlAttribute(logEntry.page_sitemap_name.String)}">${escapeHtml(logEntry.page_sitemap_name.String)} (ID: ${logEntry.page_sitemap_id.Int64})</a></p>`
+                : (logEntry.page_sitemap_id?.Valid ? `<p><strong>Associated Page ID:</strong> ${logEntry.page_sitemap_id.Int64} (Name not found)</p>` : '')}
+                <p><strong>URL (Server-Seen):</strong> ${escapeHtml(logEntry.request_url?.String || 'N/A')}</p>
+                ${ (logEntry.request_full_url_with_fragment &&
+                    logEntry.request_full_url_with_fragment.Valid &&
+                    logEntry.request_full_url_with_fragment.String &&
+                    logEntry.request_full_url_with_fragment.String !== (logEntry.request_url?.String || ''))
+                    ? `<p><strong>Full URL (Toolkit-Initiated):</strong> ${escapeHtml(logEntry.request_full_url_with_fragment.String)}</p>`
+                    : ''
+                }
                 <p><strong>Method:</strong> ${escapeHtml(logEntry.request_method?.String || '')}</p> <!-- Access .String -->
                 <p><strong>Status:</strong> ${logEntry.response_status_code || '-'}</p>
                 <p><strong>Duration:</strong> ${logEntry.duration_ms || 0} ms</p>
                 ${logEntry.target_id ? `<p><strong>Target ID:</strong> ${logEntry.target_id}</p>` : ''}
+                ${logEntry.log_source?.Valid ? `<p><strong>Log Source:</strong> ${escapeHtml(logEntry.log_source.String)}</p>` : ''}
             </div>
             <div class="tabs">
                 <button class="tab-button" data-tab="requestTab">Request</button>
@@ -1322,7 +1613,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
             </div>
             <div id="requestTab" class="tab-content active">
                 <h3>Request Details</h3>
-                <p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.request_http_version)}</p>
+                <p><strong>HTTP Version:</strong> ${escapeHtml(requestHttpVersionDisplay)}</p>
                 <h4>Headers:</h4>
                 <pre class="headers-box" id="requestHeadersPre"></pre> <!-- Give it an ID -->
                 <h4>Body:</h4>
@@ -1330,7 +1621,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
             </div>
             <div id="responseTab" class="tab-content">
                 <h3>Response Details</h3>
-                <p><strong>HTTP Version:</strong> ${escapeHtml(logEntry.response_http_version)}</p>
+                <p><strong>HTTP Version:</strong> ${escapeHtml(responseHttpVersionDisplay)}</p>
                 <h4>Headers:</h4>
                 <pre class="headers-box" id="responseHeadersPre"></pre> <!-- Give it an ID -->
                 <h4>Body: (${logEntry.response_body_size} bytes)</h4>
@@ -1345,7 +1636,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 <div class="js-analysis-controls" style="margin-bottom: 10px; display: flex; gap: 15px; align-items: center;">
                     <div class="form-group" style="margin-bottom:0;">
                         <label for="jsAnalysisCategoryFilter" style="margin-right: 5px;">Category:</label>
-                        <select id="jsAnalysisCategoryFilter" data-log-id="${logEntry.id}">
+                        <select id="jsAnalysisCategoryFilter" data-log-id="${logEntry.id}" style="min-width: 150px;">
                             <option value="">All</option>
                             <!-- Options will be populated dynamically -->
                         </select>
@@ -1354,6 +1645,13 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                         <input type="search" id="jsAnalysisSearchInput" data-log-id="${logEntry.id}" placeholder="Search findings..." style="width: 100%;">
                     </div>
                     <button id="exportJsAnalysisCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button>
+                </div>
+                <div id="jsAnalysisPathSenderControls" class="js-analysis-controls" style="margin-bottom: 10px; display: none; gap: 15px; align-items: center; padding: 5px; background-color: #f0f0f0; border-radius: 4px;">
+                    <div class="form-group" style="margin-bottom:0; flex-grow: 1;">
+                        <label for="jsAnalysisPathPrefix" style="margin-right: 5px;">URL Prefix:</label>
+                        <input type="text" id="jsAnalysisPathPrefix" placeholder="e.g., https://example.com" style="width: 80%;">
+                    </div>
+                    <button id="sendSelectedPathsToProxyBtn" class="primary small-button" data-log-id="${logEntry.id}">Send Selected to Proxy</button>
                 </div>
                 <div id="jsAnalysisResultsContent">
                     <p>Click "Analyze JS" to perform analysis.</p>
@@ -1364,12 +1662,16 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
         // Safely set the response body content
         const responseBodyPre = document.getElementById('responseBodyPre');
         if (responseBodyPre) { // For Response
-            responseBodyPre.textContent = formatBody(logEntry.response_body, logEntry.response_content_type);
+            // Ensure we pass the string value from the sql.NullString object
+            const responseContentTypeString = (logEntry.response_content_type && logEntry.response_content_type.Valid) 
+                                              ? logEntry.response_content_type.String 
+                                              : '';
+            responseBodyPre.textContent = formatBody(logEntry.response_body, responseContentTypeString);
         }
         // Safely set the request body content
         const requestBodyPre = document.getElementById('requestBodyPre');
         if (requestBodyPre) { // For Request
-            requestBodyPre.textContent = formatBody(logEntry.request_body, reqHeaders['Content-Type']?.[0]);
+            requestBodyPre.textContent = formatBody(logEntry.request_body, requestContentTypeForBody);
         }
         // Safely set the request headers
         const requestHeadersPre = document.getElementById('requestHeadersPre');
@@ -1398,14 +1700,43 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                 }
             });
         });
+
+        // --- Attaching listener for the "More Actions" (⋮) button ---
+        const moreActionsButtonElement = document.getElementById('proxyLogDetailMoreActionsBtn');
+        console.log('[ProxyLogView] loadProxyLogDetailView: Attempting to find #proxyLogDetailMoreActionsBtn. Found:', moreActionsButtonElement ? 'Yes' : 'No');
+
+        if (moreActionsButtonElement) {
+            // To prevent multiple listeners if this function is called again for the same view,
+            // we clone the node and replace it. This effectively removes all old listeners.
+            const newButton = moreActionsButtonElement.cloneNode(true);
+            if (moreActionsButtonElement.parentNode) {
+                moreActionsButtonElement.parentNode.replaceChild(newButton, moreActionsButtonElement);
+                console.log('[ProxyLogView] loadProxyLogDetailView: Replaced #proxyLogDetailMoreActionsBtn node.');
+
+                newButton.addEventListener('click', (event) => {
+                    console.log('[ProxyLogView] Detail view "more actions" (⋮) button CLICKED for logId:', logEntry.id);
+                    openDetailViewMoreActionsDropdown(event, logEntry.id);
+                });
+                console.log('[ProxyLogView] loadProxyLogDetailView: Event listener ATTACHED to #proxyLogDetailMoreActionsBtn.');
+            } else {
+                console.error('[ProxyLogView] loadProxyLogDetailView: #proxyLogDetailMoreActionsBtn found, but its parentNode is null. Cannot attach listener.');
+            }
+        }
+
+        // Add event listeners for the new "View Associated Finding" links
+        viewContentContainer.querySelectorAll('.view-associated-finding').forEach(link => {
+            link.addEventListener('click', (e) => { e.preventDefault(); handleViewAssociatedFindingDetailFromProxyLog(e.currentTarget.dataset.findingId); });
+        });
+
         document.getElementById('findCommentsBtn')?.addEventListener('click', handleFindCommentsForDetailView);
         document.getElementById('exportCommentsCsvBtn')?.addEventListener('click', handleExportCommentsToCSV);
-        
+
         // JS Analysis event listeners
         document.getElementById('analyzeJsBtn')?.addEventListener('click', handleAnalyzeJS);
         document.getElementById('exportJsAnalysisCsvBtn')?.addEventListener('click', handleExportJsAnalysisToCSV);
         document.getElementById('jsAnalysisCategoryFilter')?.addEventListener('change', handleJsAnalysisCategoryFilter);
         document.getElementById('jsAnalysisSearchInput')?.addEventListener('input', handleJsAnalysisSearch);
+        document.getElementById('sendSelectedPathsToProxyBtn')?.addEventListener('click', handleSendSelectedPathsToProxy);
 
 
         document.getElementById('saveLogEntryNotesBtn').addEventListener('click', async (event) => {
@@ -1457,7 +1788,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
         const tabToActivate = requestedTab || 'requestTab';
         const tabButtonToActivate = document.querySelector(`.tab-button[data-tab="${tabToActivate}"]`);
         if (tabButtonToActivate) {
-            tabButtonToActivate.click(); 
+            tabButtonToActivate.click();
         } else if (document.querySelector('.tab-button[data-tab="requestTab"]')) {
             // Default to requestTab if specified tab is invalid
             document.querySelector('.tab-button[data-tab="requestTab"]')?.click();
@@ -1509,15 +1840,32 @@ function renderCommentAnalysisTable(logIdStr) {
     const appState = stateService.getState();
     const currentLogCommentData = appState.commentAnalysisDataCache[logIdStr];
     const currentSortState = appState.commentAnalysisSortState;
+    const columnDefinitions = appState.paginationState.commentAnalysisTableLayout;
+    const globalTableLayouts = appState.globalTableLayouts || {};
+    const tableKey = 'commentAnalysisTable'; // Unique key for this table's layout
+    const savedLayout = globalTableLayouts[tableKey] || { columns: {} };
+    const savedColumnSettings = savedLayout.columns || {};
 
     if (!currentLogCommentData) {
         resultsContentDiv.innerHTML = "<p>No comment analysis data available for this log entry.</p>";
         return;
     }
     if (currentLogCommentData.length === 0) {
-        resultsContentDiv.innerHTML = "<p>No comments found to display.</p>";
+        resultsContentDiv.innerHTML = "<p>No comments found to display.</p>"; // Keep existing message for no data
         return;
     }
+
+    // Button to save layout (optional, but good for consistency)
+    let saveLayoutButtonHTML = `
+        <div style="margin-bottom: 10px; text-align: right;">
+            <button id="saveCommentAnalysisLayoutBtn" class="secondary small-button">Save Column Layout</button>
+        </div>
+    `;
+
+    // Defined order for columns
+    const displayOrder = ['lineNumber', 'commentType', 'commentText', 'contextBefore', 'contextAfter'];
+
+    let tableHTML = `${saveLayoutButtonHTML}<table><thead id="commentAnalysisTableHead"><tr>`; // Added table head ID
 
     // Helper function to normalize string values for display
     function normalizeStringForDisplay(value) {
@@ -1540,49 +1888,97 @@ function renderCommentAnalysisTable(logIdStr) {
         return currentSortState.sortOrder === 'ASC' ? comparison : comparison * -1;
     });
 
-    let tableHTML = `<table><thead><tr>
-        <th class="sortable" data-sort-key="lineNumber">Line#</th> {/* sortBy uses camelCase 'lineNumber' */}
-        <th class="sortable" data-sort-key="commentType">Type</th> {/* sortBy uses camelCase 'commentType' */}
-        <th>Comment Text</th>
-        <th>Context Before</th>
-        <th>Context After</th>
-        </tr></thead><tbody>`;
+    displayOrder.forEach(key => {
+        const colDef = columnDefinitions[key];
+        if (!colDef || !colDef.visible) return; // Skip if not defined or not visible
+
+        const savedColSetting = savedColumnSettings[key];
+        const thStyleWidth = savedColSetting?.width || colDef.default || 'auto';
+
+        // --- Add this logging block ---
+        if (key === 'commentType') {
+            console.log(`[ProxyLogView] 'commentType' Column ('${key}') Width Calculation:`);
+            console.log(`  - Full colDef from stateService:`, JSON.parse(JSON.stringify(colDef || {})));
+            console.log(`  - Full savedColSetting from globalTableLayouts:`, JSON.parse(JSON.stringify(savedColSetting || {})));
+            console.log(`  - Value used for colDef.default:`, colDef?.default);
+            console.log(`  - Value used for savedColSetting?.width:`, savedColSetting?.width);
+            console.log(`  - Final thStyleWidth for 'commentType':`, thStyleWidth);
+        }
+        // --- End of logging block ---
+
+        let classes = colDef.sortKey ? 'sortable' : '';
+        if (colDef.sortKey === currentSortState.sortBy) {
+            classes += currentSortState.sortOrder === 'ASC' ? ' sorted-asc' : ' sorted-desc';
+        }
+
+        tableHTML += `<th style="width: ${thStyleWidth};" class="${classes}" 
+                          ${colDef.sortKey ? `data-sort-key="${colDef.sortKey}"` : ''} 
+                          data-col-key="${key}" id="${colDef.id}">
+                          ${escapeHtml(colDef.label)}
+                      </th>`;
+    });
+    tableHTML += `</tr></thead><tbody>`;
+
     sortedData.forEach(finding => {
             const normalizedLineNumber = normalizeStringForDisplay(finding.lineNumber); // Use camelCase
             const normalizedCommentText = normalizeStringForDisplay(finding.commentText); // Use camelCase
             const normalizedCommentType = normalizeStringForDisplay(finding.commentType); // Use camelCase
             const normalizedContextBefore = normalizeStringForDisplay(finding.contextBefore); // Use camelCase
             const normalizedContextAfter = normalizeStringForDisplay(finding.contextAfter); // Use camelCase
-            
+
             const maxCommentLength = 256;
             const fullEscapedCommentTextForTitle = escapeHtmlAttribute(normalizedCommentText);
             let displayCommentText;
+            let viewFullCommentButtonHTML = ''; // Initialize as empty
 
             if (normalizedCommentText.length > maxCommentLength) {
                 displayCommentText = escapeHtml(normalizedCommentText.substring(0, maxCommentLength)) + "...";
+                // Only create the button if the text is truncated
+                viewFullCommentButtonHTML = ` <button class="action-button view-full-comment-btn" data-full-comment="${fullEscapedCommentTextForTitle}" title="View Full Comment" style="margin-left: 5px; padding: 0 3px; font-size: 0.9em;">👁️</button>`;
             } else {
                 displayCommentText = escapeHtml(normalizedCommentText);
             }
-            tableHTML += `
-                <tr>
-                    <td>${normalizedLineNumber}</td>
-                    <td>${escapeHtml(normalizedCommentType)}</td>
-                    <td title="${fullEscapedCommentTextForTitle}">${displayCommentText}</td>
-                    <td class="comment-context-cell">
-                        <pre class="context-before">${escapeHtml(normalizedContextBefore)}</pre>
-                    </td>
-                    <td class="comment-context-cell">
-                        <pre class="context-after">${escapeHtml(normalizedContextAfter)}</pre>
-                    </td>
-                </tr>`;
+            tableHTML += `<tr>`;
+            displayOrder.forEach(key => {
+                const colDef = columnDefinitions[key];
+                if (!colDef || !colDef.visible) return;
+
+                switch(key) {
+                    case 'lineNumber': tableHTML += `<td>${normalizedLineNumber}</td>`; break;
+                    case 'commentType': tableHTML += `<td>${escapeHtml(normalizedCommentType)}</td>`; break;
+                    case 'commentText':
+                        tableHTML += `<td title="${fullEscapedCommentTextForTitle}">${displayCommentText}${viewFullCommentButtonHTML}</td>`; break;
+                    case 'contextBefore': tableHTML += `<td class="comment-context-cell"><pre class="context-before">${escapeHtml(normalizedContextBefore)}</pre></td>`; break;
+                    case 'contextAfter': tableHTML += `<td class="comment-context-cell"><pre class="context-after">${escapeHtml(normalizedContextAfter)}</pre></td>`; break;
+                }
+            });
+            tableHTML += `</tr>`;
     });
     tableHTML += `</tbody></table>`;
     resultsContentDiv.innerHTML = tableHTML;
 
-    resultsContentDiv.querySelectorAll('th.sortable').forEach(th => {
+    const tableHeadElement = document.getElementById('commentAnalysisTableHead');
+    if (tableHeadElement) {
+        tableHeadElement.querySelectorAll('th.sortable').forEach(th => {
         th.classList.toggle('sorted-asc', currentSortState.sortBy === th.dataset.sortKey && currentSortState.sortOrder === 'ASC');
         th.classList.toggle('sorted-desc', currentSortState.sortBy === th.dataset.sortKey && currentSortState.sortOrder === 'DESC');
         th.addEventListener('click', (event) => handleCommentAnalysisSort(event, logIdStr));
+        });
+        if (tableService) {
+            tableService.makeTableColumnsResizable('commentAnalysisTableHead', columnDefinitions);
+        }
+    }
+
+    const saveLayoutBtn = document.getElementById('saveCommentAnalysisLayoutBtn');
+    if (saveLayoutBtn && tableService) {
+        saveLayoutBtn.addEventListener('click', () => {
+            tableService.saveCurrentTableLayout(tableKey, 'commentAnalysisTableHead');
+        });
+    };
+
+    // Add event listeners for the new "View Full Comment" buttons
+    resultsContentDiv.querySelectorAll('.view-full-comment-btn').forEach(button => {
+        button.addEventListener('click', handleViewFullComment);
     });
 }
 
@@ -1617,4 +2013,178 @@ function handleExportCommentsToCSV(event) {
     const currentLogCommentData = appState.commentAnalysisDataCache[logIdStr];
     if (!currentLogCommentData || currentLogCommentData.length === 0) { uiService.showModalMessage("No Data", "No comment data available to export."); return; }
     uiService.showModalMessage("Exporting...", "Preparing CSV data..."); const csvString = convertCommentAnalysisToCSV(currentLogCommentData); downloadCSV(csvString, `comments_log_${logIdStr}.csv`); uiService.hideModal();
+}
+
+function handleViewFullComment(event) {
+    const button = event.currentTarget;
+    // This attribute already contains HTML-escaped text.
+    // For example, if original comment was "A < B", this is "A &lt; B".
+    // We want to display "A &lt; B" literally in the modal.
+    const alreadyEscapedCommentText = button.getAttribute('data-full-comment');
+
+    if (!uiService) {
+        console.error("uiService not available in handleViewFullComment");
+        alert(alreadyEscapedCommentText); // Fallback
+        return;
+    }
+
+    // Create a div element to hold the comment and apply styles
+    const contentDiv = document.createElement('div');
+    contentDiv.style.maxHeight = '70vh';
+    contentDiv.style.overflowY = 'auto';
+    contentDiv.style.whiteSpace = 'pre-wrap'; // Preserve whitespace and newlines
+    contentDiv.style.wordWrap = 'break-word'; // Break long words
+    contentDiv.textContent = alreadyEscapedCommentText; // Set as textContent to display literally
+
+    uiService.showModalMessage("Full Comment Text", contentDiv);
+}
+
+async function handleSendSelectedPathsToProxy(event) {
+    const logIdStr = event.target.dataset.logId;
+    const appState = stateService.getState();
+    const currentTargetId = appState.currentTargetId;
+
+    if (!currentTargetId) {
+        uiService.showModalMessage("Error", "No current target is set. Cannot send requests.");
+        return;
+    }
+
+    const prefixInput = document.getElementById('jsAnalysisPathPrefix');
+    const prefix = prefixInput ? prefixInput.value.trim() : '';
+
+    if (!prefix) {
+        uiService.showModalMessage("Error", "URL Prefix is required to send paths.");
+        prefixInput.focus();
+        return;
+    }
+    // Basic URL validation for prefix
+    try {
+        new URL(prefix);
+    } catch (e) {
+        uiService.showModalMessage("Error", "Invalid URL Prefix format.");
+        prefixInput.focus();
+        return;
+    }
+
+
+    const selectedPathCheckboxes = document.querySelectorAll('.js-path-checkbox:checked');
+    if (selectedPathCheckboxes.length === 0) {
+        uiService.showModalMessage("Info", "No paths selected to send.");
+        return;
+    }
+
+    const urlsToSend = [];
+    console.log("[PathSender] Prefix:", prefix); // DEBUG
+    selectedPathCheckboxes.forEach(checkbox => {
+        const path = checkbox.dataset.path;
+        console.log("[PathSender] Selected checkbox data-path:", path); // DEBUG
+        if (path === undefined || path === null || path.trim() === "") {
+            console.warn("[PathSender] Empty or undefined path found for a selected checkbox. Skipping."); // DEBUG
+            return; // Skip this iteration if path is empty
+        }
+        let fullUrl = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+        fullUrl += path.startsWith('/') ? path : '/' + path;
+        console.log("[PathSender] Constructed fullUrl:", fullUrl); // DEBUG
+        urlsToSend.push(fullUrl);
+    });
+
+    if (urlsToSend.length === 0) {
+        uiService.showModalMessage("Info", "No valid paths selected to send (all selected paths were empty).");
+        return;
+    }
+
+    uiService.showModalMessage("Sending...", `Sending ${urlsToSend.length} request(s) to the proxy...`, true, 2000);
+
+    try {
+        await apiService.sendPathsToProxy({ target_id: currentTargetId, urls: urlsToSend });
+        uiService.showModalMessage("Success", `${urlsToSend.length} request(s) sent to proxy. Check the Proxy Log for responses.`);
+        // Optionally deselect checkboxes after sending
+        selectedPathCheckboxes.forEach(checkbox => checkbox.checked = false);
+        const selectAllCheckbox = document.getElementById('selectAllJsPathsCheckbox');
+        if(selectAllCheckbox) selectAllCheckbox.checked = false;
+
+    } catch (error) {
+        console.error("Error sending paths to proxy:", error);
+        uiService.showModalMessage("Error", `Failed to send requests: ${escapeHtml(error.message)}`);
+    }
+}
+
+function openCustomizeColumnsModal() {
+    const appState = stateService.getState();
+    const columnDefinitions = appState.paginationState.proxyLogTableLayout;
+    const globalTableLayouts = appState.globalTableLayouts || {};
+    const savedLayout = globalTableLayouts.proxyLogTable || { columns: {} };
+    const savedColumnSettings = savedLayout.columns || {};
+
+    let modalContentHTML = `<div id="customizeColumnsModalContent" style="text-align: left;">`;
+    modalContentHTML += `<p style="margin-bottom: 15px;">Select columns to display:</p>`;
+
+    // Use a defined order for checkboxes if necessary, or iterate columnDefinitions
+    const displayOrder = ['index', 'timestamp', 'method', 'page_name', 'url', 'status', 'type', 'size', 'actions'];
+
+    displayOrder.forEach(key => {
+        const colDef = columnDefinitions[key];
+        if (!colDef) return; // Should not happen if displayOrder matches keys in columnDefinitions
+
+        if (colDef.nonHideable) return; // Skip non-hideable columns like 'actions'
+
+        const savedSetting = savedColumnSettings[key];
+        const isChecked = savedSetting ? savedSetting.visible : colDef.visible; // Use saved visibility, fallback to default
+
+        modalContentHTML += `
+            <div class="form-group" style="margin-bottom: 8px;">
+                <input type="checkbox" id="colToggle_${key}" data-col-key="${key}" ${isChecked ? 'checked' : ''}>
+                <label for="colToggle_${key}" style="font-weight: normal; margin-left: 5px;">${escapeHtml(colDef.label)}</label>
+            </div>
+        `;
+    });
+    modalContentHTML += `</div>`;
+
+    uiService.showModalConfirm(
+        "Customize Proxy Log Columns",
+        modalContentHTML,
+        async () => { // onConfirm (Apply)
+            const newColumnSettings = { ...savedColumnSettings }; // Start with existing saved settings
+
+            displayOrder.forEach(key => {
+                const colDef = columnDefinitions[key];
+                if (!colDef || colDef.nonHideable) return;
+
+                const checkbox = document.getElementById(`colToggle_${key}`);
+                if (checkbox) {
+                    newColumnSettings[key] = {
+                        ...(newColumnSettings[key] || {}), // Preserve existing width if any
+                        width: newColumnSettings[key]?.width || colDef.default, // Keep existing or use default
+                        visible: checkbox.checked
+                    };
+                }
+            });
+            
+            // Update the globalTableLayouts in state
+            const updatedGlobalLayouts = {
+                ...globalTableLayouts,
+                proxyLogTable: {
+                    ...savedLayout, // Preserve existing pageSize
+                    columns: newColumnSettings
+                }
+            };
+            stateService.updateState({ globalTableLayouts: updatedGlobalLayouts });
+            
+            // Now call the unified save function
+            await prepareAndSaveProxyLogLayout(); 
+            fetchAndDisplayProxyLogs(stateService.getState().paginationState.proxyLog); // Refresh view
+            return true; // Close modal
+        },
+        () => { /* onCancel - do nothing */ },
+        "Apply Changes", "Cancel", true
+    );
+}
+
+async function prepareAndSaveProxyLogLayout() {
+    const pageSizeSelect = document.getElementById('proxyLogItemsPerPageSelect');
+    const currentPageSize = pageSizeSelect ? pageSizeSelect.value : null;
+    // tableService.saveCurrentTableLayout now expects the full layout object for the specific table
+    // We need to construct it based on current state and DOM here.
+    // For now, this just saves widths and page size. Visibility is handled by updating globalTableLayouts directly.
+    tableService.saveCurrentTableLayout('proxyLogTable', 'proxyLogTableHead', currentPageSize);
 }

@@ -58,10 +58,10 @@ export async function loadSettingsView(mainViewContainer) {
         <div id="proxyExclusionsTab" class="tab-content active">
             <h2>Global Proxy Exclusions</h2>
             <p>Define rules to prevent certain HTTP requests from being saved by the proxy.</p>
+            <div id="proxyExclusionsMessage" class="message-area" style="margin-top: 10px;"></div>
             <div id="proxyExclusionsContainer" style="margin-top:15px;">
                 <p>Loading proxy exclusion rules...</p>
             </div>
-            <div id="proxyExclusionsMessage" class="message-area" style="margin-top: 10px;"></div>
         </div>
 
         <div id="tableLayoutsTab" class="tab-content">

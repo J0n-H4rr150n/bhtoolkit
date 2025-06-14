@@ -30,15 +30,23 @@ function hideModal() {
  * Displays a modal with a title and message, and an "OK" button.
  * @param {string} title - The title for the modal.
  * @param {string} message - The message content for the modal (can include HTML).
+ * @param {string|HTMLElement} messageOrElement - The message content (string, can include HTML) or an HTMLElement to append.
  */
-export function showModalMessage(title, message) {
+export function showModalMessage(title, messageOrElement) {
     if (!modalTitle || !modalMessage || !modalConfirmBtn || !modalCancelBtn || !modalOkBtn) {
         console.error("Modal elements not found for showModalMessage");
-        alert(`${title}\n${message}`); // Fallback
+        alert(`${title}\n${typeof messageOrElement === 'string' ? messageOrElement : 'Complex content'}`); // Fallback
         return;
     }
     modalTitle.textContent = title;
-    modalMessage.innerHTML = message;
+    if (typeof messageOrElement === 'string') {
+        modalMessage.innerHTML = messageOrElement; // For HTML strings
+    } else if (messageOrElement instanceof HTMLElement) {
+        modalMessage.innerHTML = ''; // Clear previous content
+        modalMessage.appendChild(messageOrElement); // Append the element
+    } else {
+        modalMessage.textContent = String(messageOrElement); // Fallback for other types
+    }
     modalConfirmBtn.classList.add('hidden');
     modalCancelBtn.classList.add('hidden');
     modalOkBtn.classList.remove('hidden');

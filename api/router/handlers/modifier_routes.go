@@ -11,6 +11,7 @@ func RegisterModifierRoutes(r chi.Router) {
 	r.Post("/modifier/execute", ExecuteModifiedRequestHandler)
 	r.Put("/modifier/tasks/{task_id}", UpdateModifierTaskHandler) // For updating parts of the task, like name
 	r.Post("/modifier/tasks/{task_id}/clone", CloneModifierTaskHandler)
-	r.Put("/modifier/tasks/order", UpdateModifierTasksOrderHandler)  // For updating the order of all tasks
-	r.Delete("/modifier/tasks/{task_id}", DeleteModifierTaskHandler) // For deleting a specific task
+	r.Put("/modifier/tasks/order", UpdateModifierTasksOrderHandler)                        // For updating the order of all tasks
+	r.Delete("/modifier/tasks/{task_id}", DeleteModifierTaskHandler)                       // For deleting a specific task
+	r.Delete("/modifier/tasks/target/{target_id}", DeleteAllModifierTasksForTargetHandler) // New route
 }

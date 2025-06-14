@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -17,7 +18,8 @@ import (
 	"net/http"
 	"net/url" // ADDED: For URL parsing
 	"os"      // ADDED for os.ErrNotExist
-	// For cleaning paths
+
+	// For cleaning paths - Still needed for other functions like matchesRule
 	"regexp" // ADDED for regex matching in global exclusions
 	"strings"
 	"sync"
@@ -43,17 +45,39 @@ var (
 	parseURLErr           error    // Store any error during parsing
 
 	// For scoped logging
-	activeTargetID       *int64
-	allActiveScopeRules  []models.ScopeRule // Renamed from activeScopeRules
-	scopeMu              sync.RWMutex
-	globalExclusionRules []models.ProxyExclusionRule
-	analyticsFetchTicker *time.Ticker // Added for rate limiting analytics calls
+	activeTargetID        *int64
+	allActiveScopeRules   []models.ScopeRule // Renamed from activeScopeRules
+	scopeMu               sync.RWMutex
+	globalExclusionRules  []models.ProxyExclusionRule
+	activeRecordingPageID *int64       // New: ID of the page currently being recorded for Page Sitemap
+	analyticsFetchTicker  *time.Ticker // Added for rate limiting analytics calls
 )
 
 // proxyRequestContextData holds data passed between request and response handlers via ctx.UserData
 type proxyRequestContextData struct {
 	TrafficLog      *models.HTTPTrafficLog
 	SynackAuthToken string // To store the Bearer token from Synack target list request
+}
+
+// SetActivePageSitemapRecordingID is called by the Page Sitemap feature to indicate a recording has started.
+func SetActivePageSitemapRecordingID(pageID int64) {
+	scopeMu.Lock() // Using scopeMu for simplicity, or create a new mutex for this
+	defer scopeMu.Unlock()
+	if pageID == 0 { // Allow clearing by passing 0
+		activeRecordingPageID = nil
+		logger.ProxyInfo("Page Sitemap recording stopped (or no active page).")
+	} else {
+		activeRecordingPageID = &pageID
+		logger.ProxyInfo("Page Sitemap recording started for Page ID: %d", pageID)
+	}
+}
+
+// ClearActivePageSitemapRecordingID is called when a recording stops.
+func ClearActivePageSitemapRecordingID() {
+	scopeMu.Lock()
+	defer scopeMu.Unlock()
+	activeRecordingPageID = nil
+	logger.ProxyInfo("Page Sitemap recording explicitly stopped.")
 }
 
 // Initialize the parsed Synack URL once
@@ -519,18 +543,46 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				isCurrentSessionHTTPS = true
 			}
 
-			requestData := &models.HTTPTrafficLog{
-				TargetID:           currentTargetIDForLog, // Use the determined target ID
-				Timestamp:          startTime,
-				RequestMethod:      models.NullString(r.Method),
-				RequestURL:         models.NullString(r.URL.String()),
-				RequestHTTPVersion: r.Proto,
-				RequestHeaders:     models.NullString(string(reqHeadersJson)),
-				RequestBody:        reqBodyBytes,
-				ClientIP:           r.RemoteAddr,
-				IsHTTPS:            isCurrentSessionHTTPS,
+			// Determine the URL to log. Prioritize X-Toolkit-Full-URL if present for toolkit-initiated requests.
+			serverSeenURL := r.URL.String()               // This is what the server (and proxy by default) sees
+			var requestFullURLWithFragment sql.NullString // Will store the full URL if provided by toolkit
+
+			if toolkitFullURL := r.Header.Get("X-Toolkit-Full-URL"); toolkitFullURL != "" && r.Header.Get("X-Toolkit-Initiated") == "true" {
+				requestFullURLWithFragment.String = toolkitFullURL
+				requestFullURLWithFragment.Valid = true
+				logger.ProxyDebug("OnRequest: Populated requestFullURLWithFragment: %+v", requestFullURLWithFragment)
+				logger.ProxyDebug("X-Toolkit-Full-URL found: %s. Server-seen URL: %s", toolkitFullURL, serverSeenURL)
 			}
 
+			logSource := "mitmproxy" // Default source
+			var pageIDForLog sql.NullInt64
+
+			if r.Header.Get("X-Toolkit-Source") == "JS-Path-Sender" {
+				logSource = "JS Analysis"
+			}
+
+			scopeMu.RLock() // Protect read of activeRecordingPageID
+			if activeRecordingPageID != nil {
+				logSource = "Page Sitemap"
+				pageIDForLog = sql.NullInt64{Int64: *activeRecordingPageID, Valid: true}
+			}
+			scopeMu.RUnlock()
+
+			requestData := &models.HTTPTrafficLog{
+				TargetID:                   currentTargetIDForLog, // Use the determined target ID
+				Timestamp:                  startTime,
+				RequestMethod:              models.NullString(r.Method),
+				RequestURL:                 models.NullString(serverSeenURL),
+				RequestHTTPVersion:         models.NullString(r.Proto), // Corrected
+				RequestHeaders:             models.NullString(string(reqHeadersJson)),
+				RequestBody:                reqBodyBytes,
+				ClientIP:                   models.NullString(r.RemoteAddr),
+				IsHTTPS:                    isCurrentSessionHTTPS,
+				RequestFullURLWithFragment: requestFullURLWithFragment, // Assign new field
+			}
+
+			requestData.LogSource = models.NullString(logSource)
+			requestData.PageSitemapID = pageIDForLog
 			// Wrap requestData and potentially auth token for Synack calls
 			ctxData := &proxyRequestContextData{TrafficLog: requestData}
 
@@ -546,7 +598,7 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 			}
 			ctx.UserData = ctxData
 
-			logger.ProxyInfo("REQ: %s %s (HTTPS: %t)", r.Method, r.URL.String(), isCurrentSessionHTTPS)
+			logger.ProxyInfo("REQ: %s %s (HTTPS: %t)", r.Method, serverSeenURL, isCurrentSessionHTTPS)
 			return r, nil
 		})
 
@@ -584,15 +636,15 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 			duration := time.Since(requestData.Timestamp)
 
 			requestData.ResponseStatusCode = resp.StatusCode
-			requestData.ResponseReasonPhrase = strings.TrimPrefix(resp.Status, fmt.Sprintf("%d ", resp.StatusCode))
-			requestData.ResponseHTTPVersion = resp.Proto
-			requestData.ResponseHeaders = string(respHeadersJson)
+			requestData.ResponseReasonPhrase = models.NullString(strings.TrimPrefix(resp.Status, fmt.Sprintf("%d ", resp.StatusCode)))
+			requestData.ResponseHTTPVersion = models.NullString(resp.Proto)
+			requestData.ResponseHeaders = models.NullString(string(respHeadersJson))
 			requestData.ResponseBody = respBodyBytes
-			requestData.ResponseContentType = resp.Header.Get("Content-Type")
+			requestData.ResponseContentType = models.NullString(resp.Header.Get("Content-Type"))
 			requestData.ResponseBodySize = int64(len(respBodyBytes))
 			requestData.DurationMs = duration.Milliseconds()
 
-			if strings.Contains(strings.ToLower(requestData.ResponseContentType), "text/html") {
+			if requestData.ResponseContentType.Valid && strings.Contains(strings.ToLower(requestData.ResponseContentType.String), "text/html") {
 				requestData.IsPageCandidate = true
 			}
 
@@ -614,7 +666,7 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 
 			if isSynackTargetListResp && // Use the boolean determined above
 				resp.StatusCode == http.StatusOK &&
-				strings.Contains(strings.ToLower(requestData.ResponseContentType), "application/json") {
+				requestData.ResponseContentType.Valid && strings.Contains(strings.ToLower(requestData.ResponseContentType.String), "application/json") {
 
 				authTokenForAnalytics := pCtxData.SynackAuthToken // Get the captured token
 				logger.ProxyInfo("Synack target list URL detected: %s. Using auth token: %t", ctx.Req.URL.String(), authTokenForAnalytics != "")
@@ -626,7 +678,7 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 			//	resp.StatusCode, requestData.ResponseContentType)
 			//}
 
-			logger.ProxyInfo("RESP: %d %s for %s %s (Size: %d, Duration: %s)", resp.StatusCode, requestData.ResponseContentType, ctx.Req.Method, ctx.Req.URL.String(), requestData.ResponseBodySize, duration)
+			logger.ProxyInfo("RESP: %d %s for %s %s (Size: %d, Duration: %s)", resp.StatusCode, requestData.ResponseContentType.String, ctx.Req.Method, ctx.Req.URL.String(), requestData.ResponseBodySize, duration)
 
 			muSession.Lock()
 			delete(sessionIsHTTPS, ctx.Session)
@@ -645,20 +697,25 @@ func logHttpTraffic(logEntry *models.HTTPTrafficLog) {
 		logger.ProxyError("logHttpTraffic: Database is not initialized.")
 		return
 	}
+	// Log the entry being saved, especially the new field
+	logger.Debug("logHttpTraffic: Attempting to save log entry. RequestURL: '%s', RequestFullURLWithFragment: {String: '%s', Valid: %t}",
+		logEntry.RequestURL.String, logEntry.RequestFullURLWithFragment.String, logEntry.RequestFullURLWithFragment.Valid)
 	_, err := database.DB.Exec(`INSERT INTO http_traffic_log (
-		target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body,
-		response_status_code, response_reason_phrase, response_http_version, response_headers, response_body,
-		response_content_type, response_body_size, duration_ms, client_ip, is_https, is_page_candidate, notes
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body, request_full_url_with_fragment,
+		response_status_code, response_reason_phrase, response_http_version, response_headers, response_body, response_content_type,
+		response_body_size, duration_ms, client_ip, is_https, is_page_candidate, notes, log_source, page_sitemap_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // Added placeholders for new columns
 		logEntry.TargetID, logEntry.Timestamp, logEntry.RequestMethod, logEntry.RequestURL,
 		logEntry.RequestHTTPVersion, logEntry.RequestHeaders, logEntry.RequestBody,
+		logEntry.RequestFullURLWithFragment, // Added new field value
 		logEntry.ResponseStatusCode, logEntry.ResponseReasonPhrase, logEntry.ResponseHTTPVersion,
 		logEntry.ResponseHeaders, logEntry.ResponseBody, logEntry.ResponseContentType,
 		logEntry.ResponseBodySize, logEntry.DurationMs, logEntry.ClientIP, logEntry.IsHTTPS,
 		logEntry.IsPageCandidate, logEntry.Notes,
-	)
+		logEntry.LogSource, logEntry.PageSitemapID) // Values for new columns
+	// Note: is_favorite defaults to FALSE in schema, not explicitly set here.
 	if err != nil {
-		logger.ProxyError("DB log error on response for %s %s: %v", logEntry.RequestMethod, logEntry.RequestURL, err)
+		logger.ProxyError("DB log error on response for %s %s: %v", logEntry.RequestMethod.String, logEntry.RequestURL.String, err)
 	}
 }
 
@@ -939,4 +996,74 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 	logger.ProxyInfo("Finished processing Synack target list. Saw %d targets.", len(currentSeenIDs))
 }
 
-// --- End of JS Analysis ---
+// SendGETRequestsThroughProxy makes GET requests for the given URLs.
+// These requests will be routed through the running MITM proxy if this code
+// is part of the same application instance and the HTTP client is configured
+// to use the proxy.
+func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
+	if len(urls) == 0 {
+		return nil
+	}
+
+	// IMPORTANT: Configure this client to use your running proxy.
+	// The proxy address and port should come from your application's config.
+	// If config.AppConfig.Proxy.Port is a string (e.g., "8778")
+	proxyURLString := fmt.Sprintf("http://localhost:%s", config.AppConfig.Proxy.Port)
+	proxyURL, err := url.Parse(proxyURLString)
+	if err != nil {
+		return fmt.Errorf("invalid proxy URL from config: %w", err)
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			// Optionally, add TLSClientConfig if your proxy uses a custom CA
+			// or if you need to skip verification for self-signed certs on the target.
+			// This is complex as it depends on the target's cert, not the proxy's.
+			// For now, rely on default system trust store.
+		},
+		Timeout: 15 * time.Second, // Set a reasonable timeout
+	}
+
+	logger.Info("Core: Attempting to send %d GET requests for target %d via proxy.", len(urls), targetID)
+
+	for _, u := range urls {
+		logger.Info("Core: Sending GET request to: %s (TargetID: %d)", u, targetID)
+		req, err := http.NewRequest("GET", u, nil)
+		if err != nil {
+			logger.Error("Core: Error creating request for %s: %v", u, err)
+			continue // Skip this URL
+		}
+
+		// Add custom headers to identify these requests and potentially
+		// prevent them from triggering further analysis loops in the proxy handler.
+		req.Header.Set("X-Toolkit-Initiated", "true")
+		req.Header.Set("X-Toolkit-Source", "JS-Path-Sender")
+		req.Header.Set("X-Toolkit-Full-URL", u) // Ensure this is being set
+		req.Header.Set("User-Agent", "BHToolkit-Path-Tester/1.0")
+
+		// Note: We are NOT explicitly setting the TargetID here in the request headers.
+		// The proxy's OnRequest handler will need to be modified if you want these
+		// specific requests to be logged with the provided `targetID` instead of
+		// the globally active one or no target ID if out of scope.
+		// For now, they will be logged based on the proxy's standard scope rules.
+		logger.Info("Core: SendGETRequestsThroughProxy - Sending request with X-Toolkit-Full-URL header set to: %s", u)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			logger.Error("Core: Error sending request to %s: %v", u, err)
+			// Log this error. The request might still appear in the proxy log
+			// if it reached the proxy but failed to reach the target.
+			continue
+		}
+		if resp != nil && resp.Body != nil {
+			io.Copy(io.Discard, resp.Body) // Read and discard body to reuse connection
+			resp.Body.Close()              // Ensure response body is closed
+		}
+		logger.Debug("Core: Request to %s completed with status: %s", u, resp.Status)
+		// The actual logging of this request/response happens in the main proxy handlers
+		// in mitmproxy.go's OnRequest/OnResponse DoFuncs. This function just initiates the request.
+	}
+	logger.Info("Core: Finished sending %d GET requests for target %d.", len(urls), targetID)
+	return nil
+}

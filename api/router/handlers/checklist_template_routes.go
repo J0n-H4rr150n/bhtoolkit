@@ -27,4 +27,7 @@ func RegisterChecklistTemplateRoutes(r chi.Router) {
 
 	// POST /checklist-templates/copy-to-target
 	r.Post("/checklist-templates/copy-to-target", CopyTemplateItemsToTargetHandler) // Existing handler
+
+	// POST /checklist-templates/copy-all-to-target
+	r.Post("/checklist-templates/copy-all-to-target", CopyAllChecklistTemplateItemsToTargetHandler) // New handler
 }

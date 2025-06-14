@@ -13,17 +13,28 @@ let state = {
     globalTableLayouts: {},
     viewConfig: {
         synackTargets: { sortBy: 'last_seen_timestamp', sortOrder: 'DESC', filterIsActive: true, sortableColumns: ['synack_target_id_str', 'codename', 'name', 'findings_count', 'status', 'last_seen_timestamp']},
-        proxyLog: { sortBy: 'timestamp', sortOrder: 'DESC', filterFavoritesOnly: false, sortableColumns: ['id', 'timestamp', 'method', 'url', 'status', 'type', 'size', 'duration'], analysis_type: null },
+        proxyLog: { sortBy: 'id', sortOrder: 'DESC', filterFavoritesOnly: false, sortableColumns: ['id', 'timestamp', 'method', 'url', 'status', 'type', 'size', 'duration'], analysis_type: null },
         synackAnalyticsGlobal: { sortBy: 'target_codename', sortOrder: 'ASC', sortableColumns: ['target_codename', 'category_name', 'count'] },
         synackAnalyticsTarget: { sortBy: 'reported_at', sortOrder: 'DESC', sortableColumns: ['synack_finding_id', 'title', 'category_name', 'severity', 'status', 'reported_at', 'vulnerability_url'] },
     },
     paginationState: {
         synackTargets: { currentPage: 1, limit: 20, totalPages: 1, totalRecords: 0, sortBy: 'last_seen_timestamp', sortOrder: 'DESC' },
         proxyLog: {
-            currentPage: 1, limit: 15, totalPages: 1, totalRecords: 0,
-            sortBy: 'timestamp', sortOrder: 'DESC', filterFavoritesOnly: false,
+            currentPage: 1, limit: 15, // This 'limit' will be the runtime page size
+            totalPages: 1, totalRecords: 0,
+            sortBy: 'id', sortOrder: 'DESC', filterFavoritesOnly: false,
             filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: '',
             analysis_type: null // Added to proxyLog pagination state
+        },
+        targetChecklistItems: { // New state for target checklist
+            currentPage: 1,
+            limit: 10, 
+            totalPages: 1,
+            totalRecords: 0,
+            sortBy: 'created_at', // Default sort
+            sortOrder: 'asc',
+            filterQuery: '',
+            showIncompleteOnly: true 
         },
         checklistTemplateItems: {
             currentPage: 1,
@@ -31,14 +42,16 @@ let state = {
             totalPages: 1, totalRecords: 0
         },
         proxyLogTableLayout: {
-            index: { default: '3%', id: 'col-proxylog-index' },
-            timestamp: { default: '15%', id: 'col-proxylog-timestamp' },
-            method: { default: '7%', id: 'col-proxylog-method' },
-            url: { default: 'auto', id: 'col-proxylog-url' },
-            status: { default: '7%', id: 'col-proxylog-status' },
-            type: { default: '15%', id: 'col-proxylog-type' },
-            size: { default: '7%', id: 'col-proxylog-size' },
-            actions: { default: '8%', id: 'col-proxylog-actions' }
+            // Note: 'pageSize' will be stored at the root of the saved layout for proxyLogTable, not in columnConfig
+            index: { default: '3%', id: 'col-proxylog-index', visible: true, label: '#' },
+            timestamp: { default: '15%', id: 'col-proxylog-timestamp', visible: true, label: 'Timestamp' },
+            method: { default: '7%', id: 'col-proxylog-method', visible: true, label: 'Method' },
+            page_name: { default: '15%', id: 'col-proxylog-page_name', visible: true, label: 'Page Name' }, // Added page_name
+            url: { default: 'auto', id: 'col-proxylog-url', visible: true, label: 'URL' },
+            status: { default: '7%', id: 'col-proxylog-status', visible: true, label: 'Status' },
+            type: { default: '15%', id: 'col-proxylog-type', visible: true, label: 'Content-Type' },
+            size: { default: '7%', id: 'col-proxylog-size', visible: true, label: 'Size (B)' },
+            actions: { default: '150px', id: 'col-proxylog-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true } // Actions column specific flags
         },
         parameterizedUrlsView: { // New state for this view
             currentPage: 1,
@@ -69,7 +82,14 @@ let state = {
             totalRecords: 0,
             sortBy: 'timestamp', // Default sort column
             sortOrder: 'DESC'    // Default sort order
-        }    
+        },
+        commentAnalysisTableLayout: { // New layout for the comments table
+            lineNumber: { default: '80px', id: 'col-comment-linenum', visible: true, label: 'Line#', sortKey: 'lineNumber' },
+            commentType: { default: '150px', id: 'col-comment-type', visible: true, label: 'Type', sortKey: 'commentType' }, // Specific px width
+            commentText: { default: 'auto', id: 'col-comment-text', visible: true, label: 'Comment Text', sortKey: null }, // Not sortable by text directly
+            contextBefore: { default: '25%', id: 'col-comment-ctxbefore', visible: true, label: 'Context Before', sortKey: null },
+            contextAfter: { default: '25%', id: 'col-comment-ctxafter', visible: true, label: 'Context After', sortKey: null }
+        }
     }
 };
 

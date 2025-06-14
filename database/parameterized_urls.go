@@ -61,9 +61,9 @@ func CreateOrUpdateParameterizedURL(pUrl models.ParameterizedURL) (id int64, cre
 		// Optionally update example_full_url and http_traffic_log_id if the current log is more recent
 		// This assumes http_traffic_log_id is somewhat sequential with time.
 		// A more robust way would be to compare timestamps of the log entries if available.
-		if pUrl.HTTPTrafficLogID > existingLogID {
+		if pUrl.HTTPTrafficLogID.Valid && pUrl.HTTPTrafficLogID.Int64 > existingLogID {
 			updateQuery += `, http_traffic_log_id = ?, example_full_url = ?`
-			args = append(args, pUrl.HTTPTrafficLogID, pUrl.ExampleFullURL)
+			args = append(args, pUrl.HTTPTrafficLogID.Int64, pUrl.ExampleFullURL)
 		}
 		updateQuery += ` WHERE id = ?`
 		args = append(args, id)

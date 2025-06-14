@@ -145,32 +145,6 @@ type DiscoveredURL struct {
 	DiscoveredAt     time.Time `json:"discovered_at" readOnly:"true"`
 }
 
-type HTTPTrafficLog struct {
-	ID                   int64          `json:"id" readOnly:"true"`
-	TargetID             *int64         `json:"target_id,omitempty"`
-	Timestamp            time.Time      `json:"timestamp" readOnly:"true"`
-	RequestMethod        sql.NullString `json:"request_method" example:"GET"`
-	RequestURL           sql.NullString `json:"request_url" example:"https://example.com/api/data?id=123"`
-	RequestHTTPVersion   string         `json:"request_http_version" example:"HTTP/1.1"`
-	RequestHeaders       sql.NullString `json:"request_headers,omitempty" example:"{\"Content-Type\":[\"application/json\"]}"`
-	RequestBody          []byte         `json:"request_body,omitempty"`
-	ResponseStatusCode   int            `json:"response_status_code,omitempty" example:"200"`
-	ResponseReasonPhrase string         `json:"response_reason_phrase,omitempty" example:"OK"`
-	ResponseHTTPVersion  string         `json:"response_http_version,omitempty" example:"HTTP/1.1"`
-	ResponseHeaders      string         `json:"response_headers,omitempty" example:"{\"Content-Type\":[\"application/json\"]}"`
-	ResponseBody         []byte         `json:"response_body,omitempty"`
-	ResponseContentType  string         `json:"response_content_type,omitempty" example:"application/json"`
-	ResponseBodySize     int64          `json:"response_body_size,omitempty" example:"1024"`
-	DurationMs           int64          `json:"duration_ms,omitempty" example:"150"`
-	ClientIP             string         `json:"client_ip,omitempty" example:"192.168.1.100"`
-	ServerIP             string         `json:"server_ip,omitempty" example:"203.0.113.45"`
-	IsHTTPS              bool           `json:"is_https" example:"true"`
-	IsPageCandidate      bool           `json:"is_page_candidate" example:"false"`
-	Notes                sql.NullString `json:"notes,omitempty"`
-	IsFavorite           bool           `json:"is_favorite"`                       // Added for favorite logs
-	SourceModifierTaskID *int64         `json:"source_modifier_task_id,omitempty"` // Link to the modifier task
-}
-
 type WebPage struct {
 	ID           int64     `json:"id" readOnly:"true"`
 	TargetID     int64     `json:"target_id"`
@@ -202,44 +176,6 @@ type AnalysisResult struct {
 	AnalysisType string    `json:"analysis_type" example:"js_links_jsluice"`
 	ResultData   string    `json:"result_data" example:"{\"urls\":[\"example.com/path\"]}"`
 	Timestamp    time.Time `json:"timestamp" readOnly:"true"`
-}
-
-type TargetChecklistItem struct {
-	ID              int64          `json:"id"`
-	TargetID        int64          `json:"target_id"`
-	ItemText        string         `json:"item_text"`
-	ItemCommandText sql.NullString `json:"item_command_text,omitempty"` // New field for the command
-	Notes           sql.NullString `json:"notes"`                       // Use sql.NullString for nullable TEXT
-	IsCompleted     bool           `json:"is_completed"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-}
-
-// ChecklistTemplate represents a predefined checklist.
-type ChecklistTemplate struct {
-	ID          int64          `json:"id" example:"1" format:"int64" readOnly:"true"`
-	Name        string         `json:"name" example:"Web Application - Basic Scan" binding:"required"`
-	Description sql.NullString `json:"description,omitempty" example:"A basic checklist for web application security."`
-	// Items       []ChecklistTemplateItem `json:"items,omitempty"` // Might be populated on specific request
-}
-
-// ChecklistTemplateItem represents an item within a ChecklistTemplate.
-type ChecklistTemplateItem struct {
-	ID              int64          `json:"id" example:"101" format:"int64" readOnly:"true"`
-	TemplateID      int64          `json:"template_id" example:"1" format:"int64"` // FK to ChecklistTemplate
-	ItemText        string         `json:"item_text" example:"Check for SQL Injection" binding:"required"`
-	ItemCommandText sql.NullString `json:"item_command_text,omitempty" example:"sqlmap -u '...' --batch --dbs"` // New field for the command
-	Notes           sql.NullString `json:"notes,omitempty" example:"Focus on input fields and URL parameters."`
-	DisplayOrder    int            `json:"display_order,omitempty" example:"1"` // Optional: for ordering items within a template
-}
-
-// PaginatedChecklistTemplateItemsResponse is the structure for paginated checklist template items API response.
-type PaginatedChecklistTemplateItemsResponse struct {
-	Page         int                     `json:"page"`
-	Limit        int                     `json:"limit"`
-	TotalRecords int64                   `json:"total_records"`
-	TotalPages   int64                   `json:"total_pages"`
-	Items        []ChecklistTemplateItem `json:"items"`
 }
 
 // Note represents a user-created note.

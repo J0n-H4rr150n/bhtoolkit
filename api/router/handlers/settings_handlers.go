@@ -9,7 +9,7 @@ import (
 	"toolkit/database"
 	"toolkit/logger"
 	"toolkit/models"
-)
+) // Ensure models is imported if TableLayoutConfig is there
 
 // GetCurrentTargetSettingHandler retrieves the currently set target ID.
 func GetCurrentTargetSettingHandler(w http.ResponseWriter, r *http.Request) {
@@ -137,9 +137,6 @@ func SetCustomHeadersSettingHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Custom HTTP headers saved successfully."})
 }
 
-// TableColumnWidthsPayload defines the structure for storing column widths for multiple tables.
-type TableColumnWidthsPayload map[string]map[string]string
-
 // GetTableColumnWidthsHandler retrieves the custom table column widths settings.
 func GetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
 	widthsJSON, err := database.GetSetting(models.TableColumnWidthsKey)
@@ -149,13 +146,13 @@ func GetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload TableColumnWidthsPayload
+	var payload models.AllTableLayouts // Use the new model type
 	if widthsJSON == "" {
-		payload = make(TableColumnWidthsPayload)
+		payload = make(models.AllTableLayouts)
 	} else {
 		if err := json.Unmarshal([]byte(widthsJSON), &payload); err != nil {
 			logger.Error("GetTableColumnWidthsHandler: Error unmarshalling column widths JSON: %v. Stored value: %s", err, widthsJSON)
-			payload = make(TableColumnWidthsPayload) // Fallback
+			payload = make(models.AllTableLayouts) // Fallback
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -164,7 +161,7 @@ func GetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
 
 // SetTableColumnWidthsHandler saves the custom table column widths settings.
 func SetTableColumnWidthsHandler(w http.ResponseWriter, r *http.Request) {
-	var payload TableColumnWidthsPayload
+	var payload models.AllTableLayouts // Use the new model type
 
 	// Read the body into a byte slice first for debugging
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -273,18 +270,18 @@ func GetUISettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Table Column Widths
 	widthsJSON, err := database.GetSetting(models.TableColumnWidthsKey)
-	var widthsMap TableColumnWidthsPayload
+	var widthsMap models.AllTableLayouts
 	if err != nil {
 		logger.Error("GetUISettingsHandler: Error getting table_column_widths: %v", err)
 		errs = append(errs, "table_column_widths")
-		widthsMap = make(TableColumnWidthsPayload) // Default to empty
+		widthsMap = make(models.AllTableLayouts)
 	} else if widthsJSON == "" {
-		widthsMap = make(TableColumnWidthsPayload) // Default to empty
+		widthsMap = make(models.AllTableLayouts)
 	} else {
 		if err := json.Unmarshal([]byte(widthsJSON), &widthsMap); err != nil {
 			logger.Error("GetUISettingsHandler: Error unmarshalling table_column_widths: %v", err)
-			errs = append(errs, "table_column_widths_unmarshal")
-			widthsMap = make(TableColumnWidthsPayload) // Default to empty
+			errs = append(errs, "table_column_widths_unmarshal") // Corrected line
+			widthsMap = make(models.AllTableLayouts)             // Default to empty
 		}
 	}
 	settings[models.TableColumnWidthsKey] = widthsMap

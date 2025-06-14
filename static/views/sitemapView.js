@@ -44,6 +44,29 @@ function toggleNodeExpansion(event) {
     }
 }
 
+async function handleSitemapSendToModifierClick(event) {
+    const button = event.currentTarget;
+    const logId = button.dataset.logId;
+
+    if (logId && logId !== "0") {
+        try {
+            button.disabled = true;
+            button.style.opacity = '0.5';
+            const task = await apiService.addModifierTask({ http_traffic_log_id: parseInt(logId, 10) });
+            uiService.showModalMessage("Sent to Modifier", `Task "${escapeHtml(task.name || `Task ${task.id}`)}" sent to Modifier. Navigating...`, true, 1500);
+            window.location.hash = `#modifier?task_id=${task.id}`;
+        } catch (error) {
+            console.error("Error sending log to modifier:", error);
+            uiService.showModalMessage("Error", `Failed to send to Modifier: ${escapeHtml(error.message)}`);
+        } finally {
+            button.disabled = false;
+            button.style.opacity = '1';
+        }
+    } else {
+        uiService.showModalMessage("Info", "This sitemap entry is not linked to a specific proxy log to send to Modifier.");
+    }
+}
+
 function renderSitemapTree(nodes, parentElement, level = 0) {
     if (!nodes || nodes.length === 0) {
         if (level === 0 && parentElement.classList.contains('sitemap-tree-container')) {
@@ -151,21 +174,114 @@ function renderSitemapTree(nodes, parentElement, level = 0) {
 
     ul.querySelectorAll('.sitemap-node-toggle').forEach(toggler => {
         if(toggler.textContent !== '') { // Only add listener if there's a toggle symbol
-            toggler.removeEventListener('click', toggleNodeExpansion); // Prevent multiple listeners
+            toggler.removeEventListener('click', toggleNodeExpansion);
             toggler.addEventListener('click', toggleNodeExpansion);
         }
     });
 
-    // Add click listener to headers for toggling direct endpoints
     ul.querySelectorAll('.sitemap-node-header').forEach(header => {
         const nodeLi = header.closest('.sitemap-node');
         const nodeData = nodes.find(n => n.full_path === nodeLi.dataset.fullPath); // Find the node data
         if (nodeData && nodeData.endpoints && nodeData.endpoints.length > 0) { // Only if it has endpoints
+            header.removeEventListener('click', handleToggleEndpointsVisibility);
             header.addEventListener('click', handleToggleEndpointsVisibility);
             header.classList.add('clickable-for-endpoints'); // For CSS cursor styling
         }
     });
     attachSitemapActionListeners(ul);
+}
+
+async function fetchAndRenderSitemap(targetId, treeContainer, messageArea) {
+    try {
+        const sitemapTreeData = await apiService.getGeneratedSitemap(targetId); // New API call
+        treeContainer.innerHTML = ''; // Clear previous content (like "Loading...")
+
+        // Clear previous sitemap expansion states
+        Object.keys(sitemapState).forEach(key => delete sitemapState[key]);
+        // Clear previous endpoint visibility states
+        Object.keys(sitemapEndpointsVisibleState).forEach(key => delete sitemapEndpointsVisibleState[key]);
+
+
+        function setDefaultExpansionRecursive(nodesToExpand) {
+            nodesToExpand.forEach(node => {
+                if (node.children && node.children.length > 0) {
+                    sitemapState[node.full_path] = true; // Mark this folder for expansion
+                    setDefaultExpansionRecursive(node.children); // Recurse for its children
+                }
+            });
+        }
+
+        if (sitemapTreeData && sitemapTreeData.length > 0) {
+            setDefaultExpansionRecursive(sitemapTreeData); // Set all folders to be expanded by default
+            renderSitemapTree(sitemapTreeData, treeContainer);
+        } else {
+            treeContainer.innerHTML = '<p>No sitemap data found for this target. The proxy log might be empty.</p>';
+            document.getElementById('expandAllSitemapBtn').disabled = true;
+            document.getElementById('collapseAllSitemapBtn').disabled = true;
+        }
+        messageArea.textContent = 'Sitemap loaded successfully.';
+        messageArea.className = 'message-area success-message';
+        setTimeout(() => {
+            messageArea.textContent = '';
+            messageArea.className = 'message-area';
+        }, 3000); // Message disappears after 3 seconds
+    } catch (error) {
+        console.error("Error fetching or rendering sitemap:", error);
+        treeContainer.innerHTML = `<p class="error-message">Error loading sitemap: ${escapeHtml(error.message)}</p>`;
+        messageArea.textContent = `Error: ${escapeHtml(error.message)}`;
+        document.getElementById('expandAllSitemapBtn').disabled = true;
+        document.getElementById('collapseAllSitemapBtn').disabled = true;
+        messageArea.className = 'message-area error-message';
+    }
+}
+
+async function handleSitemapFavoriteToggle(event) {
+    const button = event.currentTarget;
+    const logId = button.getAttribute('data-log-id');
+    const isCurrentlyFavorite = button.getAttribute('data-is-favorite') === 'true';
+    const newFavoriteState = !isCurrentlyFavorite;
+
+    if (!logId || logId === "0" || logId === "") {
+        uiService.showModalMessage("Info", "Cannot toggle favorite: No associated log ID.");
+        return;
+    }
+
+    try {
+        await apiService.setProxyLogFavorite(logId, newFavoriteState); // Use existing API service function
+        button.innerHTML = newFavoriteState ? '★' : '☆';
+        button.classList.toggle('favorited', newFavoriteState);
+        button.setAttribute('data-is-favorite', newFavoriteState.toString());
+    } catch (favError) {
+        console.error("Error toggling favorite from Sitemap:", favError);
+        uiService.showModalMessage("Error", `Failed to update favorite status for log ${logId}: ${favError.message}`);
+    }
+}
+
+// Define handleSitemapLogLinkClick if it's specific to this module and not imported
+function handleSitemapLogLinkClick(event) {
+    if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        const fullUrl = event.currentTarget.href;
+        window.open(fullUrl, '_blank');
+    }
+    // Default action (navigate in current tab) is handled by href if not prevented
+}
+
+function attachSitemapActionListeners(parentElement) {
+    parentElement.querySelectorAll('.sitemap-log-link').forEach(button => {
+        button.removeEventListener('click', handleSitemapLogLinkClick);
+        button.addEventListener('click', handleSitemapLogLinkClick);
+    });
+
+    parentElement.querySelectorAll('.sitemap-send-to-modifier').forEach(button => {
+        button.removeEventListener('click', handleSitemapSendToModifierClick);
+        button.addEventListener('click', handleSitemapSendToModifierClick);
+    });
+
+    parentElement.querySelectorAll('.sitemap-favorite-toggle').forEach(starBtn => {
+        starBtn.removeEventListener('click', handleSitemapFavoriteToggle);
+        starBtn.addEventListener('click', handleSitemapFavoriteToggle);
+    });
 }
 
 export async function loadSitemapView(mainViewContainer) {
@@ -233,113 +349,6 @@ export async function loadSitemapView(mainViewContainer) {
     }
     await fetchAndRenderSitemap(currentTargetId, treeContainer, messageArea);
 }
-
-async function fetchAndRenderSitemap(targetId, treeContainer, messageArea) {
-    try {
-        const sitemapTreeData = await apiService.getGeneratedSitemap(targetId); // New API call
-        treeContainer.innerHTML = ''; // Clear previous content (like "Loading...")
-
-        // Clear previous sitemap expansion states
-        Object.keys(sitemapState).forEach(key => delete sitemapState[key]);
-        // Clear previous endpoint visibility states
-        Object.keys(sitemapEndpointsVisibleState).forEach(key => delete sitemapEndpointsVisibleState[key]);
-
-
-        function setDefaultExpansionRecursive(nodesToExpand) {
-            nodesToExpand.forEach(node => {
-                if (node.children && node.children.length > 0) {
-                    sitemapState[node.full_path] = true; // Mark this folder for expansion
-                    setDefaultExpansionRecursive(node.children); // Recurse for its children
-                }
-            });
-        }
-
-        if (sitemapTreeData && sitemapTreeData.length > 0) {
-            setDefaultExpansionRecursive(sitemapTreeData); // Set all folders to be expanded by default
-            renderSitemapTree(sitemapTreeData, treeContainer);
-        } else {
-            treeContainer.innerHTML = '<p>No sitemap data found for this target. The proxy log might be empty.</p>';
-            document.getElementById('expandAllSitemapBtn').disabled = true;
-            document.getElementById('collapseAllSitemapBtn').disabled = true;
-        }
-        messageArea.textContent = 'Sitemap loaded successfully.';
-        messageArea.className = 'message-area success-message';
-        setTimeout(() => {
-            messageArea.textContent = '';
-            messageArea.className = 'message-area';
-        }, 3000); // Message disappears after 3 seconds
-    } catch (error) {
-        console.error("Error fetching or rendering sitemap:", error);
-        treeContainer.innerHTML = `<p class="error-message">Error loading sitemap: ${escapeHtml(error.message)}</p>`;
-        messageArea.textContent = `Error: ${escapeHtml(error.message)}`;
-        document.getElementById('expandAllSitemapBtn').disabled = true;
-        document.getElementById('collapseAllSitemapBtn').disabled = true;
-        messageArea.className = 'message-area error-message';
-    }
-}
-
-function attachSitemapActionListeners(parentElement) {
-    parentElement.querySelectorAll('.sitemap-log-link').forEach(button => { // Changed selector
-        button.addEventListener('click', (e) => {
-            // const logId = e.currentTarget.dataset.logId; // logId is in href
-            // if (logId && logId !== "0") { // No longer needed as href handles it
-                if (e.ctrlKey || e.metaKey) { 
-                    e.preventDefault(); 
-                    const fullUrl = e.currentTarget.href;
-                    window.open(fullUrl, '_blank'); 
-                } else {
-                    // Default action: navigate in the current tab using hash change
-                    // window.location.hash = detailHashPath; // Already handled by href
-                }
-            // } else {
-            //     uiService.showModalMessage("Info", "This sitemap entry is not linked to a specific proxy log.");
-            // }
-        });
-    });
-    parentElement.querySelectorAll('.sitemap-send-to-modifier').forEach(button => {
-        button.addEventListener('click', async (e) => {
-            const logId = e.currentTarget.dataset.logId;
-             if (logId && logId !== "0") {
-                try {
-                    const task = await apiService.addModifierTask({ http_traffic_log_id: parseInt(logId, 10) });
-                    uiService.showModalMessage("Sent to Modifier", `Task "${escapeHtml(task.name || `Task ${task.id}`)}" sent to Modifier. Navigating...`, true, 1500);
-                    window.location.hash = `#modifier?task_id=${task.id}`;
-                } catch (error) {
-                    console.error("Error sending log to modifier:", error);
-                    uiService.showModalMessage("Error", `Failed to send to Modifier: ${error.message}`);
-                }
-            } else {
-                uiService.showModalMessage("Info", "This sitemap entry is not linked to a specific proxy log to send to Modifier.");
-            }
-        });
-    });
-    parentElement.querySelectorAll('.sitemap-favorite-toggle').forEach(starBtn => {
-        starBtn.addEventListener('click', handleSitemapFavoriteToggle);
-    });
-}
-
-async function handleSitemapFavoriteToggle(event) {
-    const button = event.currentTarget;
-    const logId = button.getAttribute('data-log-id');
-    const isCurrentlyFavorite = button.getAttribute('data-is-favorite') === 'true';
-    const newFavoriteState = !isCurrentlyFavorite;
-
-    if (!logId || logId === "0" || logId === "") {
-        uiService.showModalMessage("Info", "Cannot toggle favorite: No associated log ID.");
-        return;
-    }
-
-    try {
-        await apiService.setProxyLogFavorite(logId, newFavoriteState); // Use existing API service function
-        button.innerHTML = newFavoriteState ? '★' : '☆';
-        button.classList.toggle('favorited', newFavoriteState);
-        button.setAttribute('data-is-favorite', newFavoriteState.toString());
-    } catch (favError) {
-        console.error("Error toggling favorite from Sitemap:", favError);
-        uiService.showModalMessage("Error", `Failed to update favorite status for log ${logId}: ${favError.message}`);
-    }
-}
-
 
 function toggleAllSitemapNodes(expand, treeContainer) {
     if (!treeContainer) treeContainer = document.getElementById('sitemapTreeContainer');
@@ -411,4 +420,3 @@ function handleToggleEndpointsVisibility(event) {
         endpointsIndicator.textContent = makeVisible ? '📂' : '📁';
     }
 }
-

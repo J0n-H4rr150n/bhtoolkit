@@ -24,8 +24,9 @@ export function initTableService(dependencies) {
  * Saves the current column widths for a given table to the application state and persists it to the backend.
  * @param {string} tableKey - A unique key identifying the table's layout (used for storing in global state).
  * @param {string} tableHeadId - The ID of the table's thead element from which to read column widths.
+ * @param {string|number|null} currentPageSize - The current page size (items per page) to save for this table. (Optional)
  */
-export function saveCurrentTableLayout(tableKey, tableHeadId) {
+export function saveCurrentTableLayout(tableKey, tableHeadId, currentPageSize = null) {
     if (!getGlobalTableLayoutsFunc || !updateGlobalTableLayoutsFunc || !saveLayoutsToBackendFunc || !showModalMessageFunc) {
         console.error("TableService not initialized properly. Call initTableService with dependencies first.");
         if (showModalMessageFunc) showModalMessageFunc("Service Error", "Table service is not configured correctly to save layouts.");
@@ -40,28 +41,43 @@ export function saveCurrentTableLayout(tableKey, tableHeadId) {
     }
 
     const currentGlobalLayouts = getGlobalTableLayoutsFunc();
-    const newLayoutForThisTable = {};
+    // Start with the existing layout for this table (which includes visibility flags and potentially old pageSize)
+    // Perform a deep copy to avoid modifying the state directly before updateState is called.
+    const existingTableLayout = currentGlobalLayouts[tableKey] ? JSON.parse(JSON.stringify(currentGlobalLayouts[tableKey])) : { columns: {}, pageSize: null };
+    
+    // Ensure 'columns' object exists
+    if (!existingTableLayout.columns) {
+        existingTableLayout.columns = {};
+    }
 
     tableHead.querySelectorAll('th[data-col-key]').forEach(th => {
         const colKey = th.getAttribute('data-col-key');
         const currentWidth = th.style.width || getComputedStyle(th).width;
         
-        // Skip saving width for the 'actions' column as it's fixed
-        if (colKey === 'actions') {
-            return;
-        }
+        // If a column is non-resizable, its width won't be changed by dragging.
+        // So, currentWidth will be its default/rendered width, which is fine to save.
+        // The makeTableColumnsResizable function handles not adding resizers to non-resizable columns.
+
         if (currentWidth && colKey) {
-            newLayoutForThisTable[colKey] = currentWidth;
+            // Ensure the column entry exists before trying to set width
+            if (!existingTableLayout.columns[colKey]) {
+                existingTableLayout.columns[colKey] = { visible: true }; // Default to visible if new
+            }
+            existingTableLayout.columns[colKey].width = currentWidth;
         }
     });
 
+    if (currentPageSize !== null) {
+        existingTableLayout.pageSize = parseInt(currentPageSize, 10);
+    }
+
     const updatedGlobalLayouts = {
         ...currentGlobalLayouts,
-        [tableKey]: newLayoutForThisTable
+        [tableKey]: existingTableLayout // Use the modified existing layout
     };
 
     updateGlobalTableLayoutsFunc(updatedGlobalLayouts);
-    console.log(`[TableService] Layout for ${tableKey} updated in state:`, newLayoutForThisTable);
+    console.log(`[TableService] Layout for ${tableKey} updated in state:`, existingTableLayout);
 
     saveLayoutsToBackendFunc(updatedGlobalLayouts)
         .then(() => {
@@ -76,8 +92,9 @@ export function saveCurrentTableLayout(tableKey, tableHeadId) {
 /**
  * Makes the columns of a table (identified by its thead ID) resizable via drag-and-drop.
  * @param {string} tableHeadId - The ID of the table's thead element.
+ * @param {Object} columnDefinitions - Optional: Definitions for columns, including a 'nonResizable' flag.
  */
-export function makeTableColumnsResizable(tableHeadId) {
+export function makeTableColumnsResizable(tableHeadId, columnDefinitions = {}) {
     const tableHead = document.getElementById(tableHeadId);
     if (!tableHead) {
         console.warn(`Table head with ID '${tableHeadId}' not found for making columns resizable.`);
@@ -89,8 +106,9 @@ export function makeTableColumnsResizable(tableHeadId) {
     headers.forEach((th, index) => {
         const colKey = th.getAttribute('data-col-key');
 
-        // Skip adding resizer for the 'actions' column or if it's the very last header without a next sibling (optional)
-        if (colKey === 'actions' || (index === headers.length - 1 && !th.nextElementSibling)) {
+        // Skip adding resizer if column is marked nonResizable or it's the last header
+        const colDef = columnDefinitions[colKey];
+        if ((colDef && colDef.nonResizable) || (index === headers.length - 1 && !th.nextElementSibling)) {
             return;
         }
 

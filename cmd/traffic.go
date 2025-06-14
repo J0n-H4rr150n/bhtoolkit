@@ -274,26 +274,23 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 			if statusCode.Valid {
 				t.ResponseStatusCode = int(statusCode.Int64)
 			} // t.RequestMethod and t.RequestURL are now sql.NullString
-			if contentType.Valid {
-				t.ResponseContentType = contentType.String
-			}
+			t.ResponseContentType = contentType // contentType is sql.NullString
+
 			if bodySize.Valid {
 				t.ResponseBodySize = bodySize.Int64
 			}
 			if duration.Valid {
 				t.DurationMs = duration.Int64
 			}
-			if isHTTPS.Valid {
-				t.IsHTTPS = isHTTPS.Bool
-			}
+			t.IsHTTPS = isHTTPS.Bool // isHTTPS is sql.NullBool, t.IsHTTPS is bool; direct assignment after Valid check is fine.
 			if reqHeadersStr.Valid {
 				t.RequestHeaders = reqHeadersStr
 			}
 			if resHeadersStr.Valid {
-				t.ResponseHeaders = resHeadersStr.String
+				t.ResponseHeaders = resHeadersStr // resHeadersStr is sql.NullString
 			}
 			t.RequestBody = reqBodyBytes
-			t.ResponseBody = resBodyBytes
+			t.ResponseBody = resBodyBytes // These are []byte, direct assignment is fine
 
 			if regexFilter != nil {
 				match := false
@@ -305,7 +302,7 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 				case "req_body":
 					match = regexFilter.Match(t.RequestBody)
 				case "res_headers":
-					match = regexFilter.MatchString(t.ResponseHeaders)
+					match = t.ResponseHeaders.Valid && regexFilter.MatchString(t.ResponseHeaders.String)
 				case "res_body":
 					match = regexFilter.Match(t.ResponseBody)
 				default: // Default to URL if field is invalid or not specified with regex
@@ -354,13 +351,16 @@ Note: Total page count is based on database filters (--domain, --status-code) on
 				if len(displayURL) > 80 {
 					displayURL = displayURL[:77] + "..."
 				}
-				displayContentType := t.ResponseContentType
-				if len(displayContentType) > 30 {
-					displayContentType = displayContentType[:27] + "..."
+				displayContentTypeStr := ""
+				if t.ResponseContentType.Valid {
+					displayContentTypeStr = t.ResponseContentType.String
+					if len(displayContentTypeStr) > 30 {
+						displayContentTypeStr = displayContentTypeStr[:27] + "..."
+					}
 				}
 				fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%d\t%s\t%d\t%dms\t%s\n",
 					t.ID, tsFormatted, t.RequestMethod.String, displayURL, t.ResponseStatusCode, // Use .String
-					displayContentType, t.ResponseBodySize, t.DurationMs, httpsStr,
+					displayContentTypeStr, t.ResponseBodySize, t.DurationMs, httpsStr,
 				)
 			}
 			writer.Flush()
@@ -584,9 +584,8 @@ to the specified target ID (using --target-id) or the currently set target.`,
 			if statusCode.Valid {
 				t.ResponseStatusCode = int(statusCode.Int64)
 			}
-			if contentType.Valid {
-				t.ResponseContentType = contentType.String
-			}
+			t.ResponseContentType = contentType // contentType is sql.NullString
+
 			if bodySize.Valid {
 				t.ResponseBodySize = bodySize.Int64
 			}
@@ -594,9 +593,9 @@ to the specified target ID (using --target-id) or the currently set target.`,
 				t.DurationMs = duration.Int64
 			}
 			if isHTTPS.Valid {
-				t.IsHTTPS = isHTTPS.Bool
+				t.IsHTTPS = isHTTPS.Bool // isHTTPS is sql.NullBool, t.IsHTTPS is bool
 			}
-			t.TargetID = &targetIDToList
+			t.TargetID = &targetIDToList // This is correct
 			logs = append(logs, t)
 		}
 		if err = rows.Err(); err != nil {
@@ -630,14 +629,17 @@ to the specified target ID (using --target-id) or the currently set target.`,
 			if len(displayURL) > 80 {
 				displayURL = displayURL[:77] + "..."
 			}
-			displayContentType := t.ResponseContentType
-			if len(displayContentType) > 30 {
-				displayContentType = displayContentType[:27] + "..."
+			displayContentTypeStr := ""
+			if t.ResponseContentType.Valid {
+				displayContentTypeStr = t.ResponseContentType.String
+				if len(displayContentTypeStr) > 30 {
+					displayContentTypeStr = displayContentTypeStr[:27] + "..."
+				}
 			}
 
 			fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%d\t%s\t%d\t%dms\t%s\n",
 				t.ID, tsFormatted, t.RequestMethod.String, displayURL, t.ResponseStatusCode, // Use .String
-				displayContentType, t.ResponseBodySize, t.DurationMs, httpsStr,
+				displayContentTypeStr, t.ResponseBodySize, t.DurationMs, httpsStr,
 			)
 		}
 		writer.Flush()
@@ -675,9 +677,8 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 		var reqBodyBytes, resBodyBytes []byte
 		var targetID sql.NullInt64
 		var notes sql.NullString
-		var clientIPSql, serverIPSqL sql.NullString
-		var reasonPhraseSql sql.NullString
-		var reqHttpVerSql, resHttpVerSql sql.NullString
+		var clientIPSql, serverIPSql sql.NullString // Renamed serverIPSqL
+		var reasonPhraseSql, reqHttpVerSql, resHttpVerSql sql.NullString
 
 		query := `SELECT id, target_id, timestamp, request_method, request_url, request_http_version, 
                          request_headers, request_body, response_status_code, response_reason_phrase, 
@@ -688,9 +689,9 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 
 		err = database.DB.QueryRow(query, logID).Scan(
 			&t.ID, &targetID, &timestampStr, &t.RequestMethod, &t.RequestURL, &reqHttpVerSql,
-			&reqHeadersStr, &reqBodyBytes, &statusCode, &reasonPhraseSql,
-			&resHttpVerSql, &resHeadersStr, &resBodyBytes, &contentType,
-			&bodySize, &duration, &clientIPSql, &serverIPSqL, &isHTTPS,
+			&reqHeadersStr, &reqBodyBytes, &statusCode, &reasonPhraseSql, // Scan into local sql.NullString
+			&resHttpVerSql, &resHeadersStr, &resBodyBytes, &contentType, // Scan into local sql.NullString
+			&bodySize, &duration, &clientIPSql, &serverIPSql, &isHTTPS, // Scan into local sql.NullString
 			&t.IsPageCandidate, &notes,
 		)
 
@@ -717,59 +718,63 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 			logger.Error("Failed to parse timestamp '%s': %v", timestampStr, parseErr)
 		}
 		if reqHttpVerSql.Valid {
-			t.RequestHTTPVersion = reqHttpVerSql.String
+			t.RequestHTTPVersion = reqHttpVerSql
 		}
 		if reqHeadersStr.Valid {
 			t.RequestHeaders = reqHeadersStr
 		}
 		t.RequestBody = reqBodyBytes
 		if statusCode.Valid {
-			t.ResponseStatusCode = int(statusCode.Int64)
+			t.ResponseStatusCode = int(statusCode.Int64) // This is correct
 		}
 		if reasonPhraseSql.Valid {
-			t.ResponseReasonPhrase = reasonPhraseSql.String
+			t.ResponseReasonPhrase = reasonPhraseSql
 		}
 		if resHttpVerSql.Valid {
-			t.ResponseHTTPVersion = resHttpVerSql.String
+			t.ResponseHTTPVersion = resHttpVerSql
 		}
 		if resHeadersStr.Valid {
-			t.ResponseHeaders = resHeadersStr.String
+			t.ResponseHeaders = resHeadersStr
 		}
 		t.ResponseBody = resBodyBytes
 		if contentType.Valid {
-			t.ResponseContentType = contentType.String
+			t.ResponseContentType = contentType
 		}
 		if bodySize.Valid {
-			t.ResponseBodySize = bodySize.Int64
+			t.ResponseBodySize = bodySize.Int64 // This is correct
 		}
 		if duration.Valid {
-			t.DurationMs = duration.Int64
+			t.DurationMs = duration.Int64 // This is correct
 		}
 		if clientIPSql.Valid {
-			t.ClientIP = clientIPSql.String
+			t.ClientIP = clientIPSql
 		}
-		if serverIPSqL.Valid {
-			t.ServerIP = serverIPSqL.String
+		if serverIPSql.Valid { // Corrected variable name
+			t.ServerIP = serverIPSql
 		}
 		if isHTTPS.Valid {
-			t.IsHTTPS = isHTTPS.Bool
+			t.IsHTTPS = isHTTPS.Bool // This is correct
 		}
 		if notes.Valid {
 			t.Notes = notes
 		}
 
 		fmt.Println("--- REQUEST ---")
-		fmt.Printf("%s %s %s\n", t.RequestMethod.String, t.RequestURL.String, t.RequestHTTPVersion) // Use .String
-		printHeaders(t.RequestHeaders.String)
+		fmt.Printf("%s %s %s\n", t.RequestMethod.String, t.RequestURL.String, t.RequestHTTPVersion.String)
+		if t.RequestHeaders.Valid {
+			printHeaders(t.RequestHeaders.String)
+		}
 		fmt.Println()
 		printBody(t.RequestBody, "")
 
 		fmt.Println("\n--- RESPONSE ---")
 		if t.ResponseStatusCode > 0 || resHeadersStr.Valid {
-			fmt.Printf("%s %d %s\n", t.ResponseHTTPVersion, t.ResponseStatusCode, t.ResponseReasonPhrase)
-			printHeaders(t.ResponseHeaders)
+			fmt.Printf("%s %d %s\n", t.ResponseHTTPVersion.String, t.ResponseStatusCode, t.ResponseReasonPhrase.String)
+			if t.ResponseHeaders.Valid {
+				printHeaders(t.ResponseHeaders.String)
+			}
 			fmt.Println()
-			printBody(t.ResponseBody, t.ResponseContentType)
+			printBody(t.ResponseBody, t.ResponseContentType.String)
 		} else {
 			fmt.Println("(No Response Recorded or Error Occurred)")
 		}
@@ -785,9 +790,9 @@ For long bodies, pipe the output to a pager like 'less' (e.g., toolkit traffic g
 			fmt.Printf("  Timestamp:     %s\n", t.Timestamp.Format(time.RFC3339))
 		}
 		fmt.Printf("  Duration:      %dms\n", t.DurationMs)
-		fmt.Printf("  HTTPS:         %t\n", t.IsHTTPS)
-		fmt.Printf("  Client IP:     %s\n", t.ClientIP)
-		fmt.Printf("  Server IP:     %s\n", t.ServerIP)
+		fmt.Printf("  HTTPS:         %t\n", t.IsHTTPS) // This is bool, direct print is fine
+		fmt.Printf("  Client IP:     %s\n", t.ClientIP.String)
+		fmt.Printf("  Server IP:     %s\n", t.ServerIP.String)
 		fmt.Printf("  Notes:         %s\n", t.Notes.String)
 
 		fmt.Println("---")

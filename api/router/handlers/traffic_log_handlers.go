@@ -62,7 +62,7 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * limit
 
-	whereClauses := []string{"target_id = ?"}
+	whereClauses := []string{"htl.target_id = ?"} // Qualified target_id
 	queryArgs := []interface{}{targetID}
 
 	distinctWhereClauses := []string{"target_id = ?"}
@@ -103,6 +103,7 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	finalWhereClause := strings.Join(whereClauses, " AND ")
+	finalWhereClauseForCount := strings.Replace(finalWhereClause, "htl.target_id", "target_id", 1) // Use unaliased target_id for count query
 	finalDistinctWhereClause := strings.Join(distinctWhereClauses, " AND ")
 	distinctValues := make(map[string][]string)
 
@@ -140,8 +141,8 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var totalRecords int64
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM http_traffic_log WHERE %s", finalWhereClause)
-	err = database.DB.QueryRow(countQuery, queryArgs...).Scan(&totalRecords)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM http_traffic_log WHERE %s", finalWhereClauseForCount) // Use the modified where clause for counting
+	err = database.DB.QueryRow(countQuery, queryArgs...).Scan(&totalRecords)                              // queryArgs are still valid
 	if err != nil {
 		logger.Error("GetTrafficLogHandler: Error counting traffic logs for target %d: %v", targetID, err)
 		w.Header().Set("Content-Type", "application/json")
@@ -178,17 +179,19 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	allowedSortColumns := map[string]string{
-		"id":                    "id",
-		"timestamp":             "timestamp",
-		"request_method":        "request_method",
-		"request_url":           "request_url",
-		"response_status_code":  "response_status_code",
-		"response_content_type": "response_content_type",
-		"response_body_size":    "response_body_size",
-		"duration_ms":           "duration_ms",
+		"id":                    "htl.id",
+		"timestamp":             "htl.timestamp",
+		"request_method":        "htl.request_method",
+		"request_url":           "htl.request_url",
+		"response_status_code":  "htl.response_status_code",
+		"response_content_type": "htl.response_content_type",
+		"response_body_size":    "htl.response_body_size",
+		"page_sitemap_id":       "htl.page_sitemap_id", // Qualified
+		"page_sitemap_name":     "page_sitemap_name",   // This is an alias from SELECT
+		"duration_ms":           "htl.duration_ms",
 	}
 
-	dbSortColumn := "timestamp"
+	dbSortColumn := "htl.timestamp" // Default sort, aliased
 	if col, ok := allowedSortColumns[sortByParam]; ok {
 		dbSortColumn = col
 	}
@@ -198,11 +201,12 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		dbSortOrder = sortOrderParam
 	}
 
-	orderByClause := fmt.Sprintf("ORDER BY %s %s, id %s", dbSortColumn, dbSortOrder, dbSortOrder)
+	orderByClause := fmt.Sprintf("ORDER BY %s %s, htl.id %s", dbSortColumn, dbSortOrder, dbSortOrder) // Alias id
 
-	finalQueryString := fmt.Sprintf(`SELECT id, timestamp, request_method, request_url, response_status_code,
-	                 response_content_type, response_body_size, duration_ms, is_favorite
-	          FROM http_traffic_log
+	finalQueryString := fmt.Sprintf(`SELECT htl.id, htl.timestamp, htl.request_method, htl.request_url, htl.request_full_url_with_fragment,
+	                 htl.response_status_code, htl.response_content_type, htl.response_body_size, htl.duration_ms, htl.is_favorite,
+	                 htl.log_source, htl.page_sitemap_id, p.name as page_sitemap_name
+	          FROM http_traffic_log htl LEFT JOIN pages p ON htl.page_sitemap_id = p.id
 	          WHERE %s %s LIMIT ? OFFSET ?`, finalWhereClause, orderByClause)
 
 	finalQueryArgs := append(queryArgs, limit, offset)
@@ -227,7 +231,8 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		var timestampStr string
 		var isFavorite sql.NullBool
 
-		if err := rows.Scan(&t.ID, &timestampStr, &t.RequestMethod, &t.RequestURL, &statusCode, &contentType, &bodySize, &duration, &isFavorite); err != nil {
+		// Add &t.RequestFullURLWithFragment, &t.LogSource, &t.PageSitemapID, &t.PageSitemapName to the Scan call
+		if err := rows.Scan(&t.ID, &timestampStr, &t.RequestMethod, &t.RequestURL, &t.RequestFullURLWithFragment, &statusCode, &contentType, &bodySize, &duration, &isFavorite, &t.LogSource, &t.PageSitemapID, &t.PageSitemapName); err != nil {
 			logger.Error("GetTrafficLogHandler: Error scanning traffic log row: %v", err)
 			continue
 		}
@@ -239,9 +244,9 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		if statusCode.Valid {
 			t.ResponseStatusCode = int(statusCode.Int64)
 		}
-		if contentType.Valid {
-			t.ResponseContentType = contentType.String
-		}
+		// contentType is already sql.NullString, assign directly
+		t.ResponseContentType = contentType
+
 		if bodySize.Valid {
 			t.ResponseBodySize = bodySize.Int64
 		}
@@ -298,15 +303,21 @@ func getTrafficLogEntryDetail(w http.ResponseWriter, r *http.Request, logID int6
 	var logEntry models.HTTPTrafficLog
 	var targetID sql.NullInt64
 	var clientIP sql.NullString
-	var serverIP sql.NullString
+	var serverIP sql.NullString // This is the scan target
 	var timestampStr string
+	// Local sql.NullString for notes, as it's handled separately after scan
+	var notes sql.NullString
 
-	query := `SELECT id, target_id, timestamp, request_method, request_url, request_http_version, 
-	                 request_headers, request_body, response_status_code, response_reason_phrase, 
-					 response_http_version, response_headers, response_body, response_content_type, 
-					 response_body_size, duration_ms, client_ip, server_ip, is_https, is_page_candidate, notes,
-					 is_favorite
-			  FROM http_traffic_log WHERE id = ?`
+	query := `SELECT htl.id, htl.target_id, htl.timestamp, htl.request_method, htl.request_url, 
+	                 htl.request_http_version, htl.request_headers, htl.request_body, 
+					 htl.response_status_code, htl.response_reason_phrase, htl.response_http_version, 
+					 htl.response_headers, htl.response_body, htl.response_content_type, 
+					 htl.response_body_size, htl.duration_ms, htl.client_ip, htl.server_ip, 
+					 htl.is_https, htl.is_page_candidate, htl.notes, htl.is_favorite, 
+					 htl.request_full_url_with_fragment, htl.page_sitemap_id, p.name as page_sitemap_name
+			  FROM http_traffic_log htl
+			  LEFT JOIN pages p ON htl.page_sitemap_id = p.id
+			  WHERE htl.id = ?`
 
 	err := database.DB.QueryRow(query, logID).Scan(
 		&logEntry.ID, &targetID, &timestampStr, &logEntry.RequestMethod, &logEntry.RequestURL,
@@ -314,7 +325,9 @@ func getTrafficLogEntryDetail(w http.ResponseWriter, r *http.Request, logID int6
 		&logEntry.ResponseStatusCode, &logEntry.ResponseReasonPhrase, &logEntry.ResponseHTTPVersion,
 		&logEntry.ResponseHeaders, &logEntry.ResponseBody, &logEntry.ResponseContentType, &logEntry.ResponseBodySize,
 		&logEntry.DurationMs, &clientIP, &serverIP,
-		&logEntry.IsHTTPS, &logEntry.IsPageCandidate, &logEntry.Notes, &logEntry.IsFavorite,
+		&logEntry.IsHTTPS, &logEntry.IsPageCandidate, &notes, &logEntry.IsFavorite,
+		&logEntry.RequestFullURLWithFragment,
+		&logEntry.PageSitemapID, &logEntry.PageSitemapName, // Scan the new page sitemap fields
 	)
 
 	if err != nil {
@@ -337,12 +350,19 @@ func getTrafficLogEntryDetail(w http.ResponseWriter, r *http.Request, logID int6
 	if targetID.Valid {
 		logEntry.TargetID = &targetID.Int64
 	}
-	if clientIP.Valid {
-		logEntry.ClientIP = clientIP.String
-	}
-	if serverIP.Valid {
-		logEntry.ServerIP = serverIP.String
-	}
+	// Assign the scanned sql.NullString directly
+	logEntry.ClientIP = clientIP
+	logEntry.ServerIP = serverIP
+	logEntry.Notes = notes
+
+	// The following fields were already being scanned directly into logEntry which is correct
+	// as they are sql.NullString in the model:
+	// logEntry.RequestMethod
+	// logEntry.RequestURL
+	// logEntry.RequestHTTPVersion
+	// logEntry.RequestHeaders
+	// logEntry.ResponseReasonPhrase, logEntry.ResponseHTTPVersion, logEntry.ResponseHeaders, logEntry.ResponseContentType
+	// logEntry.RequestFullURLWithFragment
 
 	responsePayload := LogEntryDetailResponse{
 		HTTPTrafficLog: logEntry,

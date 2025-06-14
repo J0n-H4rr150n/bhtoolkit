@@ -20,8 +20,10 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 		return nil, 0, fmt.Errorf("TargetID is required to fetch HTTP traffic logs")
 	}
 
-	baseQuery := "FROM http_traffic_log"
-	whereClauses := []string{"target_id = ?"}
+	// Select from http_traffic_log and LEFT JOIN pages
+	selectBase := "SELECT htl.id, htl.target_id, htl.timestamp, htl.request_method, htl.request_url, htl.request_full_url_with_fragment, htl.response_status_code, htl.response_content_type, htl.response_body_size, htl.duration_ms, htl.is_favorite, htl.log_source, htl.page_sitemap_id, p.name AS page_sitemap_name"
+	fromAndJoinBase := "FROM http_traffic_log htl LEFT JOIN pages p ON htl.page_sitemap_id = p.id"
+	whereClauses := []string{"htl.target_id = ?"} // Explicitly use htl.target_id
 	args := []interface{}{filters.TargetID}
 
 	if filters.FilterFavoritesOnly {
@@ -65,7 +67,7 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 		finalWhereClause = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) %s %s", baseQuery, finalWhereClause)
+	countQuery := fmt.Sprintf("SELECT COUNT(htl.id) %s %s", fromAndJoinBase, finalWhereClause)
 	err := DB.QueryRow(countQuery, args...).Scan(&totalRecords)
 	if err != nil {
 		logger.Error("GetHTTPTrafficLogEntries: Error counting records: %v", err)
@@ -81,23 +83,28 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 		sortOrder = "ASC"
 	}
 	orderBy := "timestamp" // Default sort
+	// Add page_sitemap_name to valid sort columns, mapping to p.name
 	validSortColumns := map[string]string{
-		"id": "id", "timestamp": "timestamp", "request_method": "request_method",
-		"request_url": "request_url", "response_status_code": "response_status_code",
-		"response_content_type": "response_content_type", "response_body_size": "response_body_size",
-		"duration_ms": "duration_ms",
+		"id": "htl.id", "timestamp": "htl.timestamp", "request_method": "htl.request_method", // Prefix with htl
+		"request_url": "htl.request_url", "response_status_code": "htl.response_status_code",
+		"response_content_type": "htl.response_content_type", "response_body_size": "htl.response_body_size",
+		"page_sitemap_id": "htl.page_sitemap_id", "page_sitemap_name": "p.name", // p.name is already specific
+		"duration_ms": "htl.duration_ms",
 	}
 	if col, ok := validSortColumns[filters.SortBy]; ok {
 		orderBy = col
+	} else {
+		orderBy = "htl.timestamp" // Default to htl.timestamp if sortBy is invalid
 	}
 
-	query := fmt.Sprintf("SELECT id, target_id, timestamp, request_method, request_url, response_status_code, response_content_type, response_body_size, duration_ms, is_favorite %s %s ORDER BY %s %s, id %s LIMIT ? OFFSET ?",
-		baseQuery, finalWhereClause, orderBy, sortOrder, sortOrder)
+	// Define query and queryArgs before they are potentially used in logging
+	query := fmt.Sprintf("%s %s %s ORDER BY %s %s, htl.id %s LIMIT ? OFFSET ?",
+		selectBase, fromAndJoinBase, finalWhereClause, orderBy, sortOrder, sortOrder)
 	queryArgs := append(args, filters.Limit, (filters.Page-1)*filters.Limit)
 
 	rows, err := DB.Query(query, queryArgs...)
 	if err != nil {
-		logger.Error("GetHTTPTrafficLogEntries: Error querying records: %v", err)
+		logger.Error("GetHTTPTrafficLogEntries: Error querying records: %v. Query: %s. Args: %v", err, query, queryArgs)
 		return nil, 0, err
 	}
 	defer rows.Close()
@@ -105,9 +112,7 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 	for rows.Next() {
 		var u models.HTTPTrafficLog
 		var timestampStr string
-		// Note: Scanning only a subset of fields needed by AnalyzeTargetForParameterizedURLsHandler
-		// Adjust if more fields are needed by other callers of this function.
-		if err := rows.Scan(&u.ID, &u.TargetID, &timestampStr, &u.RequestMethod, &u.RequestURL, &u.ResponseStatusCode, &u.ResponseContentType, &u.ResponseBodySize, &u.DurationMs, &u.IsFavorite); err != nil {
+		if err := rows.Scan(&u.ID, &u.TargetID, &timestampStr, &u.RequestMethod, &u.RequestURL, &u.RequestFullURLWithFragment, &u.ResponseStatusCode, &u.ResponseContentType, &u.ResponseBodySize, &u.DurationMs, &u.IsFavorite, &u.LogSource, &u.PageSitemapID, &u.PageSitemapName); err != nil {
 			// If RequestMethod or RequestURL are now sql.NullString, this Scan will fail if they are not sql.NullString in the struct.
 			// Assuming the struct models.HTTPTrafficLog is updated, this Scan should be fine.
 			// The fields u.RequestMethod and u.RequestURL are now sql.NullString.
@@ -126,26 +131,64 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 func GetHTTPTrafficLogEntryByID(id int64) (models.HTTPTrafficLog, error) {
 	var log models.HTTPTrafficLog
 	// Select all fields that might be needed for the modifier's base request
-	query := `SELECT id, target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body,
-	                 response_status_code, response_content_type, response_body_size, response_http_version, response_headers, response_body,
-	                 duration_ms, is_favorite, notes
-	          FROM http_traffic_log WHERE id = ?`
+	query := `SELECT htl.id, htl.target_id, htl.timestamp, htl.request_method, htl.request_url, htl.request_full_url_with_fragment, 
+	                 htl.request_http_version, htl.request_headers, htl.request_body, 
+	                 htl.response_status_code, htl.response_content_type, htl.response_body_size, htl.response_http_version, 
+	                 htl.response_headers, htl.response_body, htl.duration_ms, htl.is_favorite, htl.notes, 
+	                 htl.log_source, htl.page_sitemap_id, p.name AS page_sitemap_name
+	          FROM http_traffic_log htl LEFT JOIN pages p ON htl.page_sitemap_id = p.id WHERE htl.id = ?`
 	var timestampStr string
 	err := DB.QueryRow(query, id).Scan(
 		&log.ID, &log.TargetID, &timestampStr, &log.RequestMethod, &log.RequestURL,
-		&log.RequestHTTPVersion, // This is string
-		&log.RequestHeaders,     // This will scan into sql.NullString if model is updated
+		&log.RequestFullURLWithFragment, &log.RequestHTTPVersion,
+		&log.RequestHeaders, // This will scan into sql.NullString if model is updated
 		&log.RequestBody,
 		&log.ResponseStatusCode, &log.ResponseContentType, &log.ResponseBodySize, &log.ResponseHTTPVersion, &log.ResponseHeaders, &log.ResponseBody,
-		&log.DurationMs, &log.IsFavorite, &log.Notes,
-	)
+		&log.DurationMs, &log.IsFavorite, &log.Notes, &log.LogSource, &log.PageSitemapID,
+		&log.PageSitemapName) // Scan the page name
 	if err != nil {
 		if err == sql.ErrNoRows {
+			logger.Info("GetHTTPTrafficLogEntryByID: No log entry found for ID %d", id)
 			return log, fmt.Errorf("HTTP traffic log entry with ID %d not found", id)
 		}
-		logger.Error("GetHTTPTrafficLogEntryByID: Error scanning log ID %d: %v", id, err)
+		// Use a more distinct message for this critical scan error
+		logger.Error("GetHTTPTrafficLogEntryByID: CRITICAL - Error scanning main log entry data for ID %d: %v", id, err)
 		return log, err
 	}
+
+	// Log the state of RequestFullURLWithFragment immediately after scan
+	logger.Debug("GetHTTPTrafficLogEntryByID: Main log entry scan for ID %d SUCCESSFUL. Proceeding to associated findings.", id)
+	logger.Debug("GetHTTPTrafficLogEntryByID - Scanned for ID %d: log.RequestFullURLWithFragment.Valid = %t, log.RequestFullURLWithFragment.String = '%s'", id, log.RequestFullURLWithFragment.Valid, log.RequestFullURLWithFragment.String)
+
+	logger.Debug("GetHTTPTrafficLogEntryByID: Attempting to fetch associated findings for log ID %d", id)
+	// Fetch associated findings
+	rowsFindings, errFindings := DB.Query("SELECT id, title FROM target_findings WHERE http_traffic_log_id = ?", id)
+	if errFindings != nil {
+		// Log error but don't fail the whole log retrieval
+		logger.Error("GetHTTPTrafficLogEntryByID: Error fetching associated findings for log ID %d: %v", id, errFindings)
+		log.AssociatedFindings = []models.FindingLink{} // Ensure it's an empty slice on error
+	} else {
+		defer rowsFindings.Close()
+		var findings []models.FindingLink
+		logger.Debug("GetHTTPTrafficLogEntryByID: Query for associated findings for log ID %d successful. Processing rows...", id)
+		rowCount := 0
+		for rowsFindings.Next() {
+			rowCount++
+			var f models.FindingLink
+			if errScan := rowsFindings.Scan(&f.ID, &f.Title); errScan != nil {
+				logger.Error("GetHTTPTrafficLogEntryByID: Error scanning associated finding for log ID %d (row %d): %v", id, rowCount, errScan)
+				continue // Skip this finding on scan error
+			}
+			findings = append(findings, f)
+			logger.Debug("GetHTTPTrafficLogEntryByID: Scanned finding: ID=%d, Title='%s'", f.ID, f.Title)
+		}
+		if errRows := rowsFindings.Err(); errRows != nil {
+			logger.Error("GetHTTPTrafficLogEntryByID: Error after iterating finding rows for log ID %d: %v", id, errRows)
+		}
+		logger.Debug("GetHTTPTrafficLogEntryByID: Total associated findings scanned for log ID %d: %d. Assigning to log.AssociatedFindings.", id, len(findings))
+		log.AssociatedFindings = findings
+	}
+
 	parsedTime, _ := time.Parse(time.RFC3339, timestampStr)
 	log.Timestamp = parsedTime
 	return log, nil
@@ -158,17 +201,19 @@ func LogExecutedModifierRequest(logEntry *models.HTTPTrafficLog) (int64, error) 
 		return 0, fmt.Errorf("database not initialized")
 	}
 	result, err := DB.Exec(`INSERT INTO http_traffic_log (
-		target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body,
-		response_status_code, response_reason_phrase, response_http_version, response_headers, response_body,
-		response_content_type, response_body_size, duration_ms, client_ip, is_https, is_page_candidate, notes,
-		source_modifier_task_id 
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body, request_full_url_with_fragment,
+		response_status_code, response_reason_phrase, response_http_version, response_headers, response_body, response_content_type,
+		response_body_size, duration_ms, client_ip, is_https, is_page_candidate, notes, source_modifier_task_id,
+		log_source, page_sitemap_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // Added placeholders
 		logEntry.TargetID, logEntry.Timestamp, logEntry.RequestMethod, logEntry.RequestURL,
 		logEntry.RequestHTTPVersion, logEntry.RequestHeaders, logEntry.RequestBody,
+		logEntry.RequestFullURLWithFragment, // Ensure this is passed if applicable
 		logEntry.ResponseStatusCode, logEntry.ResponseReasonPhrase, logEntry.ResponseHTTPVersion,
 		logEntry.ResponseHeaders, logEntry.ResponseBody, logEntry.ResponseContentType,
 		logEntry.ResponseBodySize, logEntry.DurationMs, logEntry.ClientIP, logEntry.IsHTTPS,
-		logEntry.IsPageCandidate, logEntry.Notes, logEntry.SourceModifierTaskID,
+		logEntry.IsPageCandidate, logEntry.Notes, logEntry.SourceModifierTaskID, // Existing fields
+		models.NullString("Modifier"), sql.NullInt64{Valid: false}, // Set log_source to "Modifier", page_sitemap_id to NULL
 	)
 	// Note: is_favorite defaults to FALSE in schema, not explicitly set here.
 	if err != nil {

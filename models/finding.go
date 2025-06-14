@@ -21,3 +21,9 @@ type TargetFinding struct {
 	DiscoveredAt      time.Time       `json:"discovered_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
 }
+
+// FindingLink is a lightweight struct for linking findings.
+type FindingLink struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+}

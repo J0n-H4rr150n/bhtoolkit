@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt" // Added for formatting messages
 	"net/http"
 	"strconv"
 	"toolkit/database"
@@ -80,4 +81,50 @@ func GetChecklistTemplateItemsHandler(w http.ResponseWriter, r *http.Request, te
 		logger.Error("GetChecklistTemplateItemsHandler: Error encoding response for template ID %d: %v", templateID, err)
 	}
 	logger.Info("Successfully fetched %d items for checklist template ID %d (Page %d, Total %d).", len(items), templateID, page, totalRecords)
+}
+
+// CopyAllChecklistTemplateItemsToTargetHandler handles requests to copy all items from a template to a target.
+func CopyAllChecklistTemplateItemsToTargetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		logger.Error("CopyAllChecklistTemplateItemsToTargetHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed. Only POST is accepted.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TemplateID int64 `json:"template_id"`
+		TargetID   int64 `json:"target_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("CopyAllChecklistTemplateItemsToTargetHandler: Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if req.TemplateID <= 0 {
+		logger.Error("CopyAllChecklistTemplateItemsToTargetHandler: Invalid template_id: %d", req.TemplateID)
+		http.Error(w, "Invalid template_id", http.StatusBadRequest)
+		return
+	}
+	if req.TargetID <= 0 {
+		logger.Error("CopyAllChecklistTemplateItemsToTargetHandler: Invalid target_id: %d", req.TargetID)
+		http.Error(w, "Invalid target_id", http.StatusBadRequest)
+		return
+	}
+
+	itemsCopied, err := database.CopyAllTemplateItemsToTarget(req.TemplateID, req.TargetID)
+	if err != nil {
+		logger.Error("CopyAllChecklistTemplateItemsToTargetHandler: Error copying items from template %d to target %d: %v", req.TemplateID, req.TargetID, err)
+		http.Error(w, "Failed to copy checklist items: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":      fmt.Sprintf("Successfully copied %d items from template %d to target %d.", itemsCopied, req.TemplateID, req.TargetID),
+		"items_copied": itemsCopied,
+	})
+	logger.Info("CopyAllChecklistTemplateItemsToTargetHandler: Copied %d items from template %d to target %d.", itemsCopied, req.TemplateID, req.TargetID)
 }

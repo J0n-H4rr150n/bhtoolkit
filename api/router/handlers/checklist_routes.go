@@ -35,4 +35,15 @@ func RegisterChecklistRoutes(r chi.Router) {
 			DeleteChecklistItemHandler(w, req, itemID) // Existing handler
 		})
 	})
+
+	// DELETE /targets/{target_id}/checklist-items/all
+	r.Delete("/targets/{target_id}/checklist-items/all", func(w http.ResponseWriter, req *http.Request) {
+		targetIDStr := chi.URLParam(req, "target_id")
+		targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid target ID", http.StatusBadRequest)
+			return
+		}
+		DeleteAllChecklistItemsForTargetHandler(w, req, targetID)
+	})
 }

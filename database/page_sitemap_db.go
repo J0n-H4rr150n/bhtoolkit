@@ -68,30 +68,31 @@ func UpdatePageEndTime(pageID int64, endTime time.Time) error {
 
 // AssociateLogsToPage links http_traffic_log entries to a page based on target_id and timestamp range.
 // It will only associate the first occurrence (min log id) of each unique (method, url) pair within the timeframe.
+// MODIFIED: This function will now update the page_sitemap_id column in the http_traffic_log table
+// for all logs within the given timeframe for the target.
 func AssociateLogsToPage(pageID int64, targetID int64, startTimestamp time.Time, endTimestamp time.Time) (int64, error) {
+	logger.Info("AssociateLogsToPage: Attempting to associate logs for PageID: %d, TargetID: %d, Start: %s, End: %s",
+		pageID, targetID, startTimestamp.Format(time.RFC3339), endTimestamp.Format(time.RFC3339))
+
 	stmt, err := DB.Prepare(`
-		INSERT INTO page_http_logs (page_id, http_traffic_log_id)
-		SELECT ?, l.id
-		FROM http_traffic_log l
-		INNER JOIN (
-			SELECT MIN(id) as min_id
-			FROM http_traffic_log
-			WHERE target_id = ? AND timestamp >= ? AND timestamp <= ?
-			GROUP BY request_method, request_url 
-		) AS unique_logs ON l.id = unique_logs.min_id
-		WHERE l.target_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
-		ON CONFLICT(page_id, http_traffic_log_id) DO NOTHING
+		UPDATE http_traffic_log
+		SET page_sitemap_id = ?
+		WHERE target_id = ?
+		  AND timestamp >= ?
+		  AND timestamp <= ?
+		  AND (page_sitemap_id IS NULL OR page_sitemap_id = 0) -- Avoid re-associating or allow overriding if 0 is used
 	`)
 	if err != nil {
-		logger.Error("AssociateLogsToPage: Error preparing statement: %v", err)
-		return 0, fmt.Errorf("preparing associate logs statement: %w", err)
+		logger.Error("AssociateLogsToPage: Error preparing update statement: %v", err)
+		return 0, fmt.Errorf("preparing associate logs update statement: %w", err)
 	}
 	defer stmt.Close()
-	// Parameters are: pageID, targetID (subquery), start (subquery), end (subquery), targetID (outer), start (outer), end (outer)
-	result, err := stmt.Exec(pageID, targetID, startTimestamp, endTimestamp, targetID, startTimestamp, endTimestamp)
+
+	// Parameters for the UPDATE statement: pageID, targetID, startTimestamp, endTimestamp
+	result, err := stmt.Exec(pageID, targetID, startTimestamp, endTimestamp)
 	if err != nil {
-		logger.Error("AssociateLogsToPage: Error executing association for page ID %d: %v", pageID, err)
-		return 0, fmt.Errorf("executing log association for page ID %d: %w", pageID, err)
+		logger.Error("AssociateLogsToPage: Error executing update for page ID %d, target ID %d: %v", pageID, targetID, err)
+		return 0, fmt.Errorf("executing log association update for page ID %d: %w", pageID, err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -174,15 +175,15 @@ func GetLogsForPage(pageID int64) ([]models.HTTPTrafficLog, error) {
 		}
 		h.RequestBody = []byte(requestBody.String)           // Convert back to []byte if needed, or adjust model
 		h.ResponseStatusCode = int(responseStatusCode.Int64) // Assuming 0 if null
-		h.ResponseReasonPhrase = responseReasonPhrase.String
-		h.ResponseHTTPVersion = responseHTTPVersion.String
-		h.ResponseHeaders = responseHeaders.String
+		h.ResponseReasonPhrase = responseReasonPhrase
+		h.ResponseHTTPVersion = responseHTTPVersion
+		h.ResponseHeaders = responseHeaders
 		h.ResponseBody = []byte(responseBody.String) // Convert back to []byte
-		h.ResponseContentType = responseContentType.String
+		h.ResponseContentType = responseContentType
 		h.ResponseBodySize = responseBodySize.Int64 // Assuming 0 if null
 		h.DurationMs = durationMs.Int64             // Assuming 0 if null
-		h.ClientIP = clientIP.String
-		h.ServerIP = serverIP.String
+		h.ClientIP = clientIP
+		h.ServerIP = serverIP
 		h.Notes = notes // Direct assignment as both are sql.NullString
 
 		logs = append(logs, h)
@@ -196,10 +197,9 @@ func GetLogsForPagePaginatedAndSorted(pageID int64, page int, limit int, sortBy 
 	var totalRecords int64
 
 	// Count total records for the given pageID (without pagination/sorting)
-	countQuery := `SELECT COUNT(htl.id)
-	               FROM http_traffic_log htl
-	               JOIN page_http_logs phl ON htl.id = phl.http_traffic_log_id
-	               WHERE phl.page_id = ?`
+	countQuery := `SELECT COUNT(id)
+	               FROM http_traffic_log
+	               WHERE page_sitemap_id = ?`
 	err := DB.QueryRow(countQuery, pageID).Scan(&totalRecords)
 	if err != nil {
 		logger.Error("GetLogsForPagePaginatedAndSorted: Error counting logs for page %d: %v", pageID, err)
@@ -227,14 +227,14 @@ func GetLogsForPagePaginatedAndSorted(pageID int64, page int, limit int, sortBy 
 	query := fmt.Sprintf(`
 		SELECT
 			htl.id, htl.target_id, htl.timestamp, htl.request_method, htl.request_url,
-			htl.request_http_version, htl.request_headers, htl.request_body,
+			htl.request_full_url_with_fragment, htl.request_http_version, htl.request_headers, htl.request_body,
 			htl.response_status_code, htl.response_reason_phrase, htl.response_http_version,
 			htl.response_headers, htl.response_body, htl.response_content_type,
 			htl.response_body_size, htl.duration_ms, htl.client_ip, htl.server_ip,
-			htl.is_https, htl.is_page_candidate, htl.notes, htl.is_favorite
+			htl.is_https, htl.is_page_candidate, htl.notes, htl.is_favorite,
+			htl.log_source, htl.page_sitemap_id 
 		FROM http_traffic_log htl
-		JOIN page_http_logs phl ON htl.id = phl.http_traffic_log_id
-		WHERE phl.page_id = ?
+		WHERE htl.page_sitemap_id = ?
 		ORDER BY %s %s, htl.id %s
 		LIMIT ? OFFSET ?
 	`, dbSortColumn, dbSortOrder, dbSortOrder) // Added htl.id for tie-breaking
@@ -266,12 +266,12 @@ func GetLogsForPagePaginatedAndSorted(pageID int64, page int, limit int, sortBy 
 		// Use sql.Null types for all potentially nullable fields to prevent scan errors
 		// This scan matches the SELECT statement precisely.
 		err := rows.Scan(
-			&h.ID, &targetIDNullable, &timestampStr, &h.RequestMethod, &h.RequestURL,
+			&h.ID, &targetIDNullable, &timestampStr, &h.RequestMethod, &h.RequestURL, &h.RequestFullURLWithFragment,
 			&requestHTTPVersionNullable, &h.RequestHeaders, &h.RequestBody,
 			&responseStatusCodeNullable, &responseReasonPhraseNullable, &responseHTTPVersionNullable,
 			&responseHeadersNullable, &h.ResponseBody, &responseContentTypeNullable,
 			&responseBodySizeNullable, &durationMsNullable, &clientIPNullable, &serverIPNullable,
-			&h.IsHTTPS, &h.IsPageCandidate, &h.Notes, &h.IsFavorite,
+			&h.IsHTTPS, &h.IsPageCandidate, &h.Notes, &h.IsFavorite, &h.LogSource, &h.PageSitemapID,
 		)
 		if err != nil {
 			logger.Error("GetLogsForPagePaginatedAndSorted: Error scanning log for page %d: %v", pageID, err)
@@ -280,39 +280,24 @@ func GetLogsForPagePaginatedAndSorted(pageID int64, page int, limit int, sortBy 
 		if targetIDNullable.Valid {
 			h.TargetID = &targetIDNullable.Int64
 		}
-		// Parse timestamp, handling potential errors more gracefully
-		parsedTime, parseErr := time.Parse(time.RFC3339, timestampStr)
-		if parseErr != nil {
-			// Attempt to parse with a common alternative format if RFC3339 fails
-			parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr)
-			if parseErr != nil {
-				logger.Warn("GetLogsForPagePaginatedAndSorted: Could not parse timestamp string '%s' for log ID %d: %v. Using zero time.", timestampStr, h.ID, parseErr)
-				h.Timestamp = time.Time{} // Set to zero value if parsing fails
-			} else {
-				h.Timestamp = parsedTime
-			}
-		} else {
-			h.Timestamp = parsedTime
-		}
-
 		// Assign values from sql.Null types to the model
 		if requestHTTPVersionNullable.Valid {
-			h.RequestHTTPVersion = requestHTTPVersionNullable.String
+			h.RequestHTTPVersion = requestHTTPVersionNullable
 		}
 		if responseStatusCodeNullable.Valid {
 			h.ResponseStatusCode = int(responseStatusCodeNullable.Int64)
 		}
 		if responseReasonPhraseNullable.Valid {
-			h.ResponseReasonPhrase = responseReasonPhraseNullable.String
+			h.ResponseReasonPhrase = responseReasonPhraseNullable
 		}
 		if responseHTTPVersionNullable.Valid {
-			h.ResponseHTTPVersion = responseHTTPVersionNullable.String
+			h.ResponseHTTPVersion = responseHTTPVersionNullable
 		}
 		if responseHeadersNullable.Valid {
-			h.ResponseHeaders = responseHeadersNullable.String
+			h.ResponseHeaders = responseHeadersNullable
 		}
 		if responseContentTypeNullable.Valid {
-			h.ResponseContentType = responseContentTypeNullable.String
+			h.ResponseContentType = responseContentTypeNullable
 		}
 		if responseBodySizeNullable.Valid {
 			h.ResponseBodySize = responseBodySizeNullable.Int64
@@ -321,10 +306,28 @@ func GetLogsForPagePaginatedAndSorted(pageID int64, page int, limit int, sortBy 
 			h.DurationMs = durationMsNullable.Int64
 		}
 		if clientIPNullable.Valid {
-			h.ClientIP = clientIPNullable.String
+			h.ClientIP = clientIPNullable
 		}
 		if serverIPNullable.Valid {
-			h.ServerIP = serverIPNullable.String
+			h.ServerIP = serverIPNullable
+		}
+		// h.PageSitemapID is already scanned from the database.
+		// The following line was incorrect as it overwrote the scanned value.
+		// h.PageSitemapID = sql.NullInt64{Int64: pageID, Valid: true}
+
+		// Parse timestamp, handling potential errors more gracefully
+		parsedTime, parseErr := time.Parse(time.RFC3339, timestampStr)
+		if parseErr != nil {
+			// Attempt to parse with a common alternative format if RFC3339 fails
+			parsedTime, parseErr = time.Parse("2006-01-02 15:04:05", timestampStr) // Common SQLite format
+			if parseErr != nil {
+				logger.Warn("GetLogsForPagePaginatedAndSorted: Could not parse timestamp string '%s' for log ID %d: %v. Using zero time.", timestampStr, h.ID, parseErr)
+				h.Timestamp = time.Time{} // Set to zero value if parsing fails
+			} else {
+				h.Timestamp = parsedTime
+			}
+		} else {
+			h.Timestamp = parsedTime
 		}
 
 		// Note: h.RequestMethod, h.RequestURL, h.RequestHeaders, h.Notes are already sql.NullString in the model

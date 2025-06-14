@@ -75,8 +75,8 @@ func AnalyzeTargetForParameterizedURLsHandler(w http.ResponseWriter, r *http.Req
 
 		pURL := models.ParameterizedURL{
 			TargetID:         sql.NullInt64{Int64: targetID, Valid: true},
-			HTTPTrafficLogID: log.ID,
-			RequestMethod:    log.RequestMethod, // log.RequestMethod is now sql.NullString
+			HTTPTrafficLogID: sql.NullInt64{Int64: log.ID, Valid: true}, // Correctly construct sql.NullInt64
+			RequestMethod:    log.RequestMethod,                         // log.RequestMethod is now sql.NullString
 			RequestPath:      models.NullString(requestPath),
 			ParamKeys:        strings.Join(paramKeys, ","),
 			ExampleFullURL:   log.RequestURL, // log.RequestURL is now sql.NullString

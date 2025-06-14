@@ -194,7 +194,7 @@ async function loadView(viewId, params = {}) {
             else console.error("loadSynackAnalyticsView not found in viewLoaders");
             break;
         case 'proxy-log':
-            let newProxyLogSortBy = (params.sort_by && params.sort_by !== 'null' && params.sort_by !== 'undefined') ? params.sort_by : 'timestamp';
+            let newProxyLogSortBy = (params.sort_by && params.sort_by !== 'null' && params.sort_by !== 'undefined') ? params.sort_by : 'id'; // Default to 'id'
             let newProxyLogSortOrder = (params.sort_order && params.sort_order !== 'null' && params.sort_order !== 'undefined') ? params.sort_order.toUpperCase() : 'DESC';
             console.log('[Router] loadView for "proxy-log", received params from handleHashChange:', params);
             // Ensure sort order is valid, default to DESC
@@ -211,7 +211,8 @@ async function loadView(viewId, params = {}) {
                 filterMethod: params.method || '', // Use parsed 'method' from hash
                 filterStatus: params.status || '', // Use parsed 'status' from hash
                 filterContentType: params.type || '', // Use parsed 'type' from hash
-                filterSearchText: params.search || '', // Use parsed 'search' from hash
+                filterSearchText: params.search || '', 
+                showIncompleteOnly: params.show_incomplete_only === 'true', // Add this for checklist
                 analysis_type: params.analysis_type || null // Ensure analysis_type is carried over
             };
             // The block below that resets filters if no '?' was in the hash might be problematic.
@@ -221,6 +222,7 @@ async function loadView(viewId, params = {}) {
                  newPaginationState.proxyLog.filterContentType = '';
                  newPaginationState.proxyLog.filterSearchText = '';
                  newPaginationState.proxyLog.filterFavoritesOnly = false;
+                 // newPaginationState.proxyLog.showIncompleteOnly = true; // Reset for proxy log if needed, or handle separately
                  newPaginationState.proxyLog.analysis_type = null; // Reset analysis_type if no query params
             }
             setState({ paginationState: newPaginationState });
@@ -228,6 +230,18 @@ async function loadView(viewId, params = {}) {
             // Pass the just-calculated proxyLog state directly
             if (viewLoaders.loadProxyLogView) viewLoaders.loadProxyLogView(newPaginationState.proxyLog);
             else console.error("loadProxyLogView not found in viewLoaders");
+            break;
+        case 'current-target': // Assuming checklist is part of current-target view
+            newPaginationState.targetChecklistItems = { // Ensure this state object exists
+                ...appState.paginationState.targetChecklistItems, // Spread existing targetChecklistItems state
+                currentPage: params.page || 1,
+                sortBy: params.sort_by || appState.paginationState.targetChecklistItems.sortBy,
+                sortOrder: params.sort_order || appState.paginationState.targetChecklistItems.sortOrder,
+                filterQuery: params.filter || '',
+                showIncompleteOnly: params.show_incomplete_only === 'true' // Default to true if param not present or false
+            };
+            setState({ paginationState: newPaginationState });
+            if (viewLoaders.loadCurrentTargetView) viewLoaders.loadCurrentTargetView(params.id, params.tab);
             break;
         case 'proxy-log-detail':
             if (viewLoaders.loadProxyLogDetailView) viewLoaders.loadProxyLogDetailView(params.id);
@@ -328,6 +342,8 @@ function handleHashChange() {
                     params.sort_order = value.toUpperCase(); // Keep toUpperCase here
                 } else if (key === 'favorites_only') {
                     params.favorites_only = value; // Keep as string, loadView handles conversion
+                } else if (key === 'show_incomplete_only') { // New param for checklist
+                    params.show_incomplete_only = value; 
                 } else {
                     params[key] = value; // Catch-all for any other parameters
                     // Specifically capture 'tab' if it's not handled above

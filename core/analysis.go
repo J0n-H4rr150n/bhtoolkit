@@ -65,8 +65,8 @@ func AnalyzeJSContent(jsContentBytes []byte, httpLogID int64) (map[string][]stri
 
 	// Prepare statement for inserting discovered URLs
 	stmt, err := database.DB.Prepare(`
-		INSERT INTO discovered_urls (target_id, http_traffic_log_id, url, source_type) 
-		VALUES (?, ?, ?, ?) 
+		INSERT INTO discovered_urls (target_id, http_traffic_log_id, url, source_type)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(http_traffic_log_id, url, source_type) DO NOTHING`)
 	if err != nil {
 		logger.Error("AnalyzeJSContent: Error preparing discovered_urls insert statement: %v", err)
@@ -135,6 +135,9 @@ func AnalyzeJSContent(jsContentBytes []byte, httpLogID int64) (map[string][]stri
 		if len(secretDescParts) > 0 { // Only add if we have some parts
 			secrets = append(secrets, strings.Join(secretDescParts, ", "))
 		}
+	}
+	if len(secrets) > 0 {
+		results["Secrets"] = processSlice(secrets)
 	}
 
 	// Extract Generic Strings (can be noisy, but might catch other things)
