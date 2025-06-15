@@ -1,7 +1,7 @@
 // static/app.js
 import { initState, getState, updateState } from './stateService.js';
 import { initRouter } from './router.js';
-import { initUIService, showModalMessage, showModalConfirm, updateBreadcrumbs } from './uiService.js';
+import { initUIService, showModalMessage, showModalConfirm, updateBreadcrumbs, createButton, createSelect } from './uiService.js';
 import * as apiService from './apiService.js'; // Keep as is
 import { initTableService, saveCurrentTableLayout, makeTableColumnsResizable, getIsResizing } from './tableService.js'; // Import getIsResizing
 import { escapeHtml, escapeHtmlAttribute, debounce, copyToClipboard, downloadCSV } from './utils.js';
@@ -22,6 +22,7 @@ import { initSitemapView, loadSitemapView } from './views/sitemapView.js';
 import { initModifierView, loadModifierView } from './views/modifierView.js';
 import { initPageSitemapView, loadPageSitemapView } from './views/pageSitemapView.js';
 import { initVisualizerView, loadVisualizerView } from './views/visualizerView.js';
+import { initDomainsView, loadDomainsView } from './views/domainsView.js';
 
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -69,7 +70,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     const uiServiceAPI = {
         showModalMessage,
         showModalConfirm,
-        updateBreadcrumbs
+        updateBreadcrumbs,
+        createButton,
+        createSelect
     };
 
     const tableServiceAPI = {
@@ -108,6 +111,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initModifierView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initPageSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initVisualizerView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
+    initDomainsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
 
     await fetchAndSetInitialCurrentTarget();
 
@@ -138,7 +142,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             loadSitemapView: () => loadSitemapView(viewContentContainer),
             loadModifierView: (params) => loadModifierView(viewContentContainer, params),
             loadPageSitemapView: () => loadPageSitemapView(viewContentContainer),
-            loadVisualizerView: () => loadVisualizerView(viewContentContainer)
+            loadVisualizerView: () => loadVisualizerView(viewContentContainer),
+            loadDomainsView: () => loadDomainsView(viewContentContainer) // Added domains view loader
         },
         getPlatformDetailsFunc: apiService.getPlatformDetails,
         cancelTargetEditFunc: cancelActiveTargetEdit,

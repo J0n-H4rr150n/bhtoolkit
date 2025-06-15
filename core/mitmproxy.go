@@ -14,13 +14,11 @@ import (
 	"io"
 	"log" // Standard log package for goproxy.Logger config
 	"math/big"
-	"net" // ADDED for CIDR and IP parsing
+	"net"
 	"net/http"
-	"net/url" // ADDED: For URL parsing
-	"os"      // ADDED for os.ErrNotExist
-
-	// For cleaning paths - Still needed for other functions like matchesRule
-	"regexp" // ADDED for regex matching in global exclusions
+	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,10 +27,9 @@ import (
 	"toolkit/logger"
 	"toolkit/models"
 
-	"strconv" // For parsing target ID from string
+	"strconv"
 
-	// "github.com/BishopFox/jsluice" // Import jsluice library - No longer needed here if AnalyzeJSContent is removed
-	"github.com/elazarl/goproxy" // Corrected: Was missing from previous full file, but likely intended.
+	"github.com/elazarl/goproxy"
 	"github.com/tidwall/gjson"
 )
 
@@ -41,16 +38,16 @@ var (
 	caKey                 *rsa.PrivateKey
 	sessionIsHTTPS        = make(map[int64]bool)
 	muSession             sync.Mutex
-	parsedSynackTargetURL *url.URL // Cache the parsed config URL
-	parseURLErr           error    // Store any error during parsing
+	parsedSynackTargetURL *url.URL
+	parseURLErr           error
 
-	// For scoped logging
 	activeTargetID        *int64
-	allActiveScopeRules   []models.ScopeRule // Renamed from activeScopeRules
+	allActiveScopeRules   []models.ScopeRule
 	scopeMu               sync.RWMutex
 	globalExclusionRules  []models.ProxyExclusionRule
-	activeRecordingPageID *int64       // New: ID of the page currently being recorded for Page Sitemap
-	analyticsFetchTicker  *time.Ticker // Added for rate limiting analytics calls
+	activeRecordingPageID *int64
+	// Added for rate limiting analytics calls
+	analyticsFetchTicker *time.Ticker
 )
 
 // proxyRequestContextData holds data passed between request and response handlers via ctx.UserData
@@ -61,9 +58,11 @@ type proxyRequestContextData struct {
 
 // SetActivePageSitemapRecordingID is called by the Page Sitemap feature to indicate a recording has started.
 func SetActivePageSitemapRecordingID(pageID int64) {
-	scopeMu.Lock() // Using scopeMu for simplicity, or create a new mutex for this
+	// Using scopeMu for simplicity, or create a new mutex for this
+	scopeMu.Lock()
 	defer scopeMu.Unlock()
-	if pageID == 0 { // Allow clearing by passing 0
+	// Allow clearing by passing 0
+	if pageID == 0 {
 		activeRecordingPageID = nil
 		logger.ProxyInfo("Page Sitemap recording stopped (or no active page).")
 	} else {
@@ -80,16 +79,13 @@ func ClearActivePageSitemapRecordingID() {
 	logger.ProxyInfo("Page Sitemap recording explicitly stopped.")
 }
 
-// Initialize the parsed Synack URL once
 func init() {
 	// Note: config.AppConfig might not be fully populated during Go's init phase.
 	// It's better to parse this lazily or after config is loaded.
 	// We will parse it inside StartMitmProxy instead.
-	// Initialize the ticker for analytics API calls (e.g., 1 request per second)
 	analyticsFetchTicker = time.NewTicker(1 * time.Second)
 }
 
-// Helper function to find minimum of two integers
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -97,7 +93,6 @@ func min(a, b int) int {
 	return b
 }
 
-// setGoproxyCA function remains the same
 func setGoproxyCA(loadedGoproxyCa *tls.Certificate) {
 	if loadedGoproxyCa == nil {
 		logger.Fatal("setGoproxyCA called with nil certificate")
@@ -248,14 +243,18 @@ func generateCA(commonName string) (*x509.Certificate, *rsa.PrivateKey, error) {
 	return cert, privKey, nil
 }
 
-// matchesRule is a helper to check if a request matches a single scope rule.
 func matchesRule(requestURL *url.URL, hostname, path string, rule models.ScopeRule) bool {
 	pattern := rule.Pattern
 	match := false
 
 	switch rule.ItemType {
 	case "domain":
-		if hostname == pattern {
+		if strings.HasPrefix(pattern, "*.") {
+			domainPart := strings.TrimPrefix(pattern, "*.")
+			if hostname == domainPart || strings.HasSuffix(hostname, "."+domainPart) {
+				match = true
+			}
+		} else if hostname == pattern {
 			match = true
 		}
 	case "subdomain":
@@ -269,12 +268,10 @@ func matchesRule(requestURL *url.URL, hostname, path string, rule models.ScopeRu
 		}
 	case "url_path":
 		rulePatternPath := rule.Pattern
-		// Normalize rulePatternPath: ensure it starts with a slash
 		if rulePatternPath != "" && !strings.HasPrefix(rulePatternPath, "/") {
 			rulePatternPath = "/" + rulePatternPath
 		}
 
-		// Normalize requestPathNormalized: ensure it starts with a slash
 		requestPathNormalized := path
 		if requestPathNormalized != "" && !strings.HasPrefix(requestPathNormalized, "/") {
 			requestPathNormalized = "/" + requestPathNormalized
@@ -294,13 +291,14 @@ func matchesRule(requestURL *url.URL, hostname, path string, rule models.ScopeRu
 			}
 		}
 	case "ip_address":
-		if hostname == pattern { // IP addresses are often used as hostnames
+		// IP addresses are often used as hostnames
+		if hostname == pattern {
 			match = true
 		}
 	case "cidr":
 		_, cidrNet, err := net.ParseCIDR(pattern)
 		if err == nil {
-			ip := net.ParseIP(hostname) // Hostname can be an IP
+			ip := net.ParseIP(hostname)
 			if ip != nil && cidrNet.Contains(ip) {
 				match = true
 			}
@@ -309,7 +307,6 @@ func matchesRule(requestURL *url.URL, hostname, path string, rule models.ScopeRu
 	return match
 }
 
-// matchesGlobalExclusionRule checks if a request URL matches a global exclusion rule.
 func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionRule) bool {
 	if !rule.IsEnabled || requestURL == nil {
 		return false
@@ -334,7 +331,8 @@ func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionR
 		re, err := regexp.Compile(pattern)
 		if err != nil {
 			logger.ProxyError("Invalid regex pattern in global exclusion rule ID %s: %s", rule.ID, pattern)
-			return false // Invalid regex shouldn't match anything
+			// Invalid regex shouldn't match anything
+			return false
 		}
 		if re.MatchString(fullURL) {
 			return true
@@ -345,9 +343,6 @@ func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionR
 	return false
 }
 
-// isRequestEffectivelyInScope evaluates if a request URL is effectively in scope
-// considering both IN and OUT OF SCOPE rules.
-// OUT OF SCOPE rules take precedence.
 func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRule) bool {
 	if requestURL == nil {
 		return false
@@ -357,17 +352,17 @@ func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRul
 	path := requestURL.Path
 
 	for _, rule := range allRules {
-		// Already filtered for is_in_scope by GetInScopeRulesForTarget
+		// allRules contains both IN and OUT rules.
+		// The logic correctly handles this by checking rule.IsInScope below.
 		pattern := rule.Pattern
 		match := matchesRule(requestURL, hostname, path, rule)
 
-		if match && !rule.IsInScope { // Matched an OUT OF SCOPE rule
+		if match && !rule.IsInScope {
 			logger.ProxyDebug("Request URL '%s' matched OUT OF SCOPE rule: Type=%s, Pattern='%s'", requestURL.String(), rule.ItemType, pattern)
-			return false // Explicitly out of scope
+			return false
 		}
 	}
 
-	// If no OUT OF SCOPE rules matched, check IN SCOPE rules
 	// Separate IN_SCOPE rules for clarity in logic below
 	var inScopeRules []models.ScopeRule
 	for _, rule := range allRules {
@@ -376,7 +371,7 @@ func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRul
 		}
 	}
 
-	// If there are no IN SCOPE rules defined for the target, consider everything in scope (default allow)
+	// If there are no IN SCOPE rules defined for the target, consider everything in scope (default allow).
 	if len(inScopeRules) == 0 {
 		logger.ProxyDebug("Request URL '%s' is IN SCOPE by default (no specific IN_SCOPE rules defined and no OUT_OF_SCOPE match).", requestURL.String())
 		return true
@@ -389,6 +384,7 @@ func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRul
 			return true
 		}
 	}
+	// If no IN_SCOPE rules matched (and no OUT_OF_SCOPE rules matched earlier), it's effectively out of scope.
 	logger.ProxyDebug("Request URL '%s' did not match any IN_SCOPE rules (and no OUT_OF_SCOPE match). Effectively OUT OF SCOPE.", requestURL.String())
 	return false
 }
@@ -404,7 +400,6 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 		Leaf:        caCert,
 	})
 
-	// Determine active target ID and load its scope rules
 	scopeMu.Lock()
 	if cliTargetID != 0 {
 		activeTargetID = &cliTargetID
@@ -426,12 +421,11 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 		} else {
 			logger.ProxyInfo("No current target ID set in database. Proxy will log traffic unassociated.")
 		}
-
 	}
 
 	if activeTargetID != nil && *activeTargetID != 0 {
 		var err error
-		allActiveScopeRules, err = database.GetAllScopeRulesForTarget(*activeTargetID) // Use new function
+		allActiveScopeRules, err = database.GetAllScopeRulesForTarget(*activeTargetID)
 		if err != nil {
 			logger.ProxyError("Failed to load all scope rules for target %d: %v. Logging for this target might be affected.", *activeTargetID, err)
 		} else {
@@ -440,27 +434,26 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 	}
 	scopeMu.Unlock()
 
-	// Load global exclusion rules
 	var errLoadExclusions error
 	globalExclusionRules, errLoadExclusions = database.GetProxyExclusionRules()
 	if errLoadExclusions != nil {
 		logger.ProxyError("Failed to load global proxy exclusion rules: %v. Proxy will not apply global exclusions.", errLoadExclusions)
-		globalExclusionRules = []models.ProxyExclusionRule{} // Ensure it's an empty slice
+		// Ensure it's an empty slice
+		globalExclusionRules = []models.ProxyExclusionRule{}
 	} else {
 		logger.ProxyInfo("Loaded %d global proxy exclusion rules.", len(globalExclusionRules))
 	}
 
-	// Parse the configured Synack URL once on startup
 	if config.AppConfig.Synack.TargetsURL != "" {
 		parsedSynackTargetURL, parseURLErr = url.Parse(config.AppConfig.Synack.TargetsURL)
 		if parseURLErr != nil {
 			logger.Error("Failed to parse configured Synack TargetsURL '%s': %v. Synack processing disabled.", config.AppConfig.Synack.TargetsURL, parseURLErr)
-			parsedSynackTargetURL = nil // Ensure it's nil on error
+			parsedSynackTargetURL = nil
 		} else {
 			logger.ProxyInfo("Parsed Synack Target URL for matching: Scheme=%s, Host=%s, Path=%s", parsedSynackTargetURL.Scheme, parsedSynackTargetURL.Host, parsedSynackTargetURL.Path)
 		}
 	} else {
-		parsedSynackTargetURL = nil // Ensure it's nil if not configured
+		parsedSynackTargetURL = nil
 	}
 
 	proxy := goproxy.NewProxyHttpServer()
@@ -478,16 +471,14 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 		func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 			startTime := time.Now()
 
-			// Check global exclusion rules first
 			for _, rule := range globalExclusionRules {
 				if matchesGlobalExclusionRule(r.URL, rule) {
 					logger.ProxyInfo("REQ: %s %s - GLOBALLY EXCLUDED by rule ID %s (Type: %s, Pattern: %s). Skipping.", r.Method, r.URL.String(), rule.ID, rule.RuleType, rule.Pattern)
-					return r, nil // Pass through without logging or further processing by our handlers
+					return r, nil
 				}
 			}
 
 			scopeMu.RLock()
-			// Determine if the current request URL matches the configured Synack target list URL
 			isSynackTargetListURL := false
 			if parsedSynackTargetURL != nil && r.URL != nil {
 				reqPathNorm := strings.TrimRight(r.URL.Path, "/")
@@ -499,23 +490,19 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				}
 			}
 
-			currentTargetIDForLog := activeTargetID     // Use the snapshot
-			currentAllScopeRules := allActiveScopeRules // Use the renamed variable
+			currentTargetIDForLog := activeTargetID
+			currentAllScopeRules := allActiveScopeRules
 			scopeMu.RUnlock()
 
-			// If there's an active target context, check scope
 			if currentTargetIDForLog != nil && *currentTargetIDForLog != 0 {
-				if !isRequestEffectivelyInScope(r.URL, currentAllScopeRules) { // Call updated function
+				if !isRequestEffectivelyInScope(r.URL, currentAllScopeRules) {
 					logger.ProxyDebug("REQ: %s %s (HTTPS: %t) - OUT OF SCOPE for active target %d.", r.Method, r.URL.String(), sessionIsHTTPS[ctx.Session], *currentTargetIDForLog)
-					// If it's the Synack target list URL, we still want to process it for token capture and list data,
-					// but we won't associate its http_traffic_log entry with the currently active (and mismatched) target.
 					if !isSynackTargetListURL {
-						return r, nil // Not Synack list and out of scope, so skip fully.
+						return r, nil
 					}
 					logger.ProxyDebug("Synack target list URL is out of scope for active target %d, but will be processed with no target association.", *currentTargetIDForLog)
-					currentTargetIDForLog = nil // It's the Synack list, but out of scope for current target; log with nil TargetID.
+					currentTargetIDForLog = nil
 				} else {
-					// In scope for the active target
 					logger.ProxyDebug("REQ: %s %s (HTTPS: %t) - IN SCOPE for active target %d.", r.Method, r.URL.String(), sessionIsHTTPS[ctx.Session], *currentTargetIDForLog)
 				}
 			} else if isSynackTargetListURL {
@@ -543,10 +530,10 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				isCurrentSessionHTTPS = true
 			}
 
-			// Determine the URL to log. Prioritize X-Toolkit-Full-URL if present for toolkit-initiated requests.
-			serverSeenURL := r.URL.String()               // This is what the server (and proxy by default) sees
-			var requestFullURLWithFragment sql.NullString // Will store the full URL if provided by toolkit
+			serverSeenURL := r.URL.String()
+			var requestFullURLWithFragment sql.NullString
 
+			// Ensure this is being set
 			if toolkitFullURL := r.Header.Get("X-Toolkit-Full-URL"); toolkitFullURL != "" && r.Header.Get("X-Toolkit-Initiated") == "true" {
 				requestFullURLWithFragment.String = toolkitFullURL
 				requestFullURLWithFragment.Valid = true
@@ -554,14 +541,14 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				logger.ProxyDebug("X-Toolkit-Full-URL found: %s. Server-seen URL: %s", toolkitFullURL, serverSeenURL)
 			}
 
-			logSource := "mitmproxy" // Default source
+			logSource := "mitmproxy"
 			var pageIDForLog sql.NullInt64
 
 			if r.Header.Get("X-Toolkit-Source") == "JS-Path-Sender" {
 				logSource = "JS Analysis"
 			}
 
-			scopeMu.RLock() // Protect read of activeRecordingPageID
+			scopeMu.RLock()
 			if activeRecordingPageID != nil {
 				logSource = "Page Sitemap"
 				pageIDForLog = sql.NullInt64{Int64: *activeRecordingPageID, Valid: true}
@@ -569,32 +556,30 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 			scopeMu.RUnlock()
 
 			requestData := &models.HTTPTrafficLog{
-				TargetID:                   currentTargetIDForLog, // Use the determined target ID
+				TargetID:                   currentTargetIDForLog,
 				Timestamp:                  startTime,
 				RequestMethod:              models.NullString(r.Method),
 				RequestURL:                 models.NullString(serverSeenURL),
-				RequestHTTPVersion:         models.NullString(r.Proto), // Corrected
+				RequestHTTPVersion:         models.NullString(r.Proto),
 				RequestHeaders:             models.NullString(string(reqHeadersJson)),
 				RequestBody:                reqBodyBytes,
 				ClientIP:                   models.NullString(r.RemoteAddr),
 				IsHTTPS:                    isCurrentSessionHTTPS,
-				RequestFullURLWithFragment: requestFullURLWithFragment, // Assign new field
+				RequestFullURLWithFragment: requestFullURLWithFragment,
 			}
 
 			requestData.LogSource = models.NullString(logSource)
 			requestData.PageSitemapID = pageIDForLog
-			// Wrap requestData and potentially auth token for Synack calls
 			ctxData := &proxyRequestContextData{TrafficLog: requestData}
 
-			// If this is the Synack target list request, try to capture its Authorization header
-			if isSynackTargetListURL { // Use the pre-calculated boolean
+			if isSynackTargetListURL {
 				authToken := r.Header.Get("Authorization")
 				if strings.HasPrefix(authToken, "Bearer ") {
 					ctxData.SynackAuthToken = authToken
 					logger.ProxyInfo("Captured Authorization token for Synack target list request.")
-				} else if authToken != "" { // The Authorization header was present but not a Bearer token
+				} else if authToken != "" {
 					logger.ProxyInfo("WARNING: Found Authorization header for Synack target list, but it's not a Bearer token.")
-				} // No "else" here, token might be absent.
+				}
 			}
 			ctx.UserData = ctxData
 
@@ -611,7 +596,7 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				logger.ProxyDebug("RESP: Skipping response processing for out-of-scope or non-TrafficLog request: %s %s", ctx.Req.Method, ctx.Req.URL.String())
 				return resp
 			}
-			requestData := pCtxData.TrafficLog // This is the *models.HTTPTrafficLog
+			requestData := pCtxData.TrafficLog
 
 			if resp == nil {
 				logger.ProxyError("RESP: Nil response for %s %s", ctx.Req.Method, ctx.Req.URL.String())
@@ -650,9 +635,8 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 
 			logHttpTraffic(requestData)
 
-			// MODIFIED Synack Target List Processing Check
 			isSynackTargetListResp := false
-			var reqPathNorm, configPathNorm string // For debug logging
+			var reqPathNorm, configPathNorm string
 
 			if parsedSynackTargetURL != nil && ctx.Req != nil && ctx.Req.URL != nil {
 				reqPathNorm = strings.TrimRight(ctx.Req.URL.Path, "/")
@@ -664,19 +648,14 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				}
 			}
 
-			if isSynackTargetListResp && // Use the boolean determined above
+			if isSynackTargetListResp &&
 				resp.StatusCode == http.StatusOK &&
 				requestData.ResponseContentType.Valid && strings.Contains(strings.ToLower(requestData.ResponseContentType.String), "application/json") {
 
-				authTokenForAnalytics := pCtxData.SynackAuthToken // Get the captured token
+				authTokenForAnalytics := pCtxData.SynackAuthToken
 				logger.ProxyInfo("Synack target list URL detected: %s. Using auth token: %t", ctx.Req.URL.String(), authTokenForAnalytics != "")
 				go processSynackTargetList(respBodyBytes, authTokenForAnalytics)
 			}
-			//	} else if parsedSynackTargetURL != nil && ctx.Req != nil && ctx.Req.URL != nil && !isSynackTargetListResp { // Log only if it wasn't a match but conditions were met
-			//logger.ProxyDebug("URL did not match Synack target list: ReqPathNorm=[%s], ConfigPathNorm=[%s], ReqFull=[%s], Status=%d, ContentType=%s",
-			//	reqPathNorm, configPathNorm, ctx.Req.URL.String(),
-			//	resp.StatusCode, requestData.ResponseContentType)
-			//}
 
 			logger.ProxyInfo("RESP: %d %s for %s %s (Size: %d, Duration: %s)", resp.StatusCode, requestData.ResponseContentType.String, ctx.Req.Method, ctx.Req.URL.String(), requestData.ResponseBodySize, duration)
 
@@ -691,58 +670,53 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 	return http.ListenAndServe(":"+port, proxy)
 }
 
-// logHttpTraffic function remains the same
 func logHttpTraffic(logEntry *models.HTTPTrafficLog) {
 	if database.DB == nil {
 		logger.ProxyError("logHttpTraffic: Database is not initialized.")
 		return
 	}
-	// Log the entry being saved, especially the new field
 	logger.Debug("logHttpTraffic: Attempting to save log entry. RequestURL: '%s', RequestFullURLWithFragment: {String: '%s', Valid: %t}",
 		logEntry.RequestURL.String, logEntry.RequestFullURLWithFragment.String, logEntry.RequestFullURLWithFragment.Valid)
 	_, err := database.DB.Exec(`INSERT INTO http_traffic_log (
 		target_id, timestamp, request_method, request_url, request_http_version, request_headers, request_body, request_full_url_with_fragment,
 		response_status_code, response_reason_phrase, response_http_version, response_headers, response_body, response_content_type,
 		response_body_size, duration_ms, client_ip, is_https, is_page_candidate, notes, log_source, page_sitemap_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // Added placeholders for new columns
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		logEntry.TargetID, logEntry.Timestamp, logEntry.RequestMethod, logEntry.RequestURL,
 		logEntry.RequestHTTPVersion, logEntry.RequestHeaders, logEntry.RequestBody,
-		logEntry.RequestFullURLWithFragment, // Added new field value
+		logEntry.RequestFullURLWithFragment,
 		logEntry.ResponseStatusCode, logEntry.ResponseReasonPhrase, logEntry.ResponseHTTPVersion,
 		logEntry.ResponseHeaders, logEntry.ResponseBody, logEntry.ResponseContentType,
 		logEntry.ResponseBodySize, logEntry.DurationMs, logEntry.ClientIP, logEntry.IsHTTPS,
 		logEntry.IsPageCandidate, logEntry.Notes,
-		logEntry.LogSource, logEntry.PageSitemapID) // Values for new columns
+		logEntry.LogSource, logEntry.PageSitemapID)
 	// Note: is_favorite defaults to FALSE in schema, not explicitly set here.
 	if err != nil {
 		logger.ProxyError("DB log error on response for %s %s: %v", logEntry.RequestMethod.String, logEntry.RequestURL.String, err)
 	}
 }
 
-// Example structure for an individual finding from a hypothetical Synack API
 type rawSynackFindingItem struct {
 	// Fields from "exploitable_locations"
-	Type       string `json:"type"`       // e.g., "url"
-	Value      string `json:"value"`      // This will be our VulnerabilityURL
+	Type       string `json:"type"` // e.g., "url"
+	Value      string `json:"value"`
 	CreatedAt  int64  `json:"created_at"` // Unix timestamp
 	Status     string `json:"status"`     // e.g., "fixed"
 	OutOfScope *bool  `json:"outOfScope"` // Pointer to handle null
 
 	// Fields that might not be present in exploitable_locations, but are in models.SynackFinding
-	// These will likely remain empty/zero unless mapped from elsewhere or if the actual structure is richer.
-	ID          string          `json:"id"`       // If Synack provides a unique finding ID here
-	Title       string          `json:"title"`    // If a title is provided
-	Category    string          `json:"category"` // If a category is provided
-	Severity    string          `json:"severity"` // If severity is provided
-	FullDetails json.RawMessage `json:"-"`        // To store the whole finding JSON, we'll marshal the item itself
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	Category    string          `json:"category"`
+	Severity    string          `json:"severity"`
+	FullDetails json.RawMessage `json:"-"` // To store the whole finding JSON
 }
 
-// processSynackTargetList function now accepts authToken
 func processSynackTargetList(jsonData []byte, authToken string) {
 	logger.ProxyInfo("Processing Synack target list JSON (%d bytes)...", len(jsonData))
 
 	var rawTargets []map[string]interface{}
-	httpClient := &http.Client{Timeout: 20 * time.Second} // Client for fetching analytics
+	httpClient := &http.Client{Timeout: 20 * time.Second}
 
 	if !config.AppConfig.Synack.AnalyticsEnabled {
 		logger.ProxyInfo("Synack target analytics fetching is disabled in config.")
@@ -805,11 +779,9 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 		dbID, errUpsert := database.UpsertSynackTarget(targetMap)
 		if errUpsert != nil {
 			logger.ProxyError("Synack target list: Error upserting target with Synack ID '%s': %v", synackID, errUpsert)
-			continue // Skip analytics/findings if target upsert failed
+			continue
 		}
 
-		// --- Analytics Category Processing (Current Logic - may need adjustment/removal) ---
-		// Successfully upserted (dbID is valid), now try to fetch analytics if enabled
 		if config.AppConfig.Synack.AnalyticsEnabled && config.AppConfig.Synack.AnalyticsBaseURL != "" && config.AppConfig.Synack.AnalyticsPathPattern != "" {
 			analyticsURL := fmt.Sprintf(config.AppConfig.Synack.AnalyticsBaseURL+config.AppConfig.Synack.AnalyticsPathPattern, synackID)
 			logger.ProxyInfo("Fetching analytics for Synack target '%s' from URL: %s", synackID, analyticsURL)
@@ -817,18 +789,15 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 			req, err := http.NewRequest("GET", analyticsURL, nil)
 			if err != nil {
 				logger.ProxyError("Synack Analytics: Error creating request for target '%s': %v", synackID, err)
-				// continue // Don't skip findings processing if analytics categories fail
 			}
 			if authToken != "" {
 				req.Header.Set("Authorization", authToken)
 				logger.ProxyDebug("Synack Analytics: Added Authorization header to request for target '%s'", synackID)
 			}
 
-			// Check if analytics already exist and are "fresh" (for now, just exist)
 			lastFetchTime, errCheck := database.GetSynackTargetAnalyticsFetchTime(dbID)
 			if errCheck != nil {
 				logger.ProxyError("Synack Analytics: Error checking existing analytics for target DB_ID %d (Synack ID %s): %v", dbID, synackID, errCheck)
-				// Decide if we should proceed. For now, let's try to fetch if checking failed.
 			}
 
 			// For now, if analytics exist at all (lastFetchTime is not nil), don't refetch.
@@ -837,27 +806,21 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 				logger.ProxyInfo("Synack Analytics: Analytics data already exists for target DB_ID %d (Synack ID %s), fetched at %s. Skipping fetch.", dbID, synackID, lastFetchTime.Format(time.RFC3339))
 			} else {
 				// Rate limit the API calls using the ticker.
-				// This will also space out the subsequent database operations for each target.
 				logger.ProxyDebug("Synack Analytics: Waiting for analyticsFetchTicker for target DB_ID %d (Synack ID %s)...", dbID, synackID)
 				<-analyticsFetchTicker.C
 				logger.ProxyInfo("Synack Analytics: No existing analytics found for target DB_ID %d (Synack ID %s) or fetch time is nil. Proceeding to fetch.", dbID, synackID)
 				resp, errDo := httpClient.Do(req)
 				if errDo != nil {
 					logger.ProxyError("Synack Analytics: Error fetching analytics for target DB_ID %d (Synack ID %s) from %s: %v", dbID, synackID, analyticsURL, errDo)
-					// continue
 				}
 				defer resp.Body.Close()
 
 				body, errRead := io.ReadAll(resp.Body)
 				if errRead != nil {
 					logger.ProxyError("Synack Analytics: Error reading analytics response body for target DB_ID %d (Synack ID %s) (status %d): %v", dbID, synackID, resp.StatusCode, errRead)
-					// continue
 				}
 				logger.ProxyInfo("Synack Analytics: Received status %d for target DB_ID %d (Synack ID %s). Response (first 500 chars): %s", resp.StatusCode, dbID, synackID, string(body[:min(len(body), 500)]))
 
-				// Attempt to extract the array of categories, assuming it's nested.
-				// Common key names are "categories", "data", "results". We'll try "categories".
-				// Based on new info, the key is "value"
 				analyticsArrayPath := "value"
 				categoriesResult := gjson.GetBytes(body, analyticsArrayPath)
 
@@ -866,10 +829,9 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 				} else if !categoriesResult.IsArray() {
 					logger.ProxyError("Synack Analytics: Value at key '%s' in analytics JSON is not an array (type: %s) for target DB_ID %d (Synack ID %s). Response (first 500 chars): %s", analyticsArrayPath, categoriesResult.Type.String(), dbID, synackID, string(body[:min(len(body), 500)]))
 				} else {
-					// Define an intermediate struct to match the JSON structure of items in the "value" array
 					var rawAnalyticsItems []struct {
 						Categories           []string        `json:"categories"`
-						ExploitableLocations json.RawMessage `json:"exploitable_locations"` // We need to count items here
+						ExploitableLocations json.RawMessage `json:"exploitable_locations"`
 						// Other fields like count, total_amount_paid, average_amount_paid from the old structure are not in the new example.
 						// If they exist in other responses, this struct might need to be more flexible or have more fields.
 					}
@@ -877,10 +839,9 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 					if errUnmarshal := json.Unmarshal([]byte(categoriesResult.Raw), &rawAnalyticsItems); errUnmarshal != nil {
 						logger.ProxyError("Synack Analytics: Error unmarshalling analytics items from key '%s' for target DB_ID %d (Synack ID %s): %v", analyticsArrayPath, dbID, synackID, errUnmarshal)
 					} else {
-						aggregatedCategories := make(map[string]int64) // Map to store aggregated counts
+						aggregatedCategories := make(map[string]int64)
 						for _, rawItem := range rawAnalyticsItems {
 
-							// Count items in exploitable_locations for this category group
 							var exploitableLocationsArray []interface{}
 							if rawItem.ExploitableLocations != nil {
 								if errParseEL := json.Unmarshal(rawItem.ExploitableLocations, &exploitableLocationsArray); errParseEL != nil {
@@ -893,9 +854,8 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 								for _, categoryName := range rawItem.Categories {
 									aggregatedCategories[categoryName] += findingCountInGroup
 								}
-							} // No "else" needed, if no categories, we just don't add anything for this rawItem.
+							}
 
-							// --- Individual Findings Processing for THIS rawItem ---
 							if config.AppConfig.Synack.FindingsEnabled {
 								logger.ProxyInfo("Synack Findings: Processing 'exploitable_locations' for target DB_ID %d, category group with categories: %v", dbID, rawItem.Categories)
 								if config.AppConfig.Synack.FindingsArrayPathInAnalyticsJson != "" {
@@ -903,16 +863,16 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 								}
 
 								if rawItem.ExploitableLocations != nil {
-									var exploitableLocationsList []rawSynackFindingItem // This struct should match the items in exploitable_locations
+									var exploitableLocationsList []rawSynackFindingItem
 
-									// Log the raw JSON of exploitable_locations before attempting to unmarshal
 									logger.ProxyDebug("Synack Findings: Raw exploitable_locations JSON for target DB_ID %d (first 500 chars): %s", dbID, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 500)]))
 
 									if errUnmarshalEL := json.Unmarshal(rawItem.ExploitableLocations, &exploitableLocationsList); errUnmarshalEL != nil {
 										logger.ProxyError("Synack Findings: Error unmarshalling exploitable_locations for category group (target DB_ID %d): %v. Raw JSON: %s", dbID, errUnmarshalEL, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 200)]))
 									} else {
-										logger.ProxyInfo("Synack Findings: Found %d exploitable_locations for this category group (target DB_ID %d).", len(exploitableLocationsList), dbID) // Corrected line
-										if len(exploitableLocationsList) == 0 && len(rawItem.ExploitableLocations) > 2 {                                                                    // >2 to avoid logging for empty array "[]"
+										logger.ProxyInfo("Synack Findings: Found %d exploitable_locations for this category group (target DB_ID %d).", len(exploitableLocationsList), dbID)
+										// >2 to avoid logging for empty array "[]"
+										if len(exploitableLocationsList) == 0 && len(rawItem.ExploitableLocations) > 2 {
 											logger.ProxyInfo("Warning: Synack Findings: Unmarshalled 0 exploitable_locations, but raw JSON was not empty for target DB_ID %d. Check rawSynackFindingItem struct against API response.", dbID)
 										}
 										primaryCategoryName := ""
@@ -925,16 +885,13 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 
 											findingToStore := models.SynackFinding{
 												SynackTargetDBID: dbID,
-												SynackFindingID:  exploitableLocation.Value,                               // Use URL as the finding ID
-												Title:            fmt.Sprintf("Finding at %s", exploitableLocation.Value), // Construct a title
+												SynackFindingID:  exploitableLocation.Value,
+												Title:            fmt.Sprintf("Finding at %s", exploitableLocation.Value),
 												CategoryName:     primaryCategoryName,
-												// Severity is not in the exploitable_locations example
 												Status:           exploitableLocation.Status,
 												VulnerabilityURL: exploitableLocation.Value,
-												// AmountPaid is not in the example
 											}
 
-											// Marshal the exploitableLocation itself to store as JSON details
 											rawExploitableLocationJsonBytes, errJson := json.Marshal(exploitableLocation)
 											if errJson == nil {
 												findingToStore.RawJSONDetails = string(rawExploitableLocationJsonBytes)
@@ -958,18 +915,15 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 											}
 										}
 									}
-								} else { // rawItem.ExploitableLocations was nil
+								} else {
 									logger.ProxyDebug("Synack Findings: No 'exploitable_locations' data for this category group (target DB_ID %d).", dbID)
 								}
 							} else {
 								logger.ProxyInfo("Synack Findings: Individual findings processing is DISABLED in config for target DB_ID %d.", dbID)
 							}
-							// --- End of Individual Findings Processing for this rawItem ---
-						} // End loop through rawAnalyticsItems
+						}
 
-						// Convert aggregated map to slice for storing
 						var finalAnalyticsCategories []models.SynackTargetAnalyticsCategory
-						// The following block was an erroneous comment and a leftover variable declaration.
 						for name, count := range aggregatedCategories {
 							finalAnalyticsCategories = append(finalAnalyticsCategories, models.SynackTargetAnalyticsCategory{CategoryName: name, Count: count})
 						}
@@ -979,11 +933,11 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 						} else {
 							logger.ProxyInfo("Synack Analytics: Successfully stored %d analytics categories for target DB_ID %d (Synack ID %s)", len(finalAnalyticsCategories), dbID, synackID)
 						}
-					} // End else for categoriesResult.IsArray()
-				} // End if resp.StatusCode == http.StatusOK
-			} // End else for lastFetchTime != nil (meaning, proceed to fetch)
+					}
+				}
+			}
 		}
-	} // End loop through rawTargets
+	}
 
 	if len(currentSeenIDs) > 0 {
 		if err := database.DeactivateMissingSynackTargets(currentSeenIDs, time.Now()); err != nil {
@@ -996,10 +950,6 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 	logger.ProxyInfo("Finished processing Synack target list. Saw %d targets.", len(currentSeenIDs))
 }
 
-// SendGETRequestsThroughProxy makes GET requests for the given URLs.
-// These requests will be routed through the running MITM proxy if this code
-// is part of the same application instance and the HTTP client is configured
-// to use the proxy.
 func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 	if len(urls) == 0 {
 		return nil
@@ -1017,12 +967,9 @@ func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyURL(proxyURL),
-			// Optionally, add TLSClientConfig if your proxy uses a custom CA
-			// or if you need to skip verification for self-signed certs on the target.
-			// This is complex as it depends on the target's cert, not the proxy's.
-			// For now, rely on default system trust store.
 		},
-		Timeout: 15 * time.Second, // Set a reasonable timeout
+		// Set a reasonable timeout
+		Timeout: 15 * time.Second,
 	}
 
 	logger.Info("Core: Attempting to send %d GET requests for target %d via proxy.", len(urls), targetID)
@@ -1032,14 +979,16 @@ func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 		req, err := http.NewRequest("GET", u, nil)
 		if err != nil {
 			logger.Error("Core: Error creating request for %s: %v", u, err)
-			continue // Skip this URL
+			// Skip this URL
+			continue
 		}
 
 		// Add custom headers to identify these requests and potentially
 		// prevent them from triggering further analysis loops in the proxy handler.
 		req.Header.Set("X-Toolkit-Initiated", "true")
 		req.Header.Set("X-Toolkit-Source", "JS-Path-Sender")
-		req.Header.Set("X-Toolkit-Full-URL", u) // Ensure this is being set
+		// Ensure this is being set
+		req.Header.Set("X-Toolkit-Full-URL", u)
 		req.Header.Set("User-Agent", "BHToolkit-Path-Tester/1.0")
 
 		// Note: We are NOT explicitly setting the TargetID here in the request headers.
@@ -1057,8 +1006,10 @@ func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 			continue
 		}
 		if resp != nil && resp.Body != nil {
-			io.Copy(io.Discard, resp.Body) // Read and discard body to reuse connection
-			resp.Body.Close()              // Ensure response body is closed
+			// Read and discard body to reuse connection
+			io.Copy(io.Discard, resp.Body)
+			// Ensure response body is closed
+			resp.Body.Close()
 		}
 		logger.Debug("Core: Request to %s completed with status: %s", u, resp.Status)
 		// The actual logging of this request/response happens in the main proxy handlers

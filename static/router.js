@@ -100,9 +100,9 @@ async function loadView(viewId, params = {}) {
             pageTitle = "Sitemap";
             breadcrumbSegments = [{ name: "Sitemap" }];
             break;
-        case 'discovered-urls':
-            pageTitle = "Discovered URLs";
-            breadcrumbSegments = [{ name: "Discovered URLs" }];
+        case 'domains': // Changed from discovered-urls
+            pageTitle = "Domains";
+            breadcrumbSegments = [{ name: "Domains" }];
             break;
         case 'visualizer':
             pageTitle = "Visualizer";
@@ -251,7 +251,30 @@ async function loadView(viewId, params = {}) {
             if (viewLoaders.loadSitemapView) viewLoaders.loadSitemapView();
             else console.error("loadSitemapView not found in viewLoaders");
             break;
-        case 'discovered-urls': if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Discovered URLs</h1><p>List of discovered URLs will be here.</p>`; break;
+        case 'domains':
+            // Ensure domainsView pagination state exists and is up-to-date
+            const currentDomainsState = appState.paginationState.domainsView || {};
+            newPaginationState.domainsView = {
+                ...currentDomainsState, // Spread existing or default
+                currentPage: params.page || 1,
+                sortBy: params.sort_by || currentDomainsState.sortBy || 'domain_name',
+                sortOrder: params.sort_order ? params.sort_order.toUpperCase() : (currentDomainsState.sortOrder || 'ASC'),
+                filterDomainName: params.domain_name_search || '',
+                filterSource: params.source_search || '',
+                filterIsInScope: params.is_in_scope !== undefined ? (params.is_in_scope === 'true') : null,
+                limit: params.limit ? parseInt(params.limit, 10) : (currentDomainsState.limit || 25)
+            };
+             if (!window.location.hash.includes('?')) { // Reset if no query params
+                 newPaginationState.domainsView.currentPage = 1;
+                 newPaginationState.domainsView.filterDomainName = '';
+                 newPaginationState.domainsView.filterSource = '';
+                 newPaginationState.domainsView.filterIsInScope = null;
+                 // Keep sortBy, sortOrder, limit as they might be user preferences not tied to specific filters
+            }
+            setState({ paginationState: newPaginationState });
+            if (viewLoaders.loadDomainsView) viewLoaders.loadDomainsView(); // It will use the updated state
+            else console.error("loadDomainsView not found in viewLoaders");
+            break;
         case 'checklist-templates':
             newPaginationState.checklistTemplateItems = {
                 ...newPaginationState.checklistTemplateItems,

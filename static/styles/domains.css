@@ -1,0 +1,172 @@
+/* static/styles/domains.css */
+
+/* General Styles for Domains View */
+.domains-view-container h1 { /* If you wrap domainsView content in a specific container */
+    margin-bottom: 20px;
+    color: #2c3e50;
+}
+
+/* Filter Controls */
+#domainsFilterControls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+}
+
+#domainsFilterControls input[type="search"],
+#domainsFilterControls select {
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+#domainsFilterControls input[type="search"] {
+    flex-grow: 1;
+}
+
+#domainsFilterControls select {
+    min-width: 150px;
+}
+
+#domainsFilterControls button {
+    padding: 8px 15px;
+}
+
+/* Table Actions Bar */
+#domainsTableActions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    gap: 10px; /* Add gap for wrapped items */
+}
+
+#domainsTableActions .dropdown .dropdown-toggle {
+    /* Styles for dropdown toggle buttons if needed, inherits from general button styles */
+}
+
+/* Domains Table Specifics */
+#domainsTableContainer table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed; /* Important for resizable columns */
+}
+
+#domainsTableContainer th,
+#domainsTableContainer td {
+    padding: 10px;
+    border: 1px solid #e0e0e0;
+    text-align: left;
+    font-size: 0.9em;
+    word-break: break-word; /* Prevent long strings from breaking layout */
+}
+
+#domainsTableContainer th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+    position: relative; /* For resizer */
+}
+
+#domainsTableContainer th.sortable:hover {
+    background-color: #e8e8e8;
+    cursor: pointer;
+}
+
+#domainsTableContainer .sort-arrow {
+    font-size: 0.8em;
+    margin-left: 5px;
+}
+
+#domainsTableContainer tbody tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+#domainsTableContainer tbody tr:hover {
+    background-color: #f1f1f1;
+}
+
+/* Checkbox column styling */
+#domainsTableContainer th input[type="checkbox"],
+#domainsTableContainer td input[type="checkbox"].domain-item-checkbox {
+    cursor: pointer;
+    margin: 0 auto; /* Center checkbox in cell if cell is text-aligned center */
+    display: block; /* For centering with margin auto */
+}
+
+/* Action buttons in table cells */
+#domainsTableContainer .action-button {
+    margin-right: 5px;
+    padding: 3px 6px;
+    font-size: 0.9em;
+}
+
+/* Message Areas */
+#discoverSubdomainsMessage {
+    /* General message area styles are in style.css, add specific overrides if needed */
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+}
+
+/* Pagination Controls for Domains View */
+#domainsPaginationControls {
+    /* Inherits from .pagination-controls in style.css */
+    /* Add specific overrides if needed */
+    margin-top: 20px;
+}
+
+/* Ensure dropdown menus from style.css work well within this context */
+/* No new styles needed if the generic .dropdown and .dropdown-menu from style.css are sufficient */
+
+/* Style for the column resizer div (from tableService.js) */
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px; /* Adjust to be on the border */
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10; /* Ensure it's above other cell content */
+}
+
+/* Dropdown specific styles - ensure these are applied */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  display: none; /* Hide by default */
+  position: absolute;
+  background-color: #f9f9f9;
+  min-width: 200px; /* Adjusted min-width for potentially longer items */
+  box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+  z-index: 1001; /* Ensure it's above table content and other elements */
+  border-radius: 4px;
+  border: 1px solid #ddd; /* Added a light border */
+  padding: 5px 0; /* Add some padding for the items */
+}
+
+.dropdown-menu.show {
+  display: block; /* Show when .show class is added */
+}
+
+.dropdown-menu a {
+  color: #333; /* Darker link color for better readability */
+  padding: 8px 15px; /* Adjusted padding */
+  text-decoration: none;
+  display: block;
+  font-size: 0.9em;
+  white-space: nowrap; /* Prevent link text from wrapping */
+}
+
+.dropdown-menu a:hover {
+  background-color: #e9ecef; /* Softer hover background */
+}

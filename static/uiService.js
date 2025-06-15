@@ -147,3 +147,49 @@ export function initUIService(elements) {
         });
     }
 }
+
+/**
+ * Creates a button element with specified text, click handler, and options.
+ * @param {string} text - The text content of the button.
+ * @param {function} onClick - The function to call when the button is clicked.
+ * @param {Object} options - Optional parameters for the button.
+ *                           Expected: { id, classNames (array), disabled (boolean), title, marginRight, marginLeft }
+ * @returns {HTMLButtonElement} The created button element.
+ */
+export function createButton(text, onClick, options = {}) { // Already exported, but good to confirm
+    const button = document.createElement('button');
+    button.innerHTML = text; // Use innerHTML to allow for HTML entities like &laquo;
+    if (options.id) button.id = options.id;
+    if (options.classNames && Array.isArray(options.classNames)) {
+        button.classList.add(...options.classNames);
+    } else {
+        button.classList.add('secondary'); // Default class if not specified
+    }
+    if (options.disabled) button.disabled = true;
+    if (options.title) button.title = options.title;
+    if (options.marginRight) button.style.marginRight = options.marginRight;
+    if (options.marginLeft) button.style.marginLeft = options.marginLeft;
+
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+/**
+ * Creates a select element with specified options.
+ * @param {Array<Object>} optionsArray - Array of objects { value, text } for select options.
+ * @param {string|number} selectedValue - The value that should be pre-selected.
+ * @param {function} onChange - The function to call when the select value changes.
+ * @param {Object} options - Optional parameters for the select element.
+ *                           Expected: { id, classNames (array), marginLeft }
+ * @returns {HTMLSelectElement} The created select element.
+ */
+export function createSelect(optionsArray, selectedValue, onChange, options = {}) { // Already exported, but good to confirm
+    const select = document.createElement('select');
+    if (options.id) select.id = options.id;
+    if (options.classNames && Array.isArray(options.classNames)) select.classList.add(...options.classNames);
+    if (options.marginLeft) select.style.marginLeft = options.marginLeft;
+
+    optionsArray.forEach(opt => select.add(new Option(opt.text, opt.value, false, String(opt.value) === String(selectedValue))));
+    select.addEventListener('change', onChange);
+    return select;
+}

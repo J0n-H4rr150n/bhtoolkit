@@ -27,7 +27,9 @@ func NewRouter() http.Handler {
 	handlers.RegisterNoteRoutes(router)
 	handlers.RegisterModifierRoutes(router)
 	handlers.RegisterProxySendRoutes(router) // New line to register proxy send handler
+	handlers.RegisterDomainRoutes(router)    // Add domain routes
 	handlers.RegisterVersionRoutes(router)   // Add version routes
+	handlers.RegisterSubfinderRoutes(router) // Add subfinder routes
 
 	// Placeholder/Not Implemented Yet routes
 	handlers.RegisterRelationshipRoutes(router)

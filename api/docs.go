@@ -1,7 +1,7 @@
 package api
 
 // @title Toolkit API
-// @version v1.0.0
+// @version v1.1.0
 // @description API for the Bug Bounty Toolkit application.
 // @termsOfService http://example.com/terms/
 
@@ -15,4 +15,8 @@ package api
 // @host localhost:8778
 // @BasePath /api
 // @schemes http
+// @tags.name Subfinder
+// @tags.name Domains
+// @tags.description Operations related to domains
+// @tags.description Operations related to Subfinder integration
 // @query.collection.format multi

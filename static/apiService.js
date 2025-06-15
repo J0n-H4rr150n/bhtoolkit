@@ -943,3 +943,149 @@ export async function getVersion() {
     const response = await fetch(`${API_BASE}/version`);
     return handleResponse(response);
 }
+
+/**
+ * Fetches domains for a specific target with pagination, sorting, and filtering.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {Object} params - Query parameters (page, limit, sort_by, sort_order, domain_name_search, source_search, is_in_scope).
+ * @returns {Promise<Object>} - API response containing domains and pagination info.
+ */
+export async function getDomains(targetId, params = {}) {
+    if (!targetId) {
+        return Promise.reject(new Error("Target ID is required to fetch domains."));
+    }
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${API_BASE}/targets/${targetId}/domains?${query}`);
+    return handleResponse(response);
+}
+
+/**
+ * Creates a new domain.
+ * @param {Object} domainData - Data for the new domain.
+ *                              Expected: { target_id, domain_name, source (optional), is_in_scope (optional), notes (optional) }
+ * @returns {Promise<Object>} - API response containing the created domain.
+ */
+export async function createDomain(domainData) {
+    if (!domainData || !domainData.target_id || !domainData.domain_name) {
+        return Promise.reject(new Error("Target ID and Domain Name are required to create a domain."));
+    }
+    const response = await fetch(`${API_BASE}/domains`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(domainData)
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes a domain.
+ * @param {number|string} domainId - The ID of the domain to delete.
+ * @returns {Promise<Object>} - API response (usually empty on success).
+ */
+export async function deleteDomain(domainId) {
+    const response = await fetch(`${API_BASE}/domains/${domainId}`, {
+        method: 'DELETE'
+    });
+    return handleResponse(response); // Expects 204 No Content on success
+}
+
+/**
+ * Updates an existing domain.
+ * @param {number|string} domainId - The ID of the domain to update.
+ * @param {Object} domainData - Data to update for the domain.
+ *                              Expected: { source (optional), is_in_scope (optional), notes (optional) }
+ * @returns {Promise<Object>} - API response containing the updated domain.
+ */
+export async function updateDomain(domainId, domainData) {
+    const response = await fetch(`${API_BASE}/domains/${domainId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(domainData)
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Initiates subdomain discovery for a target.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {Object} discoveryOptions - Options for the discovery process.
+ *                                    Expected: { domain, recursive (optional), sources (optional) }
+ * @returns {Promise<Object>} - API response indicating initiation.
+ */
+export async function discoverSubdomains(targetId, discoveryOptions) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/domains/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(discoveryOptions)
+    });
+    return handleResponse(response); // Expects 202 Accepted on success
+}
+
+/**
+ * Fetches the current status of subfinder tasks for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - API response containing subfinder status.
+ */
+export async function getSubfinderStatus(targetId) {
+    if (!targetId) {
+        return Promise.reject(new Error("Target ID is required to fetch subfinder status."));
+    }
+    const response = await fetch(`${API_BASE}/subfinder/status?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
+/**
+ * Imports in-scope domains for a target from its scope rules.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - API response containing import summary (e.g., imported_count, skipped_count).
+ */
+export async function importInScopeDomains(targetId) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/domains/import-scope`, {
+        method: 'POST', // Using POST as it creates/updates domain entries
+        headers: { 'Content-Type': 'application/json' },
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes all domains for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - API response (e.g., { deleted_count: X }).
+ */
+export async function deleteAllDomainsForTarget(targetId) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/domains/all`, { // New endpoint
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Expects 200 OK with a count or 204 No Content
+}
+
+/**
+ * Sets the favorite status for a domain.
+ * @param {number|string} domainId - The ID of the domain.
+ * @param {boolean} isFavorite - True to mark as favorite, false otherwise.
+ * @returns {Promise<Object>} - API response.
+ */
+export async function setDomainFavorite(domainId, isFavorite) {
+    const response = await fetch(`${API_BASE}/domains/${domainId}/favorite`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_favorite: isFavorite })
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Marks all domains matching the given filters as favorite for a target.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {Object} filters - An object containing filter criteria.
+ *                           Expected: { domain_name_search, source_search, is_in_scope }
+ * @returns {Promise<Object>} - API response, e.g., { updated_count: X }.
+ */
+export async function favoriteAllFilteredDomains(targetId, filters) {
+    const response = await fetch(`${API_BASE}/targets/${targetId}/domains/favorite-filtered`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filters)
+    });
+    return handleResponse(response);
+}

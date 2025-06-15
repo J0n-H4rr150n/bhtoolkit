@@ -83,6 +83,30 @@ let state = {
             sortBy: 'timestamp', // Default sort column
             sortOrder: 'DESC'    // Default sort order
         },
+        domainsView: { // New state for Domains view
+            currentPage: 1,
+            limit: 25,
+            sortBy: 'domain_name',
+            sortOrder: 'ASC',
+            filterDomainName: '',
+            filterSource: '',
+            filterIsFavorite: false, // New filter state
+            filterIsInScope: null, // null means 'all' (no filter), true for 'In Scope', false for 'Out of Scope'
+            totalPages: 0,
+            totalRecords: 0,
+        },
+        domainsTableLayout: { // New layout for Domains table
+            checkbox: { default: '3%', id: 'col-domain-checkbox', visible: true, label: '<input type="checkbox" id="selectAllDomainsCheckbox" title="Select/Deselect All Visible">', sortKey: null, nonResizable: true, nonHideable: true, isHtmlLabel: true },
+            id: { default: '4%', id: 'col-domain-row-number', visible: true, label: '#', sortKey: 'id' }, // Restore sortKey to 'id'
+            is_favorite: { default: '4%', id: 'col-domain-favorite', visible: false, label: '★', sortKey: 'is_favorite', nonResizable: true }, // Hidden, will be part of actions
+            domain_name: { default: '30%', id: 'col-domain-name', visible: true, label: 'Domain Name', sortKey: 'domain_name' },
+            source: { default: '15%', id: 'col-domain-source', visible: true, label: 'Source', sortKey: 'source' },
+            is_in_scope: { default: '8%', id: 'col-domain-inscope', visible: true, label: 'In Scope?', sortKey: 'is_in_scope' },
+            is_wildcard_scope: { default: '8%', id: 'col-domain-wildcard', visible: false, label: 'Wildcard?', sortKey: 'is_wildcard_scope'}, // Hidden
+            notes: { default: 'auto', id: 'col-domain-notes', visible: true, label: 'Notes', sortKey: 'notes' }, // 'auto' will take remaining space
+            created_at: { default: '10%', id: 'col-domain-created', visible: true, label: 'Created At', sortKey: 'created_at' },
+            actions: { default: '120px', id: 'col-domain-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true }
+        }, // Note: The actual database ID is still available in the `domain.id` object property for actions.
         commentAnalysisTableLayout: { // New layout for the comments table
             lineNumber: { default: '80px', id: 'col-comment-linenum', visible: true, label: 'Line#', sortKey: 'lineNumber' },
             commentType: { default: '150px', id: 'col-comment-type', visible: true, label: 'Type', sortKey: 'commentType' }, // Specific px width

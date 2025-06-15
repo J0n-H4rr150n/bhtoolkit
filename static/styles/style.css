@@ -353,10 +353,12 @@ button.danger:hover {
 }
 
 .message-area {
+    position: relative; /* Allows absolute positioning for child elements like a close button */
     margin-top: 10px;
     font-size: 0.9em;
-    padding: 8px;
+    padding: 10px; /* Consistent padding */
     border-radius: 4px;
+    padding-right: 40px; /* Extra space on the right for a close button */
 }
 
 /* Styles for Target Checklist Table in checklistView.js */

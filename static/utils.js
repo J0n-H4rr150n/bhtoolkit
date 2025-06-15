@@ -78,3 +78,25 @@ export function downloadCSV(csvString, filename) {
         console.error("CSV download is not supported by your browser.");
     }
 }
+
+/**
+ * Triggers a browser download for the given TXT string.
+ * @param {string} txtString The TXT content as a string.
+ * @param {string} filename The desired filename for the downloaded file.
+ */
+export function downloadTXT(txtString, filename) {
+    const blob = new Blob([txtString], { type: 'text/plain;charset=utf-8;' });
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    } else {
+        console.error("TXT download is not supported by your browser.");
+    }
+}
