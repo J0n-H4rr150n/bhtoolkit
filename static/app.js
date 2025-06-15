@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const modalCancelBtnElem = document.getElementById('modalCancelBtn');
     const modalOkBtnElem = document.getElementById('modalOkBtn');
     const breadcrumbContainerElem = document.getElementById('breadcrumbContainer');
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
 
     const API_BASE_URL_CONST = '/api';
 
@@ -60,6 +61,36 @@ document.addEventListener('DOMContentLoaded', async function() {
                 toggleButtonText.textContent = "Expand Menu";
              }
         }
+    }
+
+    // Theme Toggling Logic
+    const THEME_KEY = 'bhtoolkit-theme';
+    const DARK_MODE_CLASS = 'dark-mode';
+    const SUN_ICON = '☀️';
+    const MOON_ICON = '🌙';
+
+    function applyTheme(theme) {
+        if (theme === 'dark') {
+            document.body.classList.add(DARK_MODE_CLASS);
+            if (themeToggleBtn) themeToggleBtn.innerHTML = SUN_ICON;
+        } else {
+            document.body.classList.remove(DARK_MODE_CLASS);
+            if (themeToggleBtn) themeToggleBtn.innerHTML = MOON_ICON;
+        }
+        localStorage.setItem(THEME_KEY, theme);
+    }
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+            const currentTheme = localStorage.getItem(THEME_KEY) || 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        });
+    }
+    // Apply saved theme on initial load
+    const savedTheme = localStorage.getItem(THEME_KEY);
+    if (savedTheme) {
+        applyTheme(savedTheme);
     }
 
     const stateServiceAPI = {
@@ -237,7 +268,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         <h3>Scope Rules</h3>
                         <div id="addScopeRuleMessage" class="message-area" style="margin-bottom: 15px;"></div>
                         <div class="scope-forms-container" style="display: flex; gap: 20px; margin-bottom:20px;">
-                            <form id="addInScopeRuleForm" class="scope-rule-form" data-in-scope="true" style="flex:1; padding:15px; border:1px solid #ddd; border-radius:4px; background-color:#f9f9f9;">
+                            <form id="addInScopeRuleForm" class="scope-rule-form" data-in-scope="true" style="flex:1; padding:15px; border:1px solid #ddd; border-radius:4px;">
                                 <h4>Add In-Scope Item</h4>
                                 <input type="hidden" name="target_id" value="${target.id}">
                                 <div class="form-group"><label for="inScopePattern">Pattern:</label><input type="text" id="inScopePattern" name="pattern" placeholder="e.g., *.example.com" required></div>
@@ -247,7 +278,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 <div class="form-group"><label for="inScopeDescription">Description:</label><input type="text" id="inScopeDescription" name="description" placeholder="Optional description"></div>
                                 <button type="submit" class="primary">Add In-Scope</button>
                             </form>
-                            <form id="addOutOfScopeRuleForm" class="scope-rule-form" data-in-scope="false" style="flex:1; padding:15px; border:1px solid #ddd; border-radius:4px; background-color:#f9f9f9;">
+                            <form id="addOutOfScopeRuleForm" class="scope-rule-form" data-in-scope="false" style="flex:1; padding:15px; border:1px solid #ddd; border-radius:4px;">
                                 <h4>Add Out-of-Scope Item</h4>
                                 <input type="hidden" name="target_id" value="${target.id}">
                                 <div class="form-group"><label for="outOfScopePattern">Pattern:</label><input type="text" id="outOfScopePattern" name="pattern" placeholder="e.g., cdn.example.com" required></div>

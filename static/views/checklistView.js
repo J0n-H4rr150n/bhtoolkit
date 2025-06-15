@@ -458,7 +458,7 @@ function renderChecklistTable(containerElement, items, targetId, paginationData)
     // The main button container div
     let buttonsHtml = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <input type="search" id="checklistSearchInput" placeholder="Filter checklist items..." value="${escapeHtmlAttribute(filterQuery)}" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; flex-grow: 1; margin-right: 10px;">
+            <input type="search" id="checklistSearchInput" placeholder="Filter checklist items..." value="${escapeHtmlAttribute(filterQuery)}" style="padding: 8px; border-radius: 4px; flex-grow: 1; margin-right: 10px;">
             <label for="showIncompleteToggle" style="white-space: nowrap;"><input type="checkbox" id="showIncompleteToggle" ${showIncompleteOnly ? 'checked' : ''}> Show Incomplete Only</label>
         </div>
         <div id="checklistActionsContainer" style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -472,8 +472,8 @@ function renderChecklistTable(containerElement, items, targetId, paginationData)
 
 
     let html = `
-        <div id="checklistSummaryDisplay" class="checklist-summary" style="margin-bottom: 10px; padding: 8px; background-color: #e9ecef; border-radius: 4px; font-size: 0.9em;">
-            ${summaryContent}
+        <div id="checklistSummaryDisplay" class="checklist-summary" style="margin-bottom: 10px; padding: 8px; border-radius: 4px; font-size: 0.9em;">
+            ${summaryContent} 
         </div>
         ${buttonsHtml} 
     `;

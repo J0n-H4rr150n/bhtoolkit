@@ -120,6 +120,15 @@
     /* For example, if the sidebar had a margin, you might remove it here */
 }
 
+/* Dark Mode for Modifier Main Content */
+body.dark-mode .modifier-main-content {
+    background-color: #28313b; /* Consistent dark background */
+    color: #ecf0f1;           /* Ensure text is light */
+}
+
+body.dark-mode .modifier-main-content a {
+    color: #87ceeb; /* Lighter blue for links in dark mode */
+}
 .modifier-resizer {
     width: 5px;
     background-color: #7f8c8d; /* Neutral resizer color */
@@ -193,16 +202,22 @@
     border-bottom: 2px solid #ccc; /* Similar to other tabs in the app */
     margin-bottom: 15px;
 }
+body.dark-mode .modifier-tabs {
+    border-bottom-color: #4a6178; /* Darker border for tabs container */
+}
 
 .modifier-tab-button {
     padding: 10px 15px;
     cursor: pointer;
     border: none;
     background-color: transparent;
-    font-size: 1em;
-    color: #555;
+    font-size: 1em; 
+    color: #555; /* Default for light mode */
     border-bottom: 2px solid transparent;
     margin-bottom: -2px; /* Align with the container's border */
+}
+body.dark-mode .modifier-tab-button {
+    color: #bdc3c7; /* Lighter gray for inactive tabs in dark mode */
 }
 
 .modifier-tab-button.active {
@@ -211,6 +226,10 @@
     font-weight: bold;
 }
 
+body.dark-mode .modifier-tab-button.active {
+    color: #5dade2; /* Accent color for active tab in dark mode */
+    border-bottom-color: #5dade2;
+}
 .modifier-tab-content {
     display: none; /* Hide inactive tabs */
 }

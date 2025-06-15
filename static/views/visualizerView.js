@@ -69,7 +69,7 @@ export async function loadVisualizerView(mainViewContainer) {
             </div>
             <div id="sitemapGraphContainer" class="graph-container" style="display: none; position: relative;">
                 <div id="sitemapCy" style="width: 100%; height: 600px; border: 1px solid #ccc;"></div>
-                <div id="sitemapTooltip" class="graph-tooltip" style="display:none; position:absolute; background-color: #f9f9f9; border: 1px solid #ccc; padding: 10px; border-radius: 5px; box-shadow: 2px 2px 5px rgba(0,0,0,0.2); z-index: 1000;"></div>
+                <div id="sitemapTooltip" class="graph-tooltip" style="display:none; position:absolute; z-index: 1000;"></div>
             </div>
         </div>
 
@@ -79,7 +79,7 @@ export async function loadVisualizerView(mainViewContainer) {
             </div>
             <div id="pageSitemapGraphContainer" class="graph-container" style="display: none; position: relative;">
                 <div id="pageSitemapCy" style="width: 100%; height: 600px; border: 1px solid #ccc;"></div>
-                <div id="pageSitemapTooltip" class="graph-tooltip" style="display:none; position:absolute; background-color: #f9f9f9; border: 1px solid #ccc; padding: 10px; border-radius: 4px; box-shadow: 2px 2px 5px rgba(0,0,0,0.2); z-index: 1000;"></div>
+                <div id="pageSitemapTooltip" class="graph-tooltip" style="display:none; position:absolute; z-index: 1000;"></div>
             </div>
         </div>
     `;

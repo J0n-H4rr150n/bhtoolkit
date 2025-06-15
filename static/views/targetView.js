@@ -377,7 +377,7 @@ export async function loadTargetsView(viewContentContainer, platformIdFilter = n
     if (platformIdFilter) {
         // Only show the add form when viewing targets for a specific platform
         addTargetFormHTML = `
-            <form id="addTargetForm" class="inline-form" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
+            <form id="addTargetForm" class="inline-form" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">
                 <h4>Add New Target to ${escapeHtml(platformName)}</h4>
                 <div class="form-group">
                     <input type="text" id="targetCodename" name="codename" placeholder="Codename (e.g., example-web)" required>

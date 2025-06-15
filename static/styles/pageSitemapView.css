@@ -61,3 +61,32 @@
     /* Add specific overrides here if needed */
     margin-top: 0; /* Override default table margin-top if any */
 }
+
+/* Dark Mode Styles for Page Sitemap View */
+body.dark-mode #recordedPagesListContainer {
+    border-right-color: #4a6178; /* Darker border */
+}
+
+body.dark-mode #recordedPagesListContainer h2,
+body.dark-mode #pageLogsContainer h2 {
+    color: #ecf0f1; /* Light text for headings */
+}
+
+body.dark-mode .page-sitemap-item {
+    background-color: #2c3e50; /* Dark background for inactive items */
+    color: #ecf0f1;           /* Light text for inactive items */
+    border-color: #4a6178;     /* Darker border */
+}
+
+body.dark-mode .page-sitemap-item:hover {
+    background-color: #34495e; /* Slightly lighter dark on hover */
+}
+
+body.dark-mode .page-sitemap-item.active {
+    background-color: #5dade2; /* Accent color for active item */
+    color: #1e272e;           /* Dark text for contrast on active item */
+    border-color: #4a90e2;     /* Slightly brighter border for active */
+}
+body.dark-mode .page-sitemap-item.active small {
+    color: #2c3e50; /* Darker small text on active item */
+}

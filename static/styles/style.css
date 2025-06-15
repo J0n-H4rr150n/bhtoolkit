@@ -352,6 +352,28 @@ button.danger:hover {
     background-color: #c0392b;
 }
 
+/* General .button style if not primary, secondary, or danger */
+.button {
+    background-color: #bdc3c7; /* A neutral light gray, similar to secondary but distinct */
+    color: #2c3e50; /* Dark text */
+    padding: 10px 15px; /* Consistent padding */
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em; /* Consistent font size */
+    transition: background-color 0.2s ease;
+}
+
+.button:hover {
+    background-color: #95a5a6; /* Darker gray on hover */
+}
+
+.button:disabled {
+    background-color: #ecf0f1; /* Lighter gray for disabled */
+    color: #bdc3c7; /* Dimmer text for disabled */
+    cursor: not-allowed;
+}
+
 .message-area {
     position: relative; /* Allows absolute positioning for child elements like a close button */
     margin-top: 10px;
@@ -546,6 +568,7 @@ table[style*="table-layout: fixed;"] td {
 .inline-form {
     display: flex;
     gap: 10px;
+    /* Default light mode background, if not already set by another rule */
     align-items: center;
     margin-bottom: 20px;
     padding: 10px;
@@ -623,6 +646,570 @@ td.proxy-log-actions-column {
     color: #555;
 }
 
+/* --- Dark Mode Styles --- */
+body.dark-mode {
+    background-color: #1e272e; /* Dark background for body */
+    color: #ecf0f1; /* Light text for body */
+}
+
+body.dark-mode .top-nav {
+    background-color: #12181f; /* Darker top nav */
+    color: #ecf0f1;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+body.dark-mode .top-nav .logo {
+    color: #ecf0f1;
+}
+
+body.dark-mode .top-nav .nav-item a,
+body.dark-mode .top-nav .nav-item button {
+    color: #ecf0f1;
+}
+
+body.dark-mode .top-nav .nav-item a:hover,
+body.dark-mode .top-nav .nav-item button:hover {
+    background-color: #2c3e50; /* Slightly lighter hover for dark mode */
+}
+
+body.dark-mode .top-nav .search-box input[type="search"] {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    border: 1px solid #4a6178;
+}
+
+body.dark-mode .top-nav .search-box input[type="search"]::placeholder {
+    color: #bdc3c7;
+}
+
+body.dark-mode .left-sidebar {
+    background-color: #2c3e50; /* Darker sidebar */
+    color: #ecf0f1;
+    scrollbar-color: #4a6178 #2c3e50; /* Dark scrollbar */
+}
+
+body.dark-mode .left-sidebar::-webkit-scrollbar-track {
+    background: #2c3e50;
+}
+
+body.dark-mode .left-sidebar::-webkit-scrollbar-thumb {
+    background-color: #4a6178;
+    border-color: #2c3e50;
+}
+
+body.dark-mode .sidebar-toggle {
+    background-color: #1e272e; /* Even darker for toggle base */
+    color: #ecf0f1;
+}
+
+body.dark-mode .sidebar-toggle:hover {
+    background-color: #34495e;
+}
+
+body.dark-mode .sidebar-category-title {
+    color: #95a5a6; /* Lighter gray for category titles */
+}
+
+body.dark-mode .sidebar-item {
+    color: #bdc3c7; /* Slightly dimmer default item color */
+}
+
+body.dark-mode .sidebar-item:hover,
+body.dark-mode .sidebar-item.active {
+    background-color: #34495e; /* Hover/active color */
+}
+
+body.dark-mode .main-content {
+    background-color: #28313b; /* Main content area dark background */
+    scrollbar-color: #4a6178 #28313b;
+}
+
+body.dark-mode .main-content::-webkit-scrollbar-track {
+    background: #28313b;
+}
+
+body.dark-mode .main-content::-webkit-scrollbar-thumb {
+    background-color: #4a6178;
+    border-color: #28313b;
+}
+
+body.dark-mode .main-content h1 {
+    color: #ecf0f1;
+}
+
+body.dark-mode .main-content h2 {
+    color: #bdc3c7;
+    border-bottom-color: #34495e;
+}
+
+body.dark-mode .main-content p {
+    color: #ecf0f1; /* Brighter default paragraph text */
+}
+body.dark-mode .main-content strong { /* Covers <strong>Link:</strong> etc. */
+    color: #ecf0f1; /* Ensure strong is also bright */
+}
+
+body.dark-mode .target-detail-item { /* For spans like ID: 123 */
+    color: #ecf0f1;
+}
+
+body.dark-mode table {
+    /* Table itself might not need background, rows will cover */
+}
+
+body.dark-mode th,
+body.dark-mode td {
+    border-bottom-color: #34495e; /* Darker border */
+}
+
+body.dark-mode th {
+    background-color: #34495e; /* Darker header background */
+    color: #ecf0f1;
+}
+
+body.dark-mode tr:nth-child(even) {
+    background-color: #2c3a47; /* Slightly different dark for even rows */
+}
+
+body.dark-mode tr:hover {
+    background-color: #3e5062; /* Dark hover for rows */
+}
+
+body.dark-mode .form-group label {
+    color: #bdc3c7;
+}
+
+body.dark-mode .form-group input[type="text"],
+body.dark-mode .form-group input[type="url"],
+body.dark-mode .form-group input[type="search"], /* Added search input */
+body.dark-mode .form-group input[type="number"], /* Added number input */
+body.dark-mode .form-group textarea,
+body.dark-mode .form-group select { /* Added select */
+    background-color: #1e272e;
+    color: #ecf0f1;
+    border: 1px solid #4a6178;
+}
+
+body.dark-mode .message-area {
+    color: #ecf0f1; /* Default text for message area */
+}
+
+body.dark-mode .error-message {
+    color: #ffdddd; background-color: #c0392b; border-color: #a03020;
+}
+body.dark-mode .success-message {
+    color: #ddffdd; background-color: #27ae60; border-color: #1f8b4c;
+}
+body.dark-mode .info-message { /* Add if you have an info-message class */
+    color: #ecf0f1; background-color: #3498db; border-color: #2980b9; /* Changed text color */
+}
+
+body.dark-mode .modal-box {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+}
+body.dark-mode .modal-box h2 { color: #ecf0f1; }
+body.dark-mode .modal-box p { color: #bdc3c7; }
+/* Ensure links within the modal box are light in dark mode */
+body.dark-mode .modal-box a {
+    color: #87ceeb; /* Lighter blue for links */
+}
+
+body.dark-mode .breadcrumb-container { border-bottom-color: #4a6178; color: #bdc3c7; }
+body.dark-mode .breadcrumb-container a { color: #5dade2; }
+body.dark-mode .breadcrumb-container span.separator { color: #7f8c8d; }
+body.dark-mode .breadcrumb-container span.current-page { color: #ecf0f1; }
+
+body.dark-mode .tabs { border-bottom-color: #4a6178; }
+body.dark-mode .tab-button { /* Styles for inactive tabs by default */
+    background-color: #7f8c8d; /* Light-ish gray background for inactive tabs */
+    color: #1e272e;           /* Dark text (like black) for inactive tabs */
+    border-bottom: 2px solid transparent; /* Ensure it has a transparent bottom border */
+}
+body.dark-mode .tab-button:hover {
+    background-color: #4a6178; /* Darker background on hover for inactive tabs */
+    color: #ecf0f1;           /* White/light font on hover */
+}
+body.dark-mode .tab-button.active {
+    background-color: transparent; /* Active tab has no background, shows main content bg */
+    color: #5dade2;                /* Accent color for active tab text */
+    border-bottom-color: #5dade2;    /* Accent color for bottom border */
+    font-weight: bold;
+}
+
+body.dark-mode .headers-box,
+body.dark-mode .body-box,
+body.dark-mode .markdown-rendered-notes,
+body.dark-mode .markdown-rendered-notes pre,
+body.dark-mode .markdown-rendered-notes code {
+    background-color: #1e272e;
+    border-color: #4a6178;
+    color: #ecf0f1;
+}
+
+body.dark-mode .markdown-rendered-notes blockquote {
+    border-left-color: #7f8c8d;
+    color: #bdc3c7;
+}
+
+body.dark-mode .markdown-rendered-notes th { /* For tables within markdown */
+    background-color: #2c3a47;
+    border-color: #4a6178;
+}
+body.dark-mode .markdown-rendered-notes td {
+    border-color: #4a6178;
+}
+
+body.dark-mode .favorite-toggle { color: #555; } /* Darker default for non-favorited star */
+body.dark-mode .favorite-toggle.favorited { color: #f1c40f; } /* Gold for favorited */
+
+body.dark-mode .inline-form,
+body.dark-mode #addTargetForm { /* Specifically target the add target form */
+    background-color: #2c3a47; 
+}
+body.dark-mode .scope-rule-form { background-color: #2c3a47 !important; border-color: #4a6178 !important; } /* Added !important */
+body.dark-mode .scope-rule-form h4 { color: #bdc3c7; }
+
+body.dark-mode .graph-tooltip {
+    background-color: #333; /* Dark background for tooltip */
+    color: #fff;           /* Light text */
+    border: 1px solid #555; /* Darker border */
+    /* Padding, border-radius, box-shadow will be inherited or can be re-added here if needed */
+}
+
+.graph-tooltip { /* Light mode default for graph tooltips */
+    background-color: #f9f9f9;
+    border: 1px solid #ccc;
+    padding: 10px;
+    border-radius: 5px;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+}
+body.dark-mode .highlight { /* For target name in visualizer */
+    color: #5dade2; /* Example highlight color for dark mode */
+}
+
+/* Ensure buttons are styled for dark mode if not covered by general rules */
+body.dark-mode button.primary { background-color: #2980b9; }
+body.dark-mode button.primary:hover { background-color: #3498db; }
+body.dark-mode button.secondary { background-color: #7f8c8d; }
+body.dark-mode button.secondary:hover { background-color: #95a5a6; }
+body.dark-mode button.danger { background-color: #c0392b; }
+body.dark-mode button.danger:hover { background-color: #e74c3c; }
+
+body.dark-mode .action-button { color: #bdc3c7; }
+body.dark-mode .action-button:hover { opacity: 0.8; }
+body.dark-mode button#clearCurrentTargetBtn.action-button.danger { color: #e74c3c; }
+
+body.dark-mode .pagination-controls button,
+body.dark-mode .pagination-controls select,
+body.dark-mode .pagination-controls input[type="number"] {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    border-color: #4a6178;
+}
+
+body.dark-mode .pagination-controls button:disabled {
+    background-color: #232e38; /* Darker disabled */
+    color: #7f8c8d;
+}
+
+/* Dark mode for general .button */
+body.dark-mode .button {
+    background-color: #7f8c8d; /* Consistent with secondary button dark mode */
+    color: #ecf0f1; /* Light text */
+}
+
+body.dark-mode .button:hover {
+    background-color: #95a5a6; /* Slightly lighter on hover */
+}
+
+body.dark-mode .button:disabled {
+    background-color: #4a6178; /* Darker disabled background */
+    color: #7f8c8d; /* Dimmer text */
+}
+
+/* Dark Mode for Settings View Specifics */
+body.dark-mode #proxyExclusionsContainer,
+body.dark-mode #tableLayoutsSettingsContainer,
+body.dark-mode #uiSettingsContainer {
+    /* These containers might hold forms or text that needs styling */
+}
+
+body.dark-mode #proxyExclusionsContainer form,
+body.dark-mode #tableLayoutsSettingsContainer form, /* If forms are added here */
+body.dark-mode #uiSettingsContainer form { /* If forms are added here */
+    background-color: #2c3a47; /* Darker background for forms within settings */
+    border-color: #4a6178;
+}
+
+body.dark-mode #addProxyExclusionForm { /* Specific styling for the add rule form */
+    background-color: #2c3a47 !important; /* Darker background for this specific form */
+    border-color: #4a6178 !important;
+    padding: 15px; /* Ensure padding is consistent */
+}
+
+body.dark-mode #proxyExclusionsContainer h4,
+body.dark-mode #tableLayoutsSettingsContainer h3, /* For "Currently Saved Layouts" */
+body.dark-mode #uiSettingsContainer h3 { /* If h3 is used in UI settings */
+    color: #bdc3c7; /* Lighter text for subheadings */
+}
+
+body.dark-mode .settings-table th { /* If a table with this class is used */
+    background-color: #3e5062; /* Slightly different header for settings tables */
+}
+
+body.dark-mode .settings-table td {
+    /* General td styling is likely okay, but can be overridden if needed */
+}
+
+body.dark-mode #proxyExclusionsContainer .form-group label,
+body.dark-mode #tableLayoutsSettingsContainer .form-group label, /* If forms are added here */
+body.dark-mode #uiSettingsContainer .form-group label {
+    color: #bdc3c7; /* Ensure labels in settings forms are light */
+}
+
+body.dark-mode #proxyExclusionsContainer input[type="checkbox"] + label {
+    color: #ecf0f1; /* Ensure checkbox labels are light */
+}
+
+/* Dark Mode for Domains View Specifics */
+body.dark-mode #domainsFilterControls {
+    background-color: #2c3a47; /* Darker background for filter bar */
+    border-color: #4a6178;
+}
+
+body.dark-mode #domainsFilterControls input[type="search"],
+body.dark-mode #domainsFilterControls select {
+    background-color: #1e272e; /* Match other input fields */
+    color: #ecf0f1;
+    border-color: #4a6178;
+}
+
+body.dark-mode #domainsFilterControls label { /* For "Favorites Only" label */
+    color: #bdc3c7;
+}
+
+/* Ensure Domains table alternating rows are dark in dark mode */
+body.dark-mode #domainsTableContainer tbody tr:nth-child(even) {
+    background-color: #2c3a47; /* Same as general dark even rows, but more specific */
+}
+
+/* Ensure Domains table hover is also dark-mode appropriate */
+body.dark-mode #domainsTableContainer tbody tr:hover {
+    background-color: #3e5062; /* Same as general dark hover, but more specific */
+}
+
+/* Ensure Domains table headers are dark in dark mode */
+body.dark-mode #domainsTableContainer th {
+    background-color: #34495e; /* Darker header background, same as general table th */
+    color: #ecf0f1;           /* Light text for header */
+}
+
+/* Dark Mode for Proxy Log Detail View Specifics */
+body.dark-mode .log-detail-header h1 {
+    color: #ecf0f1; /* Ensure h1 in this specific header is light */
+}
+
+body.dark-mode .log-detail-header .log-navigation button.secondary {
+    /* General secondary button dark mode styles should apply */
+}
+
+/* Targeting .log-meta-info specifically within .main-content in dark mode */
+body.dark-mode .main-content div.log-meta-info { 
+    background-color: #2c3a47 !important; /* Darker background, !important for override */
+    color: #bdc3c7 !important;           /* Lighter text, !important */
+    border: 1px solid #4a6178 !important; /* Dark border, !important */
+    border-radius: 4px; /* Keep rounded corners */
+}
+
+body.dark-mode .log-meta-info p {
+    color: #bdc3c7; /* Ensure paragraph text within meta info is light */
+}
+
+body.dark-mode .log-meta-info strong {
+    color: #ecf0f1; /* Make strong text brighter */
+}
+
+body.dark-mode .log-meta-info a {
+    color: #5dade2; /* Accent color for links */
+}
+
+/* Tabs are already styled globally, but ensure tab content background is consistent */
+body.dark-mode .log-detail-header + .tab-content, /* If tab content is directly after header */
+body.dark-mode .tabs + .tab-content { /* If tab content is directly after tabs div */
+}
+
+body.dark-mode #requestTab h3,
+body.dark-mode #responseTab h3,
+body.dark-mode #jsAnalysisTab h3,
+body.dark-mode #commentsTab h3 {
+    color: #ecf0f1; /* Light text for tab content headings */
+}
+
+body.dark-mode .notes-section textarea,
+body.dark-mode #logEntryNotes { /* Target by ID for more specificity if needed */
+    background-color: #1e272e; /* Match other input fields */
+    color: #ecf0f1;
+    border-color: #4a6178;
+}
+
+body.dark-mode .associated-findings-section {
+    background-color: #2c3a47; /* Darker background for this section */
+    border-radius: 4px;
+}
+body.dark-mode .associated-findings-section h4 {
+    color: #ecf0f1;
+}
+body.dark-mode .associated-findings-section ul li a {
+    color: #5dade2;
+}
+
+/* Styles for JS Analysis Path Sender Controls */
+.js-analysis-controls { /* Light mode default */
+    background-color: #f0f0f0; /* The light grey you had inline */
+}
+
+body.dark-mode .js-analysis-controls {
+    background-color: #2c3a47; /* Dark background consistent with other forms/sections */
+    border: 1px solid #4a6178; /* Optional: add a border if needed */
+}
+
+/* Dark Mode for Comment Analysis Table (Proxy Log Detail) */
+body.dark-mode #commentAnalysisResultsContent th {
+    background-color: #34495e; /* Consistent dark header */
+    color: #ecf0f1;
+}
+
+body.dark-mode #commentAnalysisResultsContent tbody tr:nth-child(even) {
+    background-color: #2c3a47; /* Dark background for even rows */
+}
+
+body.dark-mode #commentAnalysisResultsContent tbody tr:hover {
+    background-color: #3e5062; /* Darker hover for rows */
+}
+body.dark-mode #commentAnalysisResultsContent td {
+    border-bottom-color: #4a6178; /* Ensure cell borders match dark theme */
+}
+/* Ensure hover on comment analysis table headers is dark-mode friendly */
+body.dark-mode #commentAnalysisResultsContent th:hover {
+    background-color: #4a6179; /* Consistent with other dark mode table header hovers */
+    color: #ecf0f1;           /* Ensure text remains light */
+}
+
+/* Ensure links within target list table cells are light in dark mode */
+body.dark-mode #targetList td a { /* Assuming your target list table is within a container with id="targetList" */
+    color: #87ceeb; /* A lighter blue, or choose another light color like #add8e6 or #90ee90 */
+}
+
+/* Ensure links within proxy log table cells are light in dark mode */
+body.dark-mode #proxyLogListContainer td a {
+    color: #87ceeb; /* A lighter blue, or choose another light color like #add8e6 or #90ee90 */
+}
+
+/* Dark Mode for "Current Target" View Specifics */
+/* Ensure links within the main paragraph area of current-target are light */
+body.dark-mode .main-content p a {
+    color: #87ceeb; /* Lighter blue for links */
+}
+
+/* Ensure tables within the current-target view tabs are dark */
+body.dark-mode #targetChecklistContent table th,
+body.dark-mode #targetFindingsContent table th,
+body.dark-mode #current-target-scope table th {
+    background-color: #34495e; /* Consistent dark header */
+    color: #ecf0f1;
+}
+
+body.dark-mode #targetChecklistContent table tr:nth-child(even),
+body.dark-mode #targetFindingsContent table tr:nth-child(even),
+body.dark-mode #current-target-scope table tr:nth-child(even) {
+    background-color: #2c3a47; /* Dark background for even rows */
+}
+
+/* Ensure hover on these specific tables is also dark-mode appropriate */
+body.dark-mode #targetChecklistContent table tr:hover,
+body.dark-mode #targetFindingsContent table tr:hover,
+body.dark-mode #current-target-scope table tr:hover {
+    background-color: #3e5062; /* Darker hover for rows */
+}
+
+/* Ensure table header hover for these specific tables */
+body.dark-mode #targetChecklistContent table th.sortable:hover,
+body.dark-mode #targetFindingsContent table th.sortable:hover, /* Assuming findings table might have sortable headers */
+body.dark-mode #current-target-scope table th.sortable:hover { /* Assuming scope table might have sortable headers */
+    background-color: #4a6179; /* Consistent with other dark mode table header hovers */
+    color: #ecf0f1;
+}
+
+/* Findings Add/Edit Form Specifics */
+body.dark-mode #targetFindingsContent form h3 { /* For "Add New Finding" or "Edit Finding" */
+    color: #ecf0f1;
+}
+
+/* Styles for Checklist Summary Display */
+.checklist-summary { /* Light mode default */
+    background-color: #e9ecef; /* The light grey you had inline */
+    /* other styles like padding, border-radius, font-size are already inline or can be moved here */
+}
+
+body.dark-mode .checklist-summary {
+    background-color: #2c3a47; /* Dark background consistent with other forms/sections */
+    border: 1px solid #4a6178; /* Optional: add a border if needed */
+}
+
+/* Dark Mode for Finding Details Modal */
+body.dark-mode .finding-details-grid .detail-item {
+    color: #ecf0f1; /* Ensure labels are bright */
+}
+body.dark-mode .finding-details-grid .detail-value {
+    color: #ecf0f1; /* Ensure values are bright */
+}
+
+body.dark-mode .finding-detail-full-width pre {
+    background-color: #1e272e; /* Consistent with other pre/code blocks */
+    border-color: #4a6178;
+    color: #ecf0f1;
+}
+body.dark-mode .finding-detail-full-width p strong { /* For "Description:", "Payload:" labels */
+    color: #ecf0f1; /* Ensure these labels are bright */
+}
+
+/* Style for Checklist Search Input */
+#checklistSearchInput { /* Light mode default */
+    border: 1px solid #ccc; /* Default light mode border */
+    background-color: #fff; /* Default light mode background */
+    color: #333; /* Default light mode text */
+}
+
+body.dark-mode #checklistSearchInput {
+    background-color: #1e272e; /* Dark background */
+    color: #ecf0f1;           /* Light text */
+    border: 1px solid #4a6178; /* Dark border */
+}
+
+/* Dark Mode for Proxy Log Table Header ("All Logs" tab) */
+body.dark-mode #proxyLogTableHead th {
+    background-color: #34495e; /* Consistent dark header background */
+    color: #ecf0f1;           /* Light text */
+}
+
+/* Dark Mode for Parameterized URLs Table Header ("Parameter Analysis" tab) */
+body.dark-mode #parameterizedUrlsTableHead th {
+    background-color: #34495e; /* Consistent dark header background */
+    color: #ecf0f1;           /* Light text */
+}
+
+/* Hover effect for Proxy Log Table Headers */
+body.dark-mode #proxyLogTableHead th:hover {
+    background-color: #4a6179; /* Slightly lighter dark shade for hover */
+}
+
+/* Hover effect for Parameterized URLs Table Headers */
+body.dark-mode #parameterizedUrlsTableHead th:hover {
+    background-color: #4a6179; /* Slightly lighter dark shade for hover */
+}
+}
+
 .breadcrumb-container a {
     text-decoration: none;
     color: #3498db;
@@ -650,6 +1237,11 @@ td.proxy-log-actions-column {
     font-size: 1.1em;
     color: #34495e;
 }
+.scope-rule-form { /* Light mode default background */
+    background-color: #f9f9f9;
+    /* Other existing styles for .scope-rule-form like padding, border are fine */
+}
+
 .scope-rule-form .form-group {
     margin-bottom: 10px;
 }
@@ -750,6 +1342,12 @@ th.sortable {
 th.sortable:hover {
     background-color: #e0e6eb;
 }
+
+/* This was duplicated, keeping the dark mode specific one below */
+/* body.dark-mode th.sortable:hover {
+    background-color: #4a6179; 
+    color: #ecf0f1;          
+} */
 
 th.sorted-asc::after,
 th.sorted-desc::after {
@@ -961,4 +1559,29 @@ td.checklist-item-command-text pre.command-text {
 .target-detail-item {
     font-size: 0.9em;
     color: #555;
+}
+
+.message-close-button {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    font-size: 1.2em;
+    font-weight: bold;
+    cursor: pointer;
+    color: inherit; /* Inherit color from parent message area */
+    opacity: 0.7;
+}
+.message-close-button:hover {
+    opacity: 1;
+}
+
+body.dark-mode .checklist-summary {
+    background-color: #2c3a47;
+    border: 1px solid #4a6178; /* Optional: if you want a border in dark mode */
+    /* text color will be inherited from body.dark-mode or .main-content */
+}
+
+.checklist-summary {
+    background-color: #e9ecef;
+    /* other styles like padding, border-radius, font-size can also be moved here from inline */
 }

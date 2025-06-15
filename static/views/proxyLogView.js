@@ -909,7 +909,7 @@ async function displayParameterizedURLs() {
                     <td>${discovered}</td>
                     <td>${lastSeen}</td>
                     <td class="actions-cell">
-                        <button class="action-button view-log-detail" data-log-id="${pUrl.http_traffic_log_id}" title="View Example Log">👁️</button>
+                        <button class="action-button view-log-detail" data-log-id="${pUrl.http_traffic_log_id?.Int64 || ''}" title="View Example Log">👁️</button>
                         <button class="action-button send-to-modifier" data-purl-id="${pUrl.id}" title="Send to Modifier">🔧</button>
                     </td></tr>`;
             });
@@ -1646,7 +1646,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                     </div>
                     <button id="exportJsAnalysisCsvBtn" class="secondary small-button" data-log-id="${logEntry.id}">Export to CSV</button>
                 </div>
-                <div id="jsAnalysisPathSenderControls" class="js-analysis-controls" style="margin-bottom: 10px; display: none; gap: 15px; align-items: center; padding: 5px; background-color: #f0f0f0; border-radius: 4px;">
+                <div id="jsAnalysisPathSenderControls" class="js-analysis-controls" style="margin-bottom: 10px; display: none; gap: 15px; align-items: center; padding: 5px; border-radius: 4px;">
                     <div class="form-group" style="margin-bottom:0; flex-grow: 1;">
                         <label for="jsAnalysisPathPrefix" style="margin-right: 5px;">URL Prefix:</label>
                         <input type="text" id="jsAnalysisPathPrefix" placeholder="e.g., https://example.com" style="width: 80%;">
