@@ -19,6 +19,12 @@
 
 ```  
 
+## Disclaimer 
+*   This toolkit is intended for educational and authorized security testing purposes only.  
+*   The author is not responsible for any misuse or damage caused by this software.  
+*   Always ensure you have explicit permission before conducting any security testing on any system.  
+*   Use responsibly and ethically.  
+
 The Bug Hunter Toolkit is a web application designed to assist bug bounty hunters and penetration testers in managing their targets, scope, notes, checklists, and proxy logs.
 
 ## Features
