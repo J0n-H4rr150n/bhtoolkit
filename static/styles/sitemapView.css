@@ -21,6 +21,14 @@
 .sitemap-tree-container .sitemap-node-header:hover {
     background-color: #e9ecef;
 }
+
+.sitemap-tree-container .sitemap-host-node-header { /* Style for host nodes */
+    background-color: #e0e0e0; /* Slightly different background for hosts */
+    font-weight: bold;
+}
+.sitemap-tree-container .sitemap-host-node-header:hover {
+    background-color: #e9ecef;
+}
 .sitemap-tree-container .sitemap-node-header.clickable-for-endpoints {
     cursor: pointer; /* Indicate that the header is clickable for endpoints */
 }
@@ -59,6 +67,10 @@
 .sitemap-tree-container .sitemap-node-children {
     padding-left: 25px; /* Indentation for children */
     border-left: 1px dashed #ced4da;
+    margin-left: 10px; /* Align with the toggle character more or less */
+}
+.sitemap-tree-container .sitemap-host-children { /* Children of a host node */
+    /* If you want different indentation for paths under a host vs sub-paths */
     margin-left: 10px; /* Align with the toggle character more or less */
 }
 .sitemap-tree-container .sitemap-node-children > .sitemap-tree { /* Direct UL child */
@@ -175,6 +187,11 @@ body.dark-mode .sitemap-node-header:hover {
     background-color: #34495e; /* Hover effect for node headers */
 }
 
+body.dark-mode .sitemap-host-node-header {
+    background-color: #3e5062; /* Darker, distinct background for host nodes */
+    border-color: #526d82;
+}
+
 body.dark-mode .sitemap-node-toggle,
 body.dark-mode .sitemap-node-icon,
 body.dark-mode .sitemap-node-name,
@@ -184,6 +201,10 @@ body.dark-mode .sitemap-endpoints-toggle-indicator {
 
 body.dark-mode .sitemap-node-children {
     border-left-color: #4a6178; /* Darker dashed line for children */
+}
+
+body.dark-mode .sitemap-host-children {
+    /* Dark mode specific styling for children of host nodes if needed */
 }
 
 body.dark-mode .sitemap-node-endpoints {

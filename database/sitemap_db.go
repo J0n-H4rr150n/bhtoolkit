@@ -120,139 +120,224 @@ func normalizeNodePath(path string) string {
 	return path
 }
 
-func ensurePathNode(segments []string, rootNodes *[]*models.SitemapTreeNode, nodesMap map[string]*models.SitemapTreeNode) *models.SitemapTreeNode {
-	currentPathAgg := ""
-	var parentNode *models.SitemapTreeNode
-
-	if len(segments) == 0 || (len(segments) == 1 && segments[0] == "") {
-		segments = []string{"/"}
+// ensurePathNodeUnderHost creates or retrieves the path nodes under a given hostNode.
+// hostNode: The parent host node.
+// relativePath: The path string relative to the host (e.g., "/api/users").
+// nodesMap: Global map of all nodes, keys are absolute full paths (e.g., "host.com/api/users").
+// hostname: The name of the host, for constructing absolute paths.
+func ensurePathNodeUnderHost(hostNode *models.SitemapTreeNode, relativePath string, nodesMap map[string]*models.SitemapTreeNode, hostname string) *models.SitemapTreeNode {
+	// Normalize relativePath: ensure it starts with a slash if not empty
+	if relativePath != "/" && !strings.HasPrefix(relativePath, "/") {
+		relativePath = "/" + relativePath
+	}
+	if relativePath == "" { // Treat empty path as root of the host
+		relativePath = "/"
 	}
 
-	for _, segmentName := range segments {
-		prospectivePath := currentPathAgg + "/" + segmentName
-		if currentPathAgg == "/" && segmentName == "/" {
-			prospectivePath = "/"
-		} else if currentPathAgg == "" && segmentName == "/" {
-			prospectivePath = "/"
-		} else if currentPathAgg == "/" {
-			prospectivePath = "/" + segmentName
-		}
-		prospectivePath = normalizeNodePath(prospectivePath)
+	// If the relative path is just "/", the hostNode itself is the target leaf node for endpoints at the root of the host.
+	if relativePath == "/" {
+		return hostNode
+	}
 
-		node, exists := nodesMap[prospectivePath]
+	segments := strings.Split(strings.Trim(relativePath, "/"), "/")
+	currentNode := hostNode
+
+	currentAbsolutePathPrefix := hostname // Path prefix for keys in nodesMap starts with the hostname
+
+	// Iterate over path segments to build/traverse the tree under the host
+	for _, segmentName := range segments {
+		if segmentName == "" {
+			continue // Should not happen with strings.Trim and then Split, but good for safety
+		}
+
+		// Construct the absolute full path for this segment node
+		childNodeAbsolutePath := currentAbsolutePathPrefix + "/" + segmentName
+		// Normalize to remove trailing slashes for map key consistency, except for root "/"
+		// This normalization might not be strictly necessary if segmentName is always clean.
+		// childNodeAbsolutePath = normalizeNodePath(childNodeAbsolutePath) // normalizeNodePath might be too aggressive here.
+
+		childNode, exists := nodesMap[childNodeAbsolutePath]
 		if !exists {
-			node = &models.SitemapTreeNode{
+			childNode = &models.SitemapTreeNode{
 				Name:     segmentName,
-				FullPath: prospectivePath,
+				FullPath: childNodeAbsolutePath, // Store absolute path
+				Type:     "folder",              // Path segments are folders
 				Children: []*models.SitemapTreeNode{},
 			}
-			nodesMap[prospectivePath] = node
-			if parentNode != nil {
-				parentNode.Children = append(parentNode.Children, node)
-			} else {
-				if prospectivePath == "/" {
-					isRootNodePresentInList := false
-					for _, rn := range *rootNodes {
-						if rn.FullPath == "/" {
-							isRootNodePresentInList = true
-							break
-						}
-					}
-					if !isRootNodePresentInList {
-						*rootNodes = append(*rootNodes, node)
-					}
-				} else if rootNode, rootExists := nodesMap["/"]; rootExists {
-					rootNode.Children = append(rootNode.Children, node)
-				} else { // Should not happen if "/" is pre-created
-					*rootNodes = append(*rootNodes, node)
-				}
-			}
+			nodesMap[childNodeAbsolutePath] = childNode
+			currentNode.Children = append(currentNode.Children, childNode)
 		}
-		parentNode = node
-		currentPathAgg = prospectivePath
+		currentNode = childNode
+		currentAbsolutePathPrefix = childNodeAbsolutePath // Update prefix for the next segment
 	}
-	return parentNode
+	return currentNode // This is the leaf path node
 }
 
 // BuildSitemapTree constructs the sitemap tree from log entries and manual entries. Returns the top-level nodes.
 func BuildSitemapTree(logEntries []LogEntryForSitemap, manualEntries []models.SitemapManualEntry) []*models.SitemapTreeNode {
-	rootNodes := []*models.SitemapTreeNode{}
+	hostMap := make(map[string]*models.SitemapTreeNode) // Stores host nodes: "example.com" -> *SitemapTreeNode
 	nodesMap := make(map[string]*models.SitemapTreeNode)
 
-	if _, ok := nodesMap["/"]; !ok {
-		rootNode := &models.SitemapTreeNode{Name: "/", FullPath: "/", Children: []*models.SitemapTreeNode{}}
-		nodesMap["/"] = rootNode
-		rootNodes = append(rootNodes, rootNode)
-	}
-
+	// Process Log Entries
 	for _, logEntry := range logEntries {
 		parsedURL, err := url.Parse(logEntry.RequestURL)
 		if err != nil {
 			logger.Info("BuildSitemapTree: Could not parse URL '%s' from log ID %d: %v", logEntry.RequestURL, logEntry.ID, err) // Changed Warn to Info
 			continue
 		}
-		// Construct the path for the tree node (directory structure)
-		treePath := parsedURL.Path
-		if treePath == "" {
-			treePath = "/"
+
+		hostname := parsedURL.Hostname()
+		if hostname == "" {
+			logger.Info("BuildSitemapTree: Could not extract hostname from URL '%s' (Log ID %d)", logEntry.RequestURL, logEntry.ID)
+			continue
 		}
-		// Construct the full path for the endpoint, including query string
+
+		// Get or create host node
+		hostNode, hostExists := nodesMap[hostname]
+		if !hostExists {
+			hostNode = &models.SitemapTreeNode{
+				Name:     hostname,
+				FullPath: hostname,
+				Type:     "host", // Mark as host
+				Children: []*models.SitemapTreeNode{},
+			}
+			nodesMap[hostname] = hostNode
+			hostMap[hostname] = hostNode // Keep track of top-level hosts
+		}
+
+		// Path under the host
+		pathUnderHost := parsedURL.Path
+
+		// Ensure path nodes under this host exist
+		// The returned leafNode is where the endpoint will be attached.
+		// If pathUnderHost is "/", leafNode will be hostNode itself.
+		leafNode := ensurePathNodeUnderHost(hostNode, pathUnderHost, nodesMap, hostname)
+
+		// Construct the full path for the endpoint, including query string for display
 		endpointPath := parsedURL.Path
 		if parsedURL.RawQuery != "" {
 			endpointPath += "?" + parsedURL.RawQuery
 		}
 
-		segments := strings.Split(strings.Trim(treePath, "/"), "/")
-		if treePath == "/" {
-			segments = []string{"/"}
-		}
-
-		leafNode := ensurePathNode(segments, &rootNodes, nodesMap)
 		if leafNode != nil {
 			endpoint := models.SitemapEndpoint{
-				// Fix 1: Convert logEntry.ID (int64) to sql.NullInt64
 				HTTPTrafficLogID: sql.NullInt64{Int64: logEntry.ID, Valid: logEntry.ID != 0}, // Assuming ID 0 is invalid/not set
 				Method:           logEntry.RequestMethod,
-				Path:             endpointPath,                // Use the path with query string
-				StatusCode:       logEntry.ResponseStatusCode, // Direct assignment, already sql.NullInt64
-				ResponseSize:     logEntry.ResponseBodySize,   // Direct assignment, already sql.NullInt64
-				IsFavorite:       logEntry.IsFavorite,         // Direct assignment, already sql.NullBool
-				IsManuallyAdded:  false,                       // Log entries are not manually added
-				ManualEntryID:    sql.NullInt64{},             // Log entries don't have a manual entry ID
+				Path:             endpointPath,
+				StatusCode:       logEntry.ResponseStatusCode,
+				ResponseSize:     logEntry.ResponseBodySize,
+				IsFavorite:       logEntry.IsFavorite,
+				IsManuallyAdded:  false,
+				ManualEntryID:    sql.NullInt64{},
 			}
 			leafNode.Endpoints = append(leafNode.Endpoints, endpoint)
 		}
 	}
 
+	// Process Manual Entries
 	for _, manualEntry := range manualEntries {
-		folderPath := normalizeNodePath(manualEntry.FolderPath)
-		segments := strings.Split(strings.Trim(folderPath, "/"), "/")
-		if folderPath == "/" {
-			segments = []string{"/"}
+		var entryHostname string
+		var entryPathUnderHost string
+
+		// Attempt to determine hostname for the manual entry
+		if manualEntry.HTTPTrafficLogID.Valid {
+			// If linked to a log, derive hostname from that log's URL
+			var originalLogURL string
+			err := DB.QueryRow("SELECT request_url FROM http_traffic_log WHERE id = ?", manualEntry.HTTPTrafficLogID.Int64).Scan(&originalLogURL)
+			if err == nil {
+				if parsedURL, parseErr := url.Parse(originalLogURL); parseErr == nil {
+					entryHostname = parsedURL.Hostname()
+				}
+			}
+			if entryHostname == "" {
+				logger.Info("BuildSitemapTree: Could not determine host from linked log ID %d for manual entry ID %d. Skipping.", manualEntry.HTTPTrafficLogID.Int64, manualEntry.ID)
+				continue
+			}
+		} else {
+			// If no linked log, try to parse FolderPath as "host/path" or assume a default/first host.
+			// This part is heuristic and might need refinement based on how FolderPath is structured for manual entries.
+			// For now, let's assume FolderPath might be like "example.com/admin" or just "/admin"
+			// If it's just "/admin", it's ambiguous. We'll try to attach it to the first available host.
+			// A better approach would be for manual entries to explicitly store a hostname or be relative to one.
+			parts := strings.SplitN(strings.Trim(manualEntry.FolderPath, "/"), "/", 2)
+			if len(parts) > 0 && strings.Contains(parts[0], ".") { // Heuristic: if first part looks like a domain
+				entryHostname = parts[0]
+				if len(parts) > 1 {
+					entryPathUnderHost = "/" + parts[1]
+				} else {
+					entryPathUnderHost = "/"
+				}
+			} else { // Path doesn't start with a domain-like string
+				if len(hostMap) > 0 {
+					for hn := range hostMap { // Pick the first host found
+						entryHostname = hn
+						break
+					}
+				} else {
+					logger.Info("BuildSitemapTree: No hosts available to attach manual entry ID %d (FolderPath: %s). Skipping.", manualEntry.ID, manualEntry.FolderPath)
+					continue
+				}
+				entryPathUnderHost = manualEntry.FolderPath
+			}
 		}
 
-		folderNode := ensurePathNode(segments, &rootNodes, nodesMap)
-		if folderNode != nil {
+		if entryHostname == "" {
+			logger.Info("BuildSitemapTree: Could not determine hostname for manual entry ID %d (FolderPath: %s). Skipping.", manualEntry.ID, manualEntry.FolderPath)
+			continue
+		}
+
+		hostNode, hostExists := nodesMap[entryHostname]
+		if !hostExists {
+			// This case should ideally not happen if log entries are processed first,
+			// or if manual entries are always for known hosts.
+			// If it can happen, create the host node here.
+			hostNode = &models.SitemapTreeNode{Name: entryHostname, FullPath: entryHostname, Type: "host", Children: []*models.SitemapTreeNode{}}
+			nodesMap[entryHostname] = hostNode
+			hostMap[entryHostname] = hostNode
+		}
+
+		leafNode := ensurePathNodeUnderHost(hostNode, entryPathUnderHost, nodesMap, entryHostname)
+
+		if leafNode != nil {
 			endpoint := models.SitemapEndpoint{
-				Method: manualEntry.RequestMethod,
-				Path:   manualEntry.RequestPath, // This should ideally include query for manual entries too
-				// Fix 3: Assign manualEntry.HTTPTrafficLogID (sql.NullInt64) directly
+				Method:           manualEntry.RequestMethod,
+				Path:             manualEntry.RequestPath, // This is the endpoint path itself
 				HTTPTrafficLogID: manualEntry.HTTPTrafficLogID,
 				IsManuallyAdded:  true,
-				// Fix 2: Convert manualEntry.ID (int64) to sql.NullInt64
-				ManualEntryID:    sql.NullInt64{Int64: manualEntry.ID, Valid: manualEntry.ID != 0}, // Assuming ID 0 is invalid/not set
+				ManualEntryID:    sql.NullInt64{Int64: manualEntry.ID, Valid: manualEntry.ID != 0},
 				ManualEntryNotes: manualEntry.Notes,
-				// Add default/zero values for other fields
-				StatusCode:   sql.NullInt64{},
-				ResponseSize: sql.NullInt64{},
-				IsFavorite:   sql.NullBool{},
+				StatusCode:       sql.NullInt64{}, // Manual entries don't have these from logs
+				ResponseSize:     sql.NullInt64{},
+				IsFavorite:       sql.NullBool{}, // Manual entries don't have favorite status from logs
 			}
-			folderNode.Endpoints = append(folderNode.Endpoints, endpoint)
+			leafNode.Endpoints = append(leafNode.Endpoints, endpoint)
 		}
 	}
 
-	sortTreeNodes(rootNodes)
-	return rootNodes
+	// Convert hostMap to slice for return
+	finalTree := make([]*models.SitemapTreeNode, 0, len(hostMap))
+	for _, hostNode := range hostMap {
+		finalTree = append(finalTree, hostNode)
+	}
+
+	// Sort hosts by name
+	sort.Slice(finalTree, func(i, j int) bool {
+		return finalTree[i].Name < finalTree[j].Name
+	})
+
+	// Sort children and endpoints within each host tree
+	for _, hostNode := range finalTree {
+		sortTreeNodes(hostNode.Children) // Sort children of each host
+		// Also sort endpoints directly under the host node if any
+		sort.Slice(hostNode.Endpoints, func(i, j int) bool {
+			if hostNode.Endpoints[i].Method != hostNode.Endpoints[j].Method {
+				return hostNode.Endpoints[i].Method < hostNode.Endpoints[j].Method
+			}
+			return hostNode.Endpoints[i].Path < hostNode.Endpoints[j].Path
+		})
+	}
+
+	return finalTree
 }
 
 func sortTreeNodes(nodes []*models.SitemapTreeNode) {

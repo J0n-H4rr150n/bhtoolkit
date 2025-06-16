@@ -9,6 +9,8 @@ let stateService;
 // DOM element references
 let viewContentContainer;
 const sitemapState = {}; // For storing expanded/collapsed states by fullPath (e.g., sitemapState['/api/users'] = true)
+let fullSitemapData = []; // To store the complete sitemap data for the current target
+let targetExpansionLevel = 0; // 0 means only hosts (or first level if no hosts) are visible
 const sitemapEndpointsVisibleState = {}; // For storing visibility of direct endpoints for a node
 
 /**
@@ -96,9 +98,18 @@ function renderSitemapTree(nodes, parentElement, level = 0) {
             li.classList.add('expanded');
         }
 
-        nodeHTML += `<div class="sitemap-node-header">`;
+        // Determine node type for styling/icon. Assume backend adds `node.type = 'host'` for top-level domain/subdomain nodes.
+        // If not, we can infer it if level === 0.
+        const isHostNode = node.type === 'host' || (level === 0 && !node.type); // Infer if type not present at level 0
+
+        nodeHTML += `<div class="sitemap-node-header ${isHostNode ? 'sitemap-host-node-header' : ''}">`;
         nodeHTML += `<span class="sitemap-node-toggle">${hasChildren ? (isExpanded ? '▼' : '►') : ''}</span>`;
-        nodeHTML += `<span class="sitemap-node-icon">${hasChildren ? '📁' : '📄'}</span>`; // Folder or File icon
+        
+        if (isHostNode) {
+            nodeHTML += `<span class="sitemap-node-icon">🌐</span>`; // Globe icon for hosts
+        } else {
+            nodeHTML += `<span class="sitemap-node-icon">${hasChildren ? '📁' : '📄'}</span>`; // Folder or File icon for paths
+        }
         nodeHTML += `<span class="sitemap-node-name">${escapeHtml(node.name)}</span>`;
         if (node.is_manually_added && node.manual_entry_id && !hasEndpoints && !hasChildren) {
             nodeHTML += ` <small class="manual-indicator" title="Manually added path">(manual path)</small>`;
@@ -113,7 +124,7 @@ function renderSitemapTree(nodes, parentElement, level = 0) {
         if (hasEndpoints) {
             const endpointsDiv = document.createElement('div');
             endpointsDiv.className = 'sitemap-node-endpoints';
-            endpointsDiv.style.display = areEndpointsVisible ? 'block' : 'none'; // Control initial visibility
+            endpointsDiv.style.display = areEndpointsVisible ? 'block' : 'none';
             let endpointsListHTML = '<ul>';
             node.endpoints.forEach(ep => {
                 let title = `Log ID: ${ep.http_traffic_log_id?.Int64 || 'N/A'}\nStatus: ${ep.status_code?.Int64 || 'N/A'}\nSize: ${ep.response_size?.Int64 || 'N/A'} bytes`;
@@ -164,6 +175,9 @@ function renderSitemapTree(nodes, parentElement, level = 0) {
         if (hasChildren) {
             const childrenDiv = document.createElement('div');
             childrenDiv.className = 'sitemap-node-children';
+            if (isHostNode) { // Add a specific class for children of a host node if needed for styling
+                childrenDiv.classList.add('sitemap-host-children');
+            }
             childrenDiv.style.display = isExpanded ? 'block' : 'none';
             renderSitemapTree(node.children, childrenDiv, level + 1);
             li.appendChild(childrenDiv);
@@ -191,48 +205,231 @@ function renderSitemapTree(nodes, parentElement, level = 0) {
     attachSitemapActionListeners(ul);
 }
 
-async function fetchAndRenderSitemap(targetId, treeContainer, messageArea) {
-    try {
-        const sitemapTreeData = await apiService.getGeneratedSitemap(targetId); // New API call
-        treeContainer.innerHTML = ''; // Clear previous content (like "Loading...")
+function applyExpansionLevel() {
+    const appState = stateService.getState();
+    let dataToProcess = fullSitemapData;
+    if (appState.selectedSitemapHost && fullSitemapData.length > 0) {
+        dataToProcess = fullSitemapData.filter(node => node.name === appState.selectedSitemapHost);
+    }
 
+    // Recursive function to set expansion state based on targetExpansionLevel
+    function setExpansion(nodes, currentDepth) {
+        nodes.forEach(node => {
+            if (node.children && node.children.length > 0) {
+                // Expand if currentDepth is less than the targetExpansionLevel
+                sitemapState[node.full_path] = (currentDepth < targetExpansionLevel);
+                setExpansion(node.children, currentDepth + 1);
+            }
+            // Endpoint visibility (sitemapEndpointsVisibleState) is not managed by this function.
+            // It's toggled by clicking the node header or "Expand/Collapse All".
+        });
+    }
+
+    setExpansion(dataToProcess, 0); // Start with depth 0 for host nodes (or first level of paths)
+}
+
+/**
+ * Displays a message in the sitemap message area with a close button and optional auto-hide.
+ * @param {HTMLElement} messageAreaElement - The DOM element for the message area.
+ * @param {string} text - The message text.
+ * @param {string} className - The class to apply (e.g., 'success-message', 'error-message', 'info-message').
+ * @param {number} autoHideTimeout - Milliseconds to auto-hide the message (0 for no auto-hide).
+ */
+function displaySitemapMessage(messageAreaElement, text, className, autoHideTimeout = 0) {
+    if (!messageAreaElement) return;
+
+    messageAreaElement.innerHTML = ''; // Clear previous content
+    messageAreaElement.className = 'message-area'; // Reset class first
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text; // Text content is set directly
+
+    const closeButton = document.createElement('span');
+    closeButton.innerHTML = '&times;'; // 'X' character
+    closeButton.className = 'message-close-button';
+    closeButton.title = 'Close message';
+    
+    let timeoutId = null;
+    const clearMessage = () => {
+        messageAreaElement.innerHTML = '';
+        messageAreaElement.className = 'message-area';
+        messageAreaElement.style.display = 'none';
+        if (timeoutId) clearTimeout(timeoutId);
+    };
+    closeButton.onclick = clearMessage;
+
+    messageAreaElement.appendChild(textSpan);
+    messageAreaElement.appendChild(closeButton);
+    messageAreaElement.classList.add(className);
+    messageAreaElement.style.display = 'block';
+
+    if (autoHideTimeout > 0) {
+        timeoutId = setTimeout(clearMessage, autoHideTimeout);
+    }
+}
+
+async function renderFilteredSitemapView() {
+    viewContentContainer = document.getElementById('viewContentContainer'); // Ensure it's up-to-date
+    const treeContainer = document.getElementById('sitemapTreeContainer');
+    const messageArea = document.getElementById('sitemapMessage');
+
+    if (!viewContentContainer || !treeContainer || !messageArea) {
+        console.error("SitemapView: Required DOM elements not found for rendering.");
+        return;
+    }
+
+    const appState = stateService.getState();
+    const { currentTargetId } = appState;
+
+    if (!currentTargetId) {
+        treeContainer.innerHTML = `<p>Please select a target to view its sitemap.</p>`;
+        messageArea.textContent = '';
+        displaySitemapMessage(messageArea, 'Please select a target to view its sitemap.', 'info-message');
+        document.getElementById('refreshSitemapBtn').disabled = true;
+        document.getElementById('expandAllSitemapBtn').disabled = true;
+        document.getElementById('collapseAllSitemapBtn').disabled = true;
+        const hostFilterDropdown = document.getElementById('sitemapHostFilter');
+        if (hostFilterDropdown) {
+            hostFilterDropdown.innerHTML = '<option value="">-- No Target --</option>';
+            hostFilterDropdown.disabled = true;
+        }
+        return;
+    }
+
+    treeContainer.innerHTML = ''; // Clear previous content
+
+    // Filter data based on selected host
+    let sitemapTreeDataToRender = fullSitemapData;
+    if (appState.selectedSitemapHost && fullSitemapData.length > 0) {
+        sitemapTreeDataToRender = fullSitemapData.filter(hostNode => hostNode.name === appState.selectedSitemapHost);
+    }
+
+    if (sitemapTreeDataToRender.length > 0) {
+        renderSitemapTree(sitemapTreeDataToRender, treeContainer);
+        displaySitemapMessage(messageArea, 'Sitemap loaded successfully.', 'success-message', 3000);
+        document.getElementById('expandAllSitemapBtn').disabled = false;
+        document.getElementById('collapseAllSitemapBtn').disabled = false;
+    } else {
+        if (appState.selectedSitemapHost) {
+            treeContainer.innerHTML = `<p>No sitemap data found for host: ${escapeHtml(appState.selectedSitemapHost)}.</p>`;
+            displaySitemapMessage(messageArea, `No sitemap data found for host: ${escapeHtml(appState.selectedSitemapHost)}.`, 'info-message');
+        } else {
+            treeContainer.innerHTML = '<p>No sitemap data found for this target.</p>';
+            displaySitemapMessage(messageArea, 'No sitemap data found for this target.', 'info-message');
+        }
+        document.getElementById('expandAllSitemapBtn').disabled = true;
+        document.getElementById('collapseAllSitemapBtn').disabled = true;
+    }
+}
+
+
+async function fetchAndPrepareSitemapData(targetId) {
+    const treeContainer = document.getElementById('sitemapTreeContainer');
+    const messageArea = document.getElementById('sitemapMessage');
+    const hostFilterDropdown = document.getElementById('sitemapHostFilter');
+
+    treeContainer.innerHTML = '<p>Fetching sitemap data...</p>';
+    displaySitemapMessage(messageArea, 'Fetching sitemap data...', 'info-message');
+
+    try {
+        fullSitemapData = await apiService.getGeneratedSitemap(targetId);
+        populateHostFilterDropdown(fullSitemapData, hostFilterDropdown);
+        
         // Clear previous sitemap expansion states
         Object.keys(sitemapState).forEach(key => delete sitemapState[key]);
         // Clear previous endpoint visibility states
         Object.keys(sitemapEndpointsVisibleState).forEach(key => delete sitemapEndpointsVisibleState[key]);
-
-
-        function setDefaultExpansionRecursive(nodesToExpand) {
-            nodesToExpand.forEach(node => {
-                if (node.children && node.children.length > 0) {
-                    sitemapState[node.full_path] = true; // Mark this folder for expansion
-                    setDefaultExpansionRecursive(node.children); // Recurse for its children
-                }
-            });
-        }
-
-        if (sitemapTreeData && sitemapTreeData.length > 0) {
-            setDefaultExpansionRecursive(sitemapTreeData); // Set all folders to be expanded by default
-            renderSitemapTree(sitemapTreeData, treeContainer);
+        
+        const currentAppState = stateService.getState(); // Get potentially updated state after dropdown population
+        if (currentAppState.selectedSitemapHost && fullSitemapData.some(node => node.name === currentAppState.selectedSitemapHost)) {
+            targetExpansionLevel = 100; // Expand all levels for the selected host
         } else {
-            treeContainer.innerHTML = '<p>No sitemap data found for this target. The proxy log might be empty.</p>';
-            document.getElementById('expandAllSitemapBtn').disabled = true;
-            document.getElementById('collapseAllSitemapBtn').disabled = true;
+            targetExpansionLevel = 0; // Default: only hosts (or first level of paths) visible
         }
-        messageArea.textContent = 'Sitemap loaded successfully.';
-        messageArea.className = 'message-area success-message';
-        setTimeout(() => {
-            messageArea.textContent = '';
-            messageArea.className = 'message-area';
-        }, 3000); // Message disappears after 3 seconds
+        applyExpansionLevel(); // Apply this initial level
+        await renderFilteredSitemapView(); // Render based on current filter (might be "All")
     } catch (error) {
-        console.error("Error fetching or rendering sitemap:", error);
+        console.error("Error fetching sitemap data:", error);
         treeContainer.innerHTML = `<p class="error-message">Error loading sitemap: ${escapeHtml(error.message)}</p>`;
-        messageArea.textContent = `Error: ${escapeHtml(error.message)}`;
-        document.getElementById('expandAllSitemapBtn').disabled = true;
-        document.getElementById('collapseAllSitemapBtn').disabled = true;
-        messageArea.className = 'message-area error-message';
+        displaySitemapMessage(messageArea, `Error loading sitemap: ${escapeHtml(error.message)}`, 'error-message');
+        fullSitemapData = []; // Clear data on error
+        if (hostFilterDropdown) hostFilterDropdown.innerHTML = '<option value="">-- Error --</option>';
     }
+}
+
+function populateHostFilterDropdown(sitemapData, dropdownElement) {
+    if (!dropdownElement) return;
+
+    const appState = stateService.getState();
+    dropdownElement.innerHTML = '<option value="">All Hosts</option>'; // Default option
+
+    if (sitemapData && sitemapData.length > 0) {
+        const hostnames = [...new Set(sitemapData.map(node => node.name))].sort();
+        hostnames.forEach(hostname => {
+            const option = document.createElement('option');
+            option.value = hostname;
+            option.textContent = escapeHtml(hostname);
+            dropdownElement.appendChild(option);
+        });
+        dropdownElement.disabled = false;
+    } else {
+        dropdownElement.disabled = true;
+    }
+    // Set selected value based on state
+    if (appState.selectedSitemapHost && dropdownElement.querySelector(`option[value="${appState.selectedSitemapHost}"]`)) {
+        dropdownElement.value = appState.selectedSitemapHost;
+    } else {
+        dropdownElement.value = ""; // Default to "All Hosts"
+    }
+}
+
+async function handleHostFilterChange(event) {
+    const selectedHost = event.target.value || null;
+    stateService.updateState({ selectedSitemapHost: selectedHost });
+    // Clear existing sitemap states when filter changes to avoid weird expansions
+    Object.keys(sitemapState).forEach(key => delete sitemapState[key]);
+    Object.keys(sitemapEndpointsVisibleState).forEach(key => delete sitemapEndpointsVisibleState[key]);
+    
+    if (selectedHost) {
+        targetExpansionLevel = 100; // Effectively expand all folders for this host
+    } else {
+        targetExpansionLevel = 0; // Collapse to show only hosts when "All Hosts"
+    }
+    applyExpansionLevel(); // Apply the new level
+    if (selectedHost && fullSitemapData.length > 0) {
+        const hostNodeToExpand = fullSitemapData.find(node => node.name === selectedHost);
+        if (hostNodeToExpand) {
+            // Temporarily define or reuse setDefaultExpansionRecursive for the selected host
+            // This function will mark all child folders of the selected host for expansion.
+            function expandHostFolders(nodesToExpand) {
+                nodesToExpand.forEach(node => {
+                    if (node.children && node.children.length > 0) {
+                        sitemapState[node.full_path] = true; // Mark this folder for expansion
+                        expandHostFolders(node.children);    // Recurse for its children
+                    }
+                });
+            }
+            expandHostFolders([hostNodeToExpand]); // Pass as an array
+        }
+    }
+    await renderFilteredSitemapView(); // Re-render with new expansion states
+}
+
+function handleExpandNextLevelSitemap() {
+    targetExpansionLevel++;
+    applyExpansionLevel();
+    renderFilteredSitemapView();
+}
+
+function handleCollapseLastLevelSitemap() {
+    targetExpansionLevel = Math.max(0, targetExpansionLevel - 1); // Ensure it doesn't go below 0
+    applyExpansionLevel();
+    renderFilteredSitemapView();
+}
+
+function getActiveSitemapTreeContainer() {
+    // This function can be expanded if you have multiple sitemap trees in different tabs.
+    return document.getElementById('sitemapTreeContainer');
 }
 
 async function handleSitemapFavoriteToggle(event) {
@@ -304,10 +501,18 @@ export async function loadSitemapView(mainViewContainer) {
     
     viewContentContainer.innerHTML = `
         ${headerHTML}
-        <div style="margin-bottom: 15px;">
+        <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <button id="refreshSitemapBtn" class="secondary small-button" ${!currentTargetId ? 'disabled' : ''}>Refresh Sitemap</button>
-            <button id="expandAllSitemapBtn" class="secondary small-button" ${!currentTargetId ? 'disabled' : ''} style="margin-left: 10px;">Expand All</button>
+            <button id="expandAllSitemapBtn" class="secondary small-button" ${!currentTargetId ? 'disabled' : ''}>Expand All</button>
             <button id="collapseAllSitemapBtn" class="secondary small-button" ${!currentTargetId ? 'disabled' : ''}>Collapse All</button>
+            <button id="expandNextLevelSitemapBtn" class="secondary small-button" ${!currentTargetId ? 'disabled' : ''}>Expand Next Level</button>
+            <button id="collapseLastLevelSitemapBtn" class="secondary small-button" ${!currentTargetId ? 'disabled' : ''}>Collapse Last Level</button>
+            <div class="form-group" style="margin-left: auto; margin-bottom: 0;"> <!-- Host Filter Dropdown -->
+                <label for="sitemapHostFilter" style="margin-right: 5px; font-weight: normal;">Filter by Host:</label>
+                <select id="sitemapHostFilter" style="min-width: 200px;">
+                    <option value="">All Hosts</option>
+                </select>
+            </div>
         </div>
         <div id="sitemapMessage" class="message-area" style="margin-bottom: 10px;"></div>
         <div id="sitemapTreeContainer" class="sitemap-tree-container">
@@ -320,42 +525,62 @@ export async function loadSitemapView(mainViewContainer) {
     const refreshButton = document.getElementById('refreshSitemapBtn');
     const expandAllButton = document.getElementById('expandAllSitemapBtn');
     const collapseAllButton = document.getElementById('collapseAllSitemapBtn');
+    const expandNextLevelButton = document.getElementById('expandNextLevelSitemapBtn');
+    const collapseLastLevelButton = document.getElementById('collapseLastLevelSitemapBtn');
+    const hostFilterDropdown = document.getElementById('sitemapHostFilter');
 
     if (refreshButton) {
         refreshButton.addEventListener('click', async () => {
             if (currentTargetId) {
                 treeContainer.innerHTML = '<p>Refreshing sitemap...</p>';
                 messageArea.textContent = '';
-                await fetchAndRenderSitemap(currentTargetId, treeContainer, messageArea);
+                await fetchAndPrepareSitemapData(currentTargetId);
             }
         });
     }
 
     if (expandAllButton) {
         expandAllButton.addEventListener('click', () => {
-            if (currentTargetId) toggleAllSitemapNodes(true, treeContainer);
+            if (currentTargetId) toggleAllSitemapNodes(true, getActiveSitemapTreeContainer());
         });
     }
 
     if (collapseAllButton) {
         collapseAllButton.addEventListener('click', () => {
-            if (currentTargetId) toggleAllSitemapNodes(false, treeContainer);
+            if (currentTargetId) toggleAllSitemapNodes(false, getActiveSitemapTreeContainer());
         });
     }
 
+    if (expandNextLevelButton) {
+        expandNextLevelButton.addEventListener('click', handleExpandNextLevelSitemap);
+    }
+
+    if (collapseLastLevelButton) {
+        collapseLastLevelButton.addEventListener('click', handleCollapseLastLevelSitemap);
+    }
+
+    if (hostFilterDropdown) {
+        hostFilterDropdown.addEventListener('change', handleHostFilterChange);
+    }
+
+    // Initialize targetExpansionLevel based on current state (e.g., selected host)
+    // This is now handled within fetchAndPrepareSitemapData
     if (!currentTargetId) {
         treeContainer.innerHTML = `<p>Please select a target to view its sitemap.</p>`;
+        if (hostFilterDropdown) {
+            hostFilterDropdown.innerHTML = '<option value="">-- No Target --</option>';
+            hostFilterDropdown.disabled = true;
+        }
         return;
     }
-    await fetchAndRenderSitemap(currentTargetId, treeContainer, messageArea);
+    await fetchAndPrepareSitemapData(currentTargetId);
 }
 
 function toggleAllSitemapNodes(expand, treeContainer) {
-    if (!treeContainer) treeContainer = document.getElementById('sitemapTreeContainer');
     if (!treeContainer) return;
 
-    const allNodesHaveChildren = [];
-    const allNodesWithEndpoints = [];
+    // Update targetExpansionLevel based on "Expand All" or "Collapse All"
+    targetExpansionLevel = expand ? 100 : 0; // 100 as a large number for "all levels"
 
     treeContainer.querySelectorAll('.sitemap-node').forEach(nodeElement => {
         const fullPath = nodeElement.dataset.fullPath;
@@ -368,7 +593,7 @@ function toggleAllSitemapNodes(expand, treeContainer) {
             // Expand folders
             if (childrenContainer) { // Only act if it's a folder node
                 nodeElement.classList.add('expanded');
-                if (toggler) toggler.textContent = '▼';
+                if (toggler && toggler.textContent !== '') toggler.textContent = '▼';
                 sitemapState[fullPath] = true;
                 childrenContainer.style.display = 'block';
             }
@@ -381,7 +606,7 @@ function toggleAllSitemapNodes(expand, treeContainer) {
         } else {
             // Collapse folders
             nodeElement.classList.remove('expanded');
-            if (toggler && childrenContainer) toggler.textContent = '►';
+            if (toggler && childrenContainer && toggler.textContent !== '') toggler.textContent = '►';
             sitemapState[fullPath] = false;
             if (childrenContainer) childrenContainer.style.display = 'none';
 

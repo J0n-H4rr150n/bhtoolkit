@@ -28,6 +28,7 @@ type SitemapTreeNode struct {
 	IsManuallyAdded bool               `json:"is_manually_added,omitempty"` // True if this node represents a manually added folder/path
 	ManualEntryID   int64              `json:"manual_entry_id,omitempty"`   // ID if this node is from a manual entry
 	Notes           sql.NullString     `json:"notes,omitempty"`             // Notes if from a manual entry
+	Type            string             `json:"type,omitempty"`              // Type of node, e.g., "host", "folder"
 }
 
 // SitemapEndpoint represents an actual HTTP endpoint found at a particular path.

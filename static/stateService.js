@@ -9,6 +9,7 @@ let state = {
     jsAnalysisFilterCategory: '', // New: For JS Analysis category filter
     jsAnalysisSearchText: '',     // New: For JS Analysis search text
     commentAnalysisDataCache: {}, 
+    selectedSitemapHost: null, // New: For sitemap host filter
     commentAnalysisSortState: { sortBy: 'lineNumber', sortOrder: 'ASC' }, // New: Sort state for comments
     globalTableLayouts: {},
     viewConfig: {
