@@ -964,9 +964,20 @@ func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 		return fmt.Errorf("invalid proxy URL from config: %w", err)
 	}
 
+	// Create a new CertPool and add the proxy's CA certificate to it
+	customCAPool := x509.NewCertPool()
+	if caCert != nil {
+		customCAPool.AddCert(caCert)
+	} else {
+		logger.Error("Core: SendGETRequestsThroughProxy - caCert is nil, cannot add to custom CA pool. HTTPS requests might fail verification.")
+		// Potentially return an error here or proceed with system CAs only
+	}
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyURL(proxyURL),
+			// Configure TLS to trust our custom CA
+			TLSClientConfig: &tls.Config{RootCAs: customCAPool},
 		},
 		// Set a reasonable timeout
 		Timeout: 15 * time.Second,

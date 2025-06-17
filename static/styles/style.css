@@ -860,7 +860,7 @@ body.dark-mode .markdown-rendered-notes td {
     border-color: #4a6178;
 }
 
-body.dark-mode .favorite-toggle { color: #555; } /* Darker default for non-favorited star */
+body.dark-mode .favorite-toggle { color: #ccc; } /* Darker default for non-favorited star */
 body.dark-mode .favorite-toggle.favorited { color: #f1c40f; } /* Gold for favorited */
 
 body.dark-mode .inline-form,

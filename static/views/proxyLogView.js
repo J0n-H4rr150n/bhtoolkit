@@ -57,8 +57,9 @@ function formatBody(body, contentType = '') {
             lowerContentType.includes('xml') ||
             lowerContentType.includes('svg') // SVG is XML-based and often text
         ) {
-            // For JavaScript, HTML, CSS, XML, plain text, display as escaped text
-            return escapeHtml(decodedText.replace(/[\x00-\x1F\x7F-\x9F]/g, '.'));
+            // For these text-based types, return the raw decoded text (after cleaning control characters).
+            // textContent will handle displaying it literally without rendering HTML.
+            return decodedText.replace(/[\x00-\x1F\x7F-\x9F]/g, '.');
         }
         // For other content types (e.g., images, binary), show a placeholder or truncated raw (escaped)
         // Since we've already decoded, showing a placeholder for non-text is better.
@@ -479,9 +480,12 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                     switch(h.key) {
                         case 'index': tableHTML += `<td>${itemIndex}</td>`; break;
                         case 'timestamp': tableHTML += `<td>${ts}</td>`; break;
-                        case 'method': tableHTML += `<td>${escapeHtml(log.request_method?.String || '')}</td>`; break;
+                        case 'method': tableHTML += `<td>${escapeHtml(log.request_method?.String || '')}</td>`; break; // Ensure .String is accessed
                         case 'page_name': tableHTML += `<td>${pageNameDisplay}</td>`; break;
-                        case 'url': tableHTML += `<td class="proxy-log-url-cell" title="${safeURL}">${safeURL}</td>`; break;
+                        case 'url':
+                            const displayURL = safeURL.length > 256 ? safeURL.substring(0, 253) + '...' : safeURL;
+                            tableHTML += `<td class="proxy-log-url-cell" title="${safeURL}">${displayURL}</td>`;
+                            break;
                         case 'status': tableHTML += `<td>${log.response_status_code || '-'}</td>`; break;
                         case 'type':
                             tableHTML += `<td title="${escapeHtmlAttribute(log.response_content_type?.String || '-')}">` +
@@ -900,12 +904,14 @@ async function displayParameterizedURLs() {
             pUrls.forEach(pUrl => {
                 const discovered = new Date(pUrl.discovered_at).toLocaleString();
                 const lastSeen = new Date(pUrl.last_seen_at).toLocaleString();
+                const fullExampleURL = pUrl.example_full_url?.String || '';
+                const displayExampleURL = fullExampleURL.length > 256 ? escapeHtml(fullExampleURL.substring(0, 253)) + '...' : escapeHtml(fullExampleURL);
                 tableHTML += `<tr>
                     <td>${pUrl.id}</td>
                     <td>${escapeHtml(pUrl.request_method?.String || '')}</td>
                     <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.request_path?.String || '')}">${escapeHtml(pUrl.request_path?.String || '')}</td>
-                    <td title="${escapeHtmlAttribute(pUrl.param_keys)}">${escapeHtml(pUrl.param_keys)}</td>
-                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(pUrl.example_full_url?.String || '')}">${escapeHtml(pUrl.example_full_url?.String || '')}</td>
+                    <td style="overflow-wrap: break-word; white-space: normal;" title="${escapeHtmlAttribute(pUrl.param_keys)}">${escapeHtml(pUrl.param_keys)}</td>
+                    <td class="proxy-log-url-cell" title="${escapeHtmlAttribute(fullExampleURL)}">${displayExampleURL}</td>
                     <td>${discovered}</td>
                     <td>${lastSeen}</td>
                     <td class="actions-cell">
@@ -1116,6 +1122,10 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
                     <input type="checkbox" id="filterFavoritesToggle" style="margin-right: 5px;" ${filterFavoritesOnly ? 'checked' : ''}>
                     <label for="filterFavoritesToggle" style="font-weight: normal;">Favorites Only</label>
                 </div>
+                <div class="form-group" style="display: flex; align-items: center; margin-left: 20px; margin-bottom: 0;">
+                    <input type="checkbox" id="defaultToResponseTabToggle" style="margin-right: 5px;">
+                    <label for="defaultToResponseTabToggle" style="font-weight: normal;">Default to Response Tab in Detail View</label>
+                </div>
                 <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
                     <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
                 </div>
@@ -1217,6 +1227,15 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
     const customizeColsBtn = document.getElementById('customizeProxyLogColumnsBtn');
     if (customizeColsBtn) {
         customizeColsBtn.addEventListener('click', openCustomizeColumnsModal);
+    }
+
+    // Listener for the new "Default to Response Tab" toggle
+    const defaultToResponseToggle = document.getElementById('defaultToResponseTabToggle');
+    if (defaultToResponseToggle) {
+        defaultToResponseToggle.checked = localStorage.getItem('proxyLogDefaultToResponseTab') === 'true';
+        defaultToResponseToggle.addEventListener('change', (event) => {
+            localStorage.setItem('proxyLogDefaultToResponseTab', event.target.checked);
+        });
     }
 }
 
@@ -1504,6 +1523,16 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
     const requestedTab = hashParams.get('tab');
     console.log("[ProxyLogDetailView] Requested tab from hash:", requestedTab);
 
+    // Determine initial tab based on persisted setting and hash parameter
+    let tabToActivate = 'requestTab'; // Default
+    const defaultToResponse = localStorage.getItem('proxyLogDefaultToResponseTab') === 'true';
+
+    if (defaultToResponse) {
+        tabToActivate = 'responseTab';
+    } else if (requestedTab) { // If not defaulting to response, then respect the hash parameter
+        tabToActivate = requestedTab;
+    }
+
     try {
         const logEntry = await apiService.getProxyLogDetail(logId, navParams);
 
@@ -1784,8 +1813,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
             renderCommentAnalysisTable(logIdString);
         }
 
-        // Activate tab based on hash parameter
-        const tabToActivate = requestedTab || 'requestTab';
+        // Activate the determined tab
         const tabButtonToActivate = document.querySelector(`.tab-button[data-tab="${tabToActivate}"]`);
         if (tabButtonToActivate) {
             tabButtonToActivate.click();
@@ -1841,6 +1869,7 @@ function renderCommentAnalysisTable(logIdStr) {
     const currentLogCommentData = appState.commentAnalysisDataCache[logIdStr];
     const currentSortState = appState.commentAnalysisSortState;
     const columnDefinitions = appState.paginationState.commentAnalysisTableLayout;
+    const maxContextLength = 150; // Max characters for context display in table
     const globalTableLayouts = appState.globalTableLayouts || {};
     const tableKey = 'commentAnalysisTable'; // Unique key for this table's layout
     const savedLayout = globalTableLayouts[tableKey] || { columns: {} };
@@ -1946,10 +1975,29 @@ function renderCommentAnalysisTable(logIdStr) {
                 switch(key) {
                     case 'lineNumber': tableHTML += `<td>${normalizedLineNumber}</td>`; break;
                     case 'commentType': tableHTML += `<td>${escapeHtml(normalizedCommentType)}</td>`; break;
-                    case 'commentText':
-                        tableHTML += `<td title="${fullEscapedCommentTextForTitle}">${displayCommentText}${viewFullCommentButtonHTML}</td>`; break;
-                    case 'contextBefore': tableHTML += `<td class="comment-context-cell"><pre class="context-before">${escapeHtml(normalizedContextBefore)}</pre></td>`; break;
-                    case 'contextAfter': tableHTML += `<td class="comment-context-cell"><pre class="context-after">${escapeHtml(normalizedContextAfter)}</pre></td>`; break;
+                    case 'commentText': tableHTML += `<td title="${fullEscapedCommentTextForTitle}">${displayCommentText}${viewFullCommentButtonHTML}</td>`; break;
+                    case 'contextBefore': {
+                        const fullEscapedContext = escapeHtmlAttribute(normalizedContextBefore);
+                        let displayContext = escapeHtml(normalizedContextBefore);
+                        let viewFullContextBtn = '';
+                        if (normalizedContextBefore.length > maxContextLength) {
+                            displayContext = escapeHtml(normalizedContextBefore.substring(0, maxContextLength)) + "...";
+                            viewFullContextBtn = ` <button class="action-button view-full-context-btn" data-full-context="${fullEscapedContext}" title="View Full Context Before" style="margin-left: 5px; padding: 0 3px; font-size: 0.9em;">👁️</button>`;
+                        }
+                        tableHTML += `<td class="comment-context-cell" title="${fullEscapedContext}"><pre class="context-before">${displayContext}</pre>${viewFullContextBtn}</td>`;
+                        break;
+                    }
+                    case 'contextAfter': {
+                        const fullEscapedContext = escapeHtmlAttribute(normalizedContextAfter);
+                        let displayContext = escapeHtml(normalizedContextAfter);
+                        let viewFullContextBtn = '';
+                        if (normalizedContextAfter.length > maxContextLength) {
+                            displayContext = escapeHtml(normalizedContextAfter.substring(0, maxContextLength)) + "...";
+                            viewFullContextBtn = ` <button class="action-button view-full-context-btn" data-full-context="${fullEscapedContext}" title="View Full Context After" style="margin-left: 5px; padding: 0 3px; font-size: 0.9em;">👁️</button>`;
+                        }
+                        tableHTML += `<td class="comment-context-cell" title="${fullEscapedContext}"><pre class="context-after">${displayContext}</pre>${viewFullContextBtn}</td>`;
+                        break;
+                    }
                 }
             });
             tableHTML += `</tr>`;
@@ -1980,9 +2028,20 @@ function renderCommentAnalysisTable(logIdStr) {
     resultsContentDiv.querySelectorAll('.view-full-comment-btn').forEach(button => {
         button.addEventListener('click', handleViewFullComment);
     });
+
+    // Add event listeners for the new "View Full Context" buttons
+    resultsContentDiv.querySelectorAll('.view-full-context-btn').forEach(button => {
+        button.addEventListener('click', handleViewFullContext);
+    });
 }
 
 function handleCommentAnalysisSort(event, logIdStr) {
+    // Prevent sorting if a column resize was just completed
+    if (tableService && typeof tableService.getIsResizing === 'function' && tableService.getIsResizing()) {
+        console.log('[ProxyLogView - Comments] Sort prevented due to active resize operation.');
+        return;
+    }
+
     const newSortBy = event.target.dataset.sortKey;
     const appState = stateService.getState();
     let newSortOrder = 'ASC';
@@ -2037,6 +2096,27 @@ function handleViewFullComment(event) {
     contentDiv.textContent = alreadyEscapedCommentText; // Set as textContent to display literally
 
     uiService.showModalMessage("Full Comment Text", contentDiv);
+}
+
+function handleViewFullContext(event) {
+    const button = event.currentTarget;
+    // This attribute already contains HTML-escaped text.
+    const alreadyEscapedContextText = button.getAttribute('data-full-context');
+
+    if (!uiService) {
+        console.error("uiService not available in handleViewFullContext");
+        alert(alreadyEscapedContextText); // Fallback
+        return;
+    }
+
+    const contentDiv = document.createElement('div');
+    contentDiv.style.maxHeight = '70vh';
+    contentDiv.style.overflowY = 'auto';
+    contentDiv.style.whiteSpace = 'pre-wrap';
+    contentDiv.style.wordWrap = 'break-word';
+    contentDiv.textContent = alreadyEscapedContextText; // Display literally
+
+    uiService.showModalMessage("Full Context", contentDiv);
 }
 
 async function handleSendSelectedPathsToProxy(event) {

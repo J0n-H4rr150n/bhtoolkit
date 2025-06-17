@@ -108,6 +108,10 @@ async function loadAndDisplayUISettings() {
                 <label for="showSynackToggle">Show Synack Section in Sidebar:</label>
                 <input type="checkbox" id="showSynackToggle" ${settings.showSynackSection ? 'checked' : ''}>
             </div>
+            <div class="form-group">
+                <label for="proxyLogDefaultToResponseToggleSettings">Default to Response Tab in Proxy Log Detail:</label>
+                <input type="checkbox" id="proxyLogDefaultToResponseToggleSettings" ${localStorage.getItem('proxyLogDefaultToResponseTab') === 'true' ? 'checked' : ''}>
+            </div>
             <button id="saveUISettingsBtn" class="primary">Save UI Settings</button>
             <div id="uiSettingsMessage" class="message-area" style="margin-top: 10px;"></div>
         `;
@@ -122,12 +126,18 @@ async function loadAndDisplayUISettings() {
 
 async function handleSaveUISettings() {
     const showSynackToggle = document.getElementById('showSynackToggle');
+    const proxyLogDefaultToggle = document.getElementById('proxyLogDefaultToResponseToggleSettings');
     const messageArea = document.getElementById('uiSettingsMessage');
-    if (!showSynackToggle || !messageArea) return;
+
+    if (!messageArea) return; // Only messageArea is critical for feedback
 
     messageArea.textContent = '';
     messageArea.className = 'message-area';
 
+    // Handle proxy log detail default tab setting (localStorage)
+    if (proxyLogDefaultToggle) {
+        localStorage.setItem('proxyLogDefaultToResponseTab', proxyLogDefaultToggle.checked);
+    }
     const newSettings = {
         showSynackSection: showSynackToggle.checked
     };
