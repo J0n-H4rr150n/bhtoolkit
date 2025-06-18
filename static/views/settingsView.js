@@ -118,6 +118,10 @@ async function loadAndDisplayUISettings() {
             <input type="checkbox" id="showSynackToggle" ${uiSpecificSettings.ShowSynackSection ? 'checked' : ''}>
             </div>
             <div class="form-group">
+                <label for="defaultThemeToggle">Default to Dark Mode:</label>
+                <input type="checkbox" id="defaultThemeToggle" ${uiSpecificSettings.DefaultTheme === 'dark' ? 'checked' : ''}>
+            </div>
+            <div class="form-group">
                 <label for="proxyLogDefaultToResponseToggleSettings">Default to Response Tab in Proxy Log Detail:</label>
                 <input type="checkbox" id="proxyLogDefaultToResponseToggleSettings" ${proxyLogDefaultSavedValue === 'true' ? 'checked' : ''}>
             </div>
@@ -147,6 +151,7 @@ async function loadAndDisplayUISettings() {
 async function handleSaveUISettings() {
     const showSynackToggle = document.getElementById('showSynackToggle');
     const proxyLogDefaultToggle = document.getElementById('proxyLogDefaultToResponseToggleSettings');
+    const defaultThemeToggle = document.getElementById('defaultThemeToggle'); // Get the new toggle
     const claimMinPayoutInput = document.getElementById('claimMinPayout');
     const claimMaxPayoutInput = document.getElementById('claimMaxPayout');
     const messageArea = document.getElementById('uiSettingsMessage');
@@ -191,7 +196,8 @@ async function handleSaveUISettings() {
     // Construct the payload for all settings
     const settingsToSave = {
         ui: {
-            ShowSynackSection: showSynackToggle ? showSynackToggle.checked : (currentFullAppSettings.ui?.ShowSynackSection || false) // Corrected case
+            ShowSynackSection: showSynackToggle ? showSynackToggle.checked : (currentFullAppSettings.ui?.ShowSynackSection || false),
+            DefaultTheme: defaultThemeToggle ? (defaultThemeToggle.checked ? 'dark' : 'light') : (currentFullAppSettings.ui?.DefaultTheme || 'light')
         },
         missions: {
             ...baseMissionSettings, // Spread the existing/default mission settings

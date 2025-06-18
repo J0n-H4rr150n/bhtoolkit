@@ -34,3 +34,4 @@ toolkit
 ~
 *.yaml
 migrations/*
+resume.cfg

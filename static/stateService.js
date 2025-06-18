@@ -10,6 +10,12 @@ let state = {
     jsAnalysisSearchText: '',     // New: For JS Analysis search text
     commentAnalysisDataCache: {}, 
     selectedSitemapHost: null, // New: For sitemap host filter
+    appSettings: { // Store application settings fetched from backend
+        ui: {
+            DefaultTheme: 'light', // Default theme from config
+            ShowSynackSection: false,
+        },
+    },
     commentAnalysisSortState: { sortBy: 'lineNumber', sortOrder: 'ASC' }, // New: Sort state for comments
     globalTableLayouts: {},
     viewConfig: {
@@ -161,6 +167,10 @@ export function initState(initialValues = {}) {
     }
     if (initialValues.globalTableLayouts !== undefined) {
         state.globalTableLayouts = { ...state.globalTableLayouts, ...initialValues.globalTableLayouts };
+    }
+    // Add this block to correctly initialize appSettings
+    if (initialValues.appSettings !== undefined) {
+        state.appSettings = initialValues.appSettings; // Directly assign the fetched appSettings
     }
     // You can extend this to initialize other specific parts of the state if needed
     // For paginationState and viewConfig, the defaults are already set.

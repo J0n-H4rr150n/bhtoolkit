@@ -69,10 +69,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     const THEME_KEY = 'bhtoolkit-theme';
     const DARK_MODE_CLASS = 'dark-mode';
     const SUN_ICON = '☀️';
-    const MOON_ICON = '🌙';
+    const MOON_ICON = '🌙'; // Default icon for light mode
 
     function applyTheme(theme) {
         if (theme === 'dark') {
+            console.log('[App.js] Applying dark mode.');
             document.body.classList.add(DARK_MODE_CLASS);
             if (themeToggleBtn) themeToggleBtn.innerHTML = SUN_ICON;
         } else {
@@ -80,19 +81,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (themeToggleBtn) themeToggleBtn.innerHTML = MOON_ICON;
         }
         localStorage.setItem(THEME_KEY, theme);
-    }
-
-    if (themeToggleBtn) {
-        themeToggleBtn.addEventListener('click', () => {
-            const currentTheme = localStorage.getItem(THEME_KEY) || 'light';
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            applyTheme(newTheme);
-        });
-    }
-    // Apply saved theme on initial load
-    const savedTheme = localStorage.getItem(THEME_KEY);
-    if (savedTheme) {
-        applyTheme(savedTheme);
     }
 
     const stateServiceAPI = {
@@ -149,6 +137,25 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSynackMissionsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
 
     await fetchAndSetInitialCurrentTarget();
+
+    // After fetching initial settings (which includes UI config), apply the theme
+    // Determine initial theme:
+    // 1. Check localStorage (user preference)
+    // 2. Check backend config defaultTheme
+    // 3. Fallback to 'light'
+    const appSettings = getState().appSettings || {}; // Get settings fetched by fetchAndSetInitialCurrentTarget
+    const configDefaultTheme = appSettings.ui?.DefaultTheme || 'light'; // Use config default
+    const initialTheme = localStorage.getItem(THEME_KEY) || configDefaultTheme;
+    console.log(`[App.js] Initial theme determined: ${initialTheme} (localStorage: ${localStorage.getItem(THEME_KEY)}, configDefault: ${configDefaultTheme})`);
+    applyTheme(initialTheme);
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+            const currentTheme = localStorage.getItem(THEME_KEY) || 'light'; // Always base toggle on current state
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        });
+    }
 
     initRouter({
         viewContentContainer,
@@ -1074,7 +1081,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         let fetchedCurrentTargetName = 'None';
         let fetchedGlobalTableLayouts = {};
         let fetchedAppSettings = { // Default structure if API call fails or returns unexpected data
-            ui: { showSynackSection: false },
+            ui: { ShowSynackSection: false, DefaultTheme: 'light' }, // Added DefaultTheme
             missions: { enabled: false /* other mission defaults if needed by other parts of app.js */ }
         };
 
@@ -1103,7 +1110,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 fetchedAppSettings = appSettingsFromApi;
             } else {
                 console.warn("[App.js] getAppSettings did not return the expected structure. Using defaults for UI/Missions settings. API Response was:", JSON.parse(JSON.stringify(appSettingsFromApi)));
-                console.warn("[App.js] getAppSettings did not return the expected structure. Using defaults for UI/Missions settings.", appSettingsFromApi);
                 // fetchedAppSettings retains its default structure defined above
             }
 
@@ -1114,7 +1120,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             initState({
                 currentTargetId: fetchedCurrentTargetId,
                 currentTargetName: fetchedCurrentTargetName,
-                globalTableLayouts: fetchedGlobalTableLayouts
+                globalTableLayouts: fetchedGlobalTableLayouts,
+                appSettings: fetchedAppSettings // Store fetched app settings in state
             });
             console.log('[App.js] About to call applyUiSettings with fetchedAppSettings.ui:', JSON.parse(JSON.stringify(fetchedAppSettings.ui)));
             applyUiSettings(fetchedAppSettings.ui); // Now fetchedAppSettings.ui will always be an object

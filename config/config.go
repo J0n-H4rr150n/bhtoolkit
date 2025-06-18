@@ -22,6 +22,7 @@ type DefaultPaths struct {
 	LogLevel         string
 	SynackTargetsURL string
 }
+
 // DatabaseConfig holds database related configuration.
 type DatabaseConfig struct {
 	Path string `mapstructure:"path" yaml:"path"`
@@ -59,7 +60,7 @@ type SynackConfig struct {
 	TargetsArrayPath                 string `mapstructure:"targets_array_path" yaml:"targets_array_path"` // GJSON path to the array of targets in the targets_url response
 	FindingsEnabled                  bool   `mapstructure:"findings_enabled" yaml:"findings_enabled"`
 	FindingsBaseURL                  string `mapstructure:"findings_base_url" yaml:"findings_base_url"`
-	FindingsPathPattern              string `mapstructure:"findings_path_pattern" yaml:"findings_path_pattern"`                 // Path for a separate findings endpoint (currently unused if findings are in analytics)
+	FindingsPathPattern              string `mapstructure:"findings_path_pattern" yaml:"findings_path_pattern"`                                 // Path for a separate findings endpoint (currently unused if findings are in analytics)
 	FindingsArrayPathInAnalyticsJson string `mapstructure:"findings_array_path_in_analytics_json" yaml:"findings_array_path_in_analytics_json"` // GJSON path to findings array within the analytics response
 }
 
@@ -75,7 +76,8 @@ type MissionsConfig struct {
 
 // UIConfig holds UI related configuration.
 type UIConfig struct {
-	ShowSynackSection bool `mapstructure:"showSynackSection" yaml:"showSynackSection"`
+	ShowSynackSection bool   `mapstructure:"showSynackSection" yaml:"showSynackSection"`
+	DefaultTheme      string `mapstructure:"defaultTheme" yaml:"defaultTheme"` // "light" or "dark"
 }
 
 // Configuration is the main application configuration struct.
@@ -157,14 +159,15 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 	v.SetDefault("synack.findings_enabled", false)                                                         // Default to false
 	v.SetDefault("synack.findings_base_url", "https://platform.synack.com")                                // Example, adjust as needed
 	v.SetDefault("synack.findings_path_pattern", "/api/v1/targets/%s/vulnerabilities")                     // Example, adjust as needed
+	v.SetDefault("ui.defaultTheme", "dark")                                                                // Default theme
 	v.SetDefault("synack.findings_array_path_in_analytics_json", "value.#.exploitable_locations|@flatten") // Corrected default GJSON path
 	// Defaults for new missions fields
 	v.SetDefault("missions.enabled", false)
 	v.SetDefault("missions.polling_interval_seconds", 10)
 	v.SetDefault("missions.list_url", "https://platform.synack.com/api/tasks?perPage=20&viewed=true&page=1&status=PUBLISHED&sort=CLAIMABLE&sortDir=DESC&includeAssignedBySynackUser=true")
 	v.SetDefault("missions.claim_url_pattern", "https://platform.synack.com/api/tasks/v1/organizations/%s/listings/%s/campaigns/%s/tasks/%s/transitions") // orgId, listingId, campaignId, taskId
-	v.SetDefault("missions.claim_min_payout", 0.0)   // Default to claim any mission with a payout (can be set higher)
-	v.SetDefault("missions.claim_max_payout", 50.0)  // Default to claim missions with payout $50 or less
+	v.SetDefault("missions.claim_min_payout", 0.0)                                                                                                        // Default to claim any mission with a payout (can be set higher)
+	v.SetDefault("missions.claim_max_payout", 50.0)                                                                                                       // Default to claim missions with payout $50 or less
 
 	if cfgFile != "" {
 		expandedCfgFile, err := expandTilde(cfgFile)
@@ -225,6 +228,7 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 		return fmt.Errorf("unable to decode config into struct: %w", err)
 	}
 
+	logger.Debug("Config Unmarshalled. UI.DefaultTheme: %s", AppConfig.UI.DefaultTheme)
 	// Apply flag overrides
 	if flagAppLogPath != "" {
 		expandedPath, err := expandTilde(flagAppLogPath)
