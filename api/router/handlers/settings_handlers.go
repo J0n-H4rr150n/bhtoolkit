@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"toolkit/database"
+	"toolkit/config" // Import the config package
 	"toolkit/logger"
 	"toolkit/models"
 ) // Ensure models is imported if TableLayoutConfig is there
@@ -408,4 +409,67 @@ func SetProxyExclusionRulesHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Proxy exclusion rules saved successfully."})
 	logger.Info("Successfully saved %d proxy exclusion rules.", len(rules))
+}
+
+// ApplicationSettingsResponse defines the structure for the /settings/app endpoint.
+type ApplicationSettingsResponse struct {
+	UI       config.UIConfig       `json:"ui"`
+	Missions config.MissionsConfig `json:"missions"`
+	// Add other sections as needed
+}
+
+// GetApplicationSettingsHandler retrieves the current application settings.
+func GetApplicationSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		logger.Error("GetApplicationSettingsHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	response := ApplicationSettingsResponse{
+		UI:       config.AppConfig.UI,
+		Missions: config.AppConfig.Missions,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.Error("GetApplicationSettingsHandler: Error encoding response: %v", err)
+		http.Error(w, "Failed to encode settings", http.StatusInternalServerError)
+	}
+}
+
+// SaveApplicationSettingsHandler saves the application settings.
+func SaveApplicationSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		logger.Error("SaveApplicationSettingsHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var newSettings ApplicationSettingsResponse
+	if err := json.NewDecoder(r.Body).Decode(&newSettings); err != nil {
+		logger.Error("SaveApplicationSettingsHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Update the global AppConfig
+	config.AppConfig.UI = newSettings.UI
+	config.AppConfig.Missions = newSettings.Missions
+
+	// Persist the changes to the config file
+	// This function needs to be implemented in your config package.
+	if err := config.SaveAppConfig(); err != nil {
+		logger.Error("SaveApplicationSettingsHandler: Error saving application configuration: %v", err)
+		http.Error(w, "Failed to save application settings", http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: Consider if any services need to be re-initialized or notified of config changes.
+	// For example, if mission polling interval changes, the SynackMissionService might need a restart or update.
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Application settings saved successfully."})
+	logger.Info("Application settings updated and saved to config file.")
 }

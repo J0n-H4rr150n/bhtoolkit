@@ -12,6 +12,7 @@ import (
 	"toolkit/api"
 	"toolkit/config"
 	"toolkit/core"
+	"toolkit/database" // Added for DB instance
 	"toolkit/logger"
 
 	"github.com/spf13/cobra"
@@ -110,6 +111,9 @@ Press Ctrl+C to gracefully shut down all services.`,
 			logger.Info("Start Command Goroutine(API): Finished.")
 		}(ctx)
 
+		// --- Initialize Synack Mission Polling Service (before proxy needs it) ---
+		missionService := core.NewSynackMissionService(ctx, &config.AppConfig, database.DB)
+
 		// --- Start MITM Proxy Goroutine ---
 		wg.Add(1)
 		go func(parentCtx context.Context) {
@@ -129,9 +133,12 @@ Press Ctrl+C to gracefully shut down all services.`,
 			logger.ProxyInfo("Start Command Goroutine(Proxy): Using CA Cert: %s, CA Key: %s", caCertPath, caKeyPath)
 
 			proxyErrChan := make(chan error, 1)
+			// The missionService is created before this goroutine.
+			// We need to pass it to StartMitmProxy.
+			// Also, passing the parentCtx to StartMitmProxy allows it to handle graceful shutdown.
 			go func() {
 				logger.ProxyInfo("Start Command Goroutine(Proxy): Calling core.StartMitmProxy...")
-				proxyErrChan <- core.StartMitmProxy(actualProxyPort, actualProxyTargetID, caCertPath, caKeyPath)
+				proxyErrChan <- core.StartMitmProxy(parentCtx, actualProxyPort, actualProxyTargetID, caCertPath, caKeyPath, missionService)
 			}()
 
 			select {
@@ -147,6 +154,24 @@ Press Ctrl+C to gracefully shut down all services.`,
 			}
 			logger.ProxyInfo("Start Command Goroutine(Proxy): Finished.")
 		}(ctx)
+
+		if config.AppConfig.Missions.Enabled {
+			wg.Add(1)
+			go func(parentCtx context.Context) {
+				defer wg.Done()
+				logger.Info("Start Command Goroutine(Missions): Starting SynackMissionService...")
+				missionService.Start() // This is non-blocking and starts its own internal poller
+
+				// Wait for the main context to be cancelled.
+				// The missionService itself will also stop its internal polling
+				// because its context is derived from parentCtx.
+				<-parentCtx.Done()
+				logger.Info("Start Command Goroutine(Missions): Main context cancelled. Mission service wrapper goroutine finishing.")
+				// missionService.Stop() // Optional: explicit stop, though context cancellation should handle it.
+			}(ctx)
+		} else {
+			logger.Info("Start Command: Synack Mission Polling Service is disabled in configuration, not starting.")
+		}
 
 		// --- Wait for termination signal ---
 		sigs := make(chan os.Signal, 1)

@@ -9,6 +9,7 @@ let stateService;
 
 // Module-level state for proxy exclusion rules
 let currentProxyExclusionRules = [];
+let currentFullAppSettings = null; // To store the full settings loaded
 
 // DOM element references (will be queried within functions or passed)
 let viewContentContainer; // Main container, passed to load functions
@@ -102,15 +103,33 @@ async function loadAndDisplayUISettings() {
     if (!uiSettingsContainer) return;
 
     try {
-        const settings = await apiService.getUISettings();
+        // We'll assume getAppSettings fetches all relevant settings including missions.
+        // If not, this API call might need to be adjusted or a new one created.
+        const appSettings = await apiService.getAppSettings(); // Changed from getUISettings
+        currentFullAppSettings = appSettings; // Store the fetched settings
+        const uiSpecificSettings = appSettings.ui || {}; // Assuming UI settings are nested under 'ui'
+        const missionSettings = appSettings.missions || {}; // Assuming mission settings are nested under 'missions'
+
+        const proxyLogDefaultSavedValue = localStorage.getItem('proxyLogDefaultToResponseTab');
+        console.log(`[SettingsView] Loaded 'proxyLogDefaultToResponseTab' from localStorage: ${proxyLogDefaultSavedValue}`);
         uiSettingsContainer.innerHTML = `
             <div class="form-group">
                 <label for="showSynackToggle">Show Synack Section in Sidebar:</label>
-                <input type="checkbox" id="showSynackToggle" ${settings.showSynackSection ? 'checked' : ''}>
+            <input type="checkbox" id="showSynackToggle" ${uiSpecificSettings.ShowSynackSection ? 'checked' : ''}>
             </div>
             <div class="form-group">
                 <label for="proxyLogDefaultToResponseToggleSettings">Default to Response Tab in Proxy Log Detail:</label>
-                <input type="checkbox" id="proxyLogDefaultToResponseToggleSettings" ${localStorage.getItem('proxyLogDefaultToResponseTab') === 'true' ? 'checked' : ''}>
+                <input type="checkbox" id="proxyLogDefaultToResponseToggleSettings" ${proxyLogDefaultSavedValue === 'true' ? 'checked' : ''}>
+            </div>
+            <hr style="margin: 20px 0;">
+            <h4>Synack Mission Claiming</h4>
+            <div class="form-group">
+                <label for="claimMinPayout">Min Payout to Claim ($):</label>
+                <input type="number" id="claimMinPayout" class="settings-input" value="${escapeHtmlAttribute(missionSettings.ClaimMinPayout || 0)}" step="0.01">
+            </div>
+            <div class="form-group">
+                <label for="claimMaxPayout">Max Payout to Claim ($):</label>
+                <input type="number" id="claimMaxPayout" class="settings-input" value="${escapeHtmlAttribute(missionSettings.ClaimMaxPayout || 50)}" step="0.01">
             </div>
             <button id="saveUISettingsBtn" class="primary">Save UI Settings</button>
             <div id="uiSettingsMessage" class="message-area" style="margin-top: 10px;"></div>
@@ -121,12 +140,15 @@ async function loadAndDisplayUISettings() {
     } catch (error) {
         console.error("Error loading UI settings:", error);
         uiSettingsContainer.innerHTML = `<p class="error-message">Failed to load UI settings: ${escapeHtml(error.message)}</p>`;
+        currentFullAppSettings = null; // Reset on error
     }
 }
 
 async function handleSaveUISettings() {
     const showSynackToggle = document.getElementById('showSynackToggle');
     const proxyLogDefaultToggle = document.getElementById('proxyLogDefaultToResponseToggleSettings');
+    const claimMinPayoutInput = document.getElementById('claimMinPayout');
+    const claimMaxPayoutInput = document.getElementById('claimMaxPayout');
     const messageArea = document.getElementById('uiSettingsMessage');
 
     if (!messageArea) return; // Only messageArea is critical for feedback
@@ -136,29 +158,64 @@ async function handleSaveUISettings() {
 
     // Handle proxy log detail default tab setting (localStorage)
     if (proxyLogDefaultToggle) {
-        localStorage.setItem('proxyLogDefaultToResponseTab', proxyLogDefaultToggle.checked);
+        localStorage.setItem('proxyLogDefaultToResponseTab', proxyLogDefaultToggle.checked); // Save its state
+        console.log(`[SettingsView] Saved 'proxyLogDefaultToResponseTab' to localStorage: ${proxyLogDefaultToggle.checked}`);
+    } else {
+        console.warn("[SettingsView] 'proxyLogDefaultToResponseToggleSettings' element not found during save.");
     }
-    const newSettings = {
-        showSynackSection: showSynackToggle.checked
+
+    // Ensure currentFullAppSettings is loaded, otherwise fetch it.
+    // This is a fallback, ideally it's loaded when the view is displayed.
+    if (!currentFullAppSettings) {
+        try {
+            console.log("[SettingsView] currentFullAppSettings is null, fetching fresh settings before save.");
+            currentFullAppSettings = await apiService.getAppSettings();
+        } catch (error) {
+            messageArea.textContent = `Error: Could not load current settings to perform save. ${escapeHtml(error.message)}`;
+            messageArea.classList.add('error-message');
+            return;
+        }
+    }
+
+    // Start with the existing full mission settings, or a default structure if none exist
+    // This ensures that fields not present on this specific UI form are preserved.
+    const baseMissionSettings = currentFullAppSettings.missions ? { ...currentFullAppSettings.missions } : {
+        enabled: false, // Provide sensible defaults if missions section was missing entirely
+        polling_interval_seconds: 10,
+        list_url: "",
+        claim_url_pattern: "",
+        claim_min_payout: 0.0,
+        claim_max_payout: 50.0
+    };
+
+    // Construct the payload for all settings
+    const settingsToSave = {
+        ui: {
+            ShowSynackSection: showSynackToggle ? showSynackToggle.checked : (currentFullAppSettings.ui?.ShowSynackSection || false) // Corrected case
+        },
+        missions: {
+            ...baseMissionSettings, // Spread the existing/default mission settings
+            ClaimMinPayout: parseFloat(claimMinPayoutInput.value) || 0,
+            ClaimMaxPayout: parseFloat(claimMaxPayoutInput.value) || 0
+        }
     };
 
     try {
-        // Use the new apiService function
-        const responseData = await apiService.saveUISettings(newSettings); 
+        // Assuming saveAppSettings can save the broader settings structure.
+        await apiService.saveAppSettings(settingsToSave); // Assuming it resolves on success or throws on error
 
-        if (responseData) { // Assuming successful save returns some confirmation
+        // After successful save, update currentFullAppSettings with the saved data
+        // This makes the local cache consistent with what was just sent.
+        currentFullAppSettings.ui = settingsToSave.ui;
+        currentFullAppSettings.missions = settingsToSave.missions;
+
              messageArea.textContent = 'UI settings saved successfully! Refresh may be needed for sidebar changes.';
              messageArea.classList.add('success-message');
              uiService.showModalMessage('Settings Saved', 'UI settings have been saved. A page refresh might be required to see all changes (like sidebar visibility).');
              // Call the applyUiSettings function passed from app.js
             if (localApplyUiSettingsFunc) {
-                localApplyUiSettingsFunc(newSettings);
+                localApplyUiSettingsFunc(settingsToSave.ui); // Pass only the UI part to the existing function
             }
-        } else {
-            const errorData = await response.json();
-            messageArea.textContent = `Error saving UI settings: ${escapeHtml(errorData.message || response.statusText)}`;
-            messageArea.classList.add('error-message');
-        }
     } catch (error) {
         console.error("Error saving UI settings:", error);
         messageArea.textContent = `Network error saving UI settings: ${escapeHtml(error.message)}`;

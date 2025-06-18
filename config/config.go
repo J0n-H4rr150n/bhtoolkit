@@ -8,6 +8,7 @@ import (
 	"toolkit/logger"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 type DefaultPaths struct {
@@ -21,46 +22,75 @@ type DefaultPaths struct {
 	LogLevel         string
 	SynackTargetsURL string
 }
+// DatabaseConfig holds database related configuration.
+type DatabaseConfig struct {
+	Path string `mapstructure:"path" yaml:"path"`
+}
 
+// ServerConfig holds server related configuration.
+type ServerConfig struct {
+	Port    string `mapstructure:"port" yaml:"port"`
+	LogPath string `mapstructure:"log_path" yaml:"log_path"`
+}
+
+// ProxyConfig holds proxy related configuration.
+type ProxyConfig struct {
+	Port                  string `mapstructure:"port" yaml:"port"`
+	CACertPath            string `mapstructure:"ca_cert_path" yaml:"ca_cert_path"`
+	CAKeyPath             string `mapstructure:"ca_key_path" yaml:"ca_key_path"`
+	LogPath               string `mapstructure:"log_path" yaml:"log_path"`
+	ModifierSkipTLSVerify bool   `mapstructure:"modifier_skip_tls_verify" yaml:"modifier_skip_tls_verify"`
+	ModifierAllowLoopback bool   `mapstructure:"modifier_allow_loopback" yaml:"modifier_allow_loopback"`
+}
+
+// LoggingConfig holds logging related configuration.
+type LoggingConfig struct {
+	Level string `mapstructure:"level" yaml:"level"`
+}
+
+// SynackConfig holds Synack integration related configuration.
+type SynackConfig struct {
+	TargetsURL                       string `mapstructure:"targets_url" yaml:"targets_url"`
+	TargetIDField                    string `mapstructure:"target_id_field" yaml:"target_id_field"`
+	AnalyticsEnabled                 bool   `mapstructure:"analytics_enabled" yaml:"analytics_enabled"`
+	AnalyticsBaseURL                 string `mapstructure:"analytics_base_url" yaml:"analytics_base_url"`
+	AnalyticsPathPattern             string `mapstructure:"analytics_path_pattern" yaml:"analytics_path_pattern"`
+	TargetNameField                  string `mapstructure:"target_name_field" yaml:"target_name_field"`
+	TargetsArrayPath                 string `mapstructure:"targets_array_path" yaml:"targets_array_path"` // GJSON path to the array of targets in the targets_url response
+	FindingsEnabled                  bool   `mapstructure:"findings_enabled" yaml:"findings_enabled"`
+	FindingsBaseURL                  string `mapstructure:"findings_base_url" yaml:"findings_base_url"`
+	FindingsPathPattern              string `mapstructure:"findings_path_pattern" yaml:"findings_path_pattern"`                 // Path for a separate findings endpoint (currently unused if findings are in analytics)
+	FindingsArrayPathInAnalyticsJson string `mapstructure:"findings_array_path_in_analytics_json" yaml:"findings_array_path_in_analytics_json"` // GJSON path to findings array within the analytics response
+}
+
+// MissionsConfig holds Synack Missions feature related configuration.
+type MissionsConfig struct {
+	Enabled                bool    `mapstructure:"enabled" yaml:"enabled"`
+	PollingIntervalSeconds int     `mapstructure:"polling_interval_seconds" yaml:"polling_interval_seconds"`
+	ListURL                string  `mapstructure:"list_url" yaml:"list_url"`
+	ClaimURLPattern        string  `mapstructure:"claim_url_pattern" yaml:"claim_url_pattern"` // Pattern like /api/tasks/v1/organizations/%s/listings/%s/campaigns/%s/tasks/%s/transitions
+	ClaimMinPayout         float64 `mapstructure:"claim_min_payout" yaml:"claim_min_payout"`   // Minimum payout to consider claiming
+	ClaimMaxPayout         float64 `mapstructure:"claim_max_payout" yaml:"claim_max_payout"`   // Maximum payout to consider claiming (e.g., up to $50)
+}
+
+// UIConfig holds UI related configuration.
+type UIConfig struct {
+	ShowSynackSection bool `mapstructure:"showSynackSection" yaml:"showSynackSection"`
+}
+
+// Configuration is the main application configuration struct.
 type Configuration struct {
-	Database struct {
-		Path string `mapstructure:"path"`
-	} `mapstructure:"database"`
-	Server struct {
-		Port    string `mapstructure:"port"`
-		LogPath string `mapstructure:"log_path"`
-	} `mapstructure:"server"`
-	Proxy struct {
-		Port                  string `mapstructure:"port"`
-		CACertPath            string `mapstructure:"ca_cert_path"`
-		CAKeyPath             string `mapstructure:"ca_key_path"`
-		LogPath               string `mapstructure:"log_path"`
-		ModifierSkipTLSVerify bool   `mapstructure:"modifier_skip_tls_verify"`
-		ModifierAllowLoopback bool   `mapstructure:"modifier_allow_loopback"`
-	} `mapstructure:"proxy"`
-	Logging struct {
-		Level string `mapstructure:"level"`
-	} `mapstructure:"logging"`
-	Synack struct {
-		TargetsURL           string `mapstructure:"targets_url"`
-		TargetIDField        string `mapstructure:"target_id_field"`
-		AnalyticsEnabled     bool   `mapstructure:"analytics_enabled"`
-		AnalyticsBaseURL     string `mapstructure:"analytics_base_url"`
-		AnalyticsPathPattern string `mapstructure:"analytics_path_pattern"`
-		TargetNameField      string `mapstructure:"target_name_field"`
-		TargetsArrayPath     string `mapstructure:"targets_array_path"`
-		// Fields for individual findings
-		FindingsEnabled                  bool   `mapstructure:"findings_enabled"`
-		FindingsBaseURL                  string `mapstructure:"findings_base_url"`
-		FindingsPathPattern              string `mapstructure:"findings_path_pattern"`                 // Path for a separate findings endpoint (currently unused if findings are in analytics)
-		FindingsArrayPathInAnalyticsJson string `mapstructure:"findings_array_path_in_analytics_json"` // GJSON path to findings array within the analytics response
-	} `mapstructure:"synack"`
-	UI struct {
-		ShowSynackSection bool `mapstructure:"showSynackSection" yaml:"showSynackSection"`
-	} `mapstructure:"ui"`
+	Database DatabaseConfig `mapstructure:"database" yaml:"database"`
+	Server   ServerConfig   `mapstructure:"server" yaml:"server"`
+	Proxy    ProxyConfig    `mapstructure:"proxy" yaml:"proxy"`
+	Logging  LoggingConfig  `mapstructure:"logging" yaml:"logging"`
+	Synack   SynackConfig   `mapstructure:"synack" yaml:"synack"`
+	Missions MissionsConfig `mapstructure:"missions" yaml:"missions"`
+	UI       UIConfig       `mapstructure:"ui" yaml:"ui"`
 }
 
 var AppConfig Configuration
+var configFileUsedPath string // Stores the path of the config file viper actually used/tried to use
 
 func expandTilde(path string) (string, error) {
 	if !strings.HasPrefix(path, "~") {
@@ -128,6 +158,13 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 	v.SetDefault("synack.findings_base_url", "https://platform.synack.com")                                // Example, adjust as needed
 	v.SetDefault("synack.findings_path_pattern", "/api/v1/targets/%s/vulnerabilities")                     // Example, adjust as needed
 	v.SetDefault("synack.findings_array_path_in_analytics_json", "value.#.exploitable_locations|@flatten") // Corrected default GJSON path
+	// Defaults for new missions fields
+	v.SetDefault("missions.enabled", false)
+	v.SetDefault("missions.polling_interval_seconds", 10)
+	v.SetDefault("missions.list_url", "https://platform.synack.com/api/tasks?perPage=20&viewed=true&page=1&status=PUBLISHED&sort=CLAIMABLE&sortDir=DESC&includeAssignedBySynackUser=true")
+	v.SetDefault("missions.claim_url_pattern", "https://platform.synack.com/api/tasks/v1/organizations/%s/listings/%s/campaigns/%s/tasks/%s/transitions") // orgId, listingId, campaignId, taskId
+	v.SetDefault("missions.claim_min_payout", 0.0)   // Default to claim any mission with a payout (can be set higher)
+	v.SetDefault("missions.claim_max_payout", 50.0)  // Default to claim missions with payout $50 or less
 
 	if cfgFile != "" {
 		expandedCfgFile, err := expandTilde(cfgFile)
@@ -148,21 +185,40 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 	v.SetEnvPrefix("TOOLKIT")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	var actualCfgFileUsed string
 	configUsedMsg := "Using default/environment configuration."
 	readErr := v.ReadInConfig()
+
 	if readErr == nil {
-		configUsedMsg = fmt.Sprintf("Using config file: %s", v.ConfigFileUsed())
+		actualCfgFileUsed = v.ConfigFileUsed()
+		configUsedMsg = fmt.Sprintf("Using config file: %s", actualCfgFileUsed)
 	} else {
-		if _, ok := readErr.(viper.ConfigFileNotFoundError); ok {
-			if cfgFile != "" {
-				fmt.Fprintf(os.Stderr, "Warning: Config file specified by flag (%s) not found: %v\n", cfgFile, readErr)
-			} else {
-				fmt.Fprintln(os.Stderr, "No default config file found. Using defaults/environment variables.")
+		if cfgFile != "" { // User specified a file
+			// v.ConfigFileUsed() should return the path set by SetConfigFile, even if read failed
+			actualCfgFileUsed = v.ConfigFileUsed()
+			if actualCfgFileUsed == "" { // If SetConfigFile was called with empty or somehow viper cleared it
+				actualCfgFileUsed = cfgFile // Fallback to the original flag value
 			}
-		} else {
-			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", v.ConfigFileUsed(), readErr)
+			if _, ok := readErr.(viper.ConfigFileNotFoundError); ok {
+				configUsedMsg = fmt.Sprintf("Config file specified (%s) not found. Will create on save.", actualCfgFileUsed)
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", configUsedMsg)
+			} else {
+				configUsedMsg = fmt.Sprintf("Error reading specified config file %s: %v. Will attempt to overwrite on save.", actualCfgFileUsed, readErr)
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", configUsedMsg)
+			}
+		} else { // No specific file, Viper searched defaults
+			if _, ok := readErr.(viper.ConfigFileNotFoundError); ok {
+				actualCfgFileUsed = "" // Indicate no file was used, save will use default path.
+				configUsedMsg = "No default config file found. Using defaults/environment variables. Will save to default path."
+				fmt.Fprintln(os.Stderr, configUsedMsg)
+			} else { // Error reading a default file that was found.
+				actualCfgFileUsed = v.ConfigFileUsed()
+				configUsedMsg = fmt.Sprintf("Error reading default config file %s: %v. Will attempt to overwrite on save.", actualCfgFileUsed, readErr)
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", configUsedMsg)
+			}
 		}
 	}
+	configFileUsedPath = actualCfgFileUsed // Set the global package variable
 
 	if err := v.Unmarshal(&AppConfig); err != nil {
 		fmt.Fprintf(os.Stderr, "CRITICAL: Error unmarshalling configuration: %v\n", err)
@@ -258,4 +314,34 @@ func Init(cfgFile string, flagAppLogPath, flagProxyLogPath, flagLogLevel string)
 
 	logger.Debug("Final AppConfig Initialized: %+v", AppConfig)
 	return nil
+}
+
+// SaveAppConfig persists the current AppConfig to the configuration file.
+func SaveAppConfig() error {
+	filePathToSave := configFileUsedPath
+
+	if filePathToSave == "" {
+		// No config file was loaded or specified initially, so save to the default location.
+		defaults := GetDefaultConfigPaths()
+		// Ensure the default config directory exists first.
+		if err := os.MkdirAll(defaults.ConfigDir, 0750); err != nil {
+			return fmt.Errorf("failed to create default config directory %s: %w", defaults.ConfigDir, err)
+		}
+		filePathToSave = filepath.Join(defaults.ConfigDir, "config.yaml") // Viper's default name and type
+		logger.Info("No specific config file was loaded. Saving to default path: %s", filePathToSave)
+	}
+
+	// Ensure the directory for the target file path exists.
+	dir := filepath.Dir(filePathToSave)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("failed to create directory %s for config file: %w", dir, err)
+	}
+
+	yamlData, err := yaml.Marshal(&AppConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal AppConfig to YAML: %w", err)
+	}
+
+	logger.Info("Attempting to save application configuration to %s", filePathToSave)
+	return os.WriteFile(filePathToSave, yamlData, 0640) // Permissions like 0640 (rw-r-----) or 0600 (rw-------)
 }

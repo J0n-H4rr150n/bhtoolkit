@@ -87,21 +87,21 @@ export async function saveTableLayouts(layouts) {
 }
 
 /**
- * Fetches UI settings.
+ * Fetches application settings (includes UI, Missions, etc.).
  * @returns {Promise<Object>}
  */
-export async function getUISettings() {
-    const response = await fetch(`${API_BASE}/ui-settings`);
+export async function getAppSettings() {
+    const response = await fetch(`${API_BASE}/settings/app`);
     return handleResponse(response);
 }
 
 /**
- * Saves UI settings.
- * @param {Object} settings - The UI settings to save (e.g., { showSynackSection: true }).
+ * Saves application settings.
+ * @param {Object} settings - The application settings to save (e.g., { ui: { showSynackSection: true }, missions: { claim_min_payout: 0 } }).
  * @returns {Promise<Object>}
  */
-export async function saveUISettings(settings) {
-    const response = await fetch(`${API_BASE}/ui-settings`, {
+export async function saveAppSettings(settings) {
+    const response = await fetch(`${API_BASE}/settings/app`, {
         method: 'PUT', // Or POST, depending on your backend implementation
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
@@ -752,6 +752,20 @@ export async function updateModifierTasksOrder(taskOrders) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(taskOrders),
     });
+    return handleResponse(response);
+}
+
+// --- Synack Missions API ---
+
+/**
+ * Fetches observed Synack missions from the backend.
+ * @param {Object} params - Optional query parameters (e.g., for pagination, filtering).
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of mission objects.
+ */
+export async function getObservedMissions(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    // Example endpoint, adjust if your backend endpoint is different
+    const response = await fetch(`${API_BASE}/synack/missions/observed?${query}`);
     return handleResponse(response);
 }
 

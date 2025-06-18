@@ -88,6 +88,10 @@ async function loadView(viewId, params = {}) {
             pageTitle = "Synack Target Analytics";
             breadcrumbSegments = [{ name: "Synack Targets", hash: "#synack-targets" }, { name: "Analytics" }];
             break;
+        case 'synack-missions':
+            pageTitle = "Synack Missions";
+            breadcrumbSegments = [{ name: "Synack Targets", hash: "#synack-targets" }, { name: "Missions" }];
+            break;
         case 'proxy-log':
             pageTitle = "Proxy Log";
             breadcrumbSegments = [{ name: "Proxy Log" }];
@@ -192,6 +196,10 @@ async function loadView(viewId, params = {}) {
             setState({ paginationState: newPaginationState });
             if (viewLoaders.loadSynackAnalyticsView) viewLoaders.loadSynackAnalyticsView();
             else console.error("loadSynackAnalyticsView not found in viewLoaders");
+            break;
+        case 'synack-missions':
+            if (viewLoaders.loadSynackMissionsView) viewLoaders.loadSynackMissionsView();
+            else console.error("loadSynackMissionsView not found in viewLoaders");
             break;
         case 'proxy-log':
             let newProxyLogSortBy = (params.sort_by && params.sort_by !== 'null' && params.sort_by !== 'undefined') ? params.sort_by : 'id'; // Default to 'id'

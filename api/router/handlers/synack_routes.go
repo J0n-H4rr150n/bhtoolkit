@@ -38,4 +38,7 @@ func RegisterSynackRoutes(r chi.Router) {
 		})
 	})
 	r.Get("/synack-analytics/all", ListAllSynackAnalyticsHandler)
+
+	// New route for observed missions
+	r.Get("/synack/missions/observed", ListObservedMissionsHandler)
 }

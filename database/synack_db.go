@@ -428,6 +428,75 @@ func UpsertSynackFinding(finding models.SynackFinding) (int64, error) {
 	return findingDBID, nil
 }
 
+// ListObservedMissionsPaginated retrieves a paginated list of observed Synack missions.
+func ListObservedMissionsPaginated(limit int, offset int, sortByColumn string, sortOrder string) ([]models.SynackMission, int64, error) {
+	var missions []models.SynackMission
+	var totalRecords int64
+
+	// Count total records
+	countQuery := `SELECT COUNT(*) FROM synack_missions`
+	err := DB.QueryRow(countQuery).Scan(&totalRecords)
+	if err != nil {
+		logger.Error("ListObservedMissionsPaginated: Error counting missions: %v", err)
+		return nil, 0, fmt.Errorf("counting missions: %w", err)
+	}
+
+	if totalRecords == 0 {
+		return missions, 0, nil
+	}
+
+	// Validate sortByColumn to prevent SQL injection and ensure it's a valid column
+	allowedSortColumns := map[string]string{
+		"id":                    "id",
+		"synack_task_id":        "synack_task_id",
+		"title":                 "title",
+		"listing_codename":      "listing_codename",
+		"payout_amount":         "payout_amount",
+		"status":                "status",
+		"claimed_by_toolkit_at": "claimed_by_toolkit_at",
+		"synack_api_expires_at": "synack_api_expires_at",
+		"created_at":            "created_at",
+		"updated_at":            "updated_at",
+	}
+	dbSortColumn, ok := allowedSortColumns[sortByColumn]
+	if !ok {
+		dbSortColumn = "created_at" // Default sort column
+	}
+
+	// Validate sortOrder
+	if strings.ToUpper(sortOrder) != "ASC" && strings.ToUpper(sortOrder) != "DESC" {
+		sortOrder = "DESC" // Default sort order
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, synack_task_id, title, description, campaign_name, organization_uid, listing_uid, listing_codename,
+		       campaign_uid, payout_amount, payout_currency, status, claimed_by_toolkit_at, synack_api_claimed_at,
+		       synack_api_expires_at, raw_mission_details_json, notes, created_at, updated_at
+		FROM synack_missions
+		ORDER BY %s %s, id %s
+		LIMIT ? OFFSET ?
+	`, dbSortColumn, sortOrder, sortOrder) // Add secondary sort by id for stable pagination
+
+	rows, err := DB.Query(query, limit, offset)
+	if err != nil {
+		logger.Error("ListObservedMissionsPaginated: Error querying missions: %v", err)
+		return nil, totalRecords, fmt.Errorf("querying missions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m models.SynackMission
+		// Ensure all fields in models.SynackMission are scanned correctly, especially nullable ones.
+		// The Scan method will automatically handle sql.NullTime, sql.NullString, etc.
+		if err := rows.Scan(&m.ID, &m.SynackTaskID, &m.Title, &m.Description, &m.CampaignName, &m.OrganizationUID, &m.ListingUID, &m.ListingCodename, &m.CampaignUID, &m.PayoutAmount, &m.PayoutCurrency, &m.Status, &m.ClaimedByToolkitAt, &m.SynackAPIClaimedAt, &m.SynackAPIExpiresAt, &m.RawMissionDetailsJSON, &m.Notes, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			logger.Error("ListObservedMissionsPaginated: Error scanning mission row: %v", err)
+			return nil, totalRecords, fmt.Errorf("scanning mission row: %w", err)
+		}
+		missions = append(missions, m)
+	}
+	return missions, totalRecords, rows.Err()
+}
+
 func ListSynackTargetsPaginated(limit int, offset int, sortByColumn string, sortOrder string, filterIsActive *bool) ([]models.SynackTarget, int64, error) {
 	var targets []models.SynackTarget
 	var totalRecords int64

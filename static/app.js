@@ -23,6 +23,7 @@ import { initModifierView, loadModifierView } from './views/modifierView.js';
 import { initPageSitemapView, loadPageSitemapView } from './views/pageSitemapView.js';
 import { initVisualizerView, loadVisualizerView } from './views/visualizerView.js';
 import { initDomainsView, loadDomainsView } from './views/domainsView.js';
+import { initSynackMissionsView, loadSynackMissionsView } from './views/synackMissionsView.js';
 
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -143,6 +144,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initPageSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initVisualizerView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initDomainsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
+    initSynackMissionsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
 
     await fetchAndSetInitialCurrentTarget();
 
@@ -174,7 +176,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             loadModifierView: (params) => loadModifierView(viewContentContainer, params),
             loadPageSitemapView: () => loadPageSitemapView(viewContentContainer),
             loadVisualizerView: () => loadVisualizerView(viewContentContainer),
-            loadDomainsView: () => loadDomainsView(viewContentContainer) // Added domains view loader
+            loadDomainsView: () => loadDomainsView(viewContentContainer),
+            loadSynackMissionsView: () => loadSynackMissionsView(viewContentContainer)
         },
         getPlatformDetailsFunc: apiService.getPlatformDetails,
         cancelTargetEditFunc: cancelActiveTargetEdit,
@@ -636,9 +639,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    function applyUiSettings(settings) { 
+    function applyUiSettings(uiSettings) { // Changed 'settings' to 'uiSettings' for clarity
         // console.log('[App.js] applyUiSettings called with settings:', JSON.parse(JSON.stringify(settings)));
-        const showSynack = settings && typeof settings === 'object' && settings.showSynackSection === true;
+        // 'uiSettings' is now always expected to be an object like { showSynackSection: true/false }
+        const showSynack = uiSettings && uiSettings.ShowSynackSection === true; // Corrected case
         // console.log('[App.js] applyUiSettings - showSynack evaluated to:', showSynack);
 
         const synackSection = document.getElementById('synack-sidebar-section');
@@ -1032,7 +1036,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         let fetchedCurrentTargetId = null;
         let fetchedCurrentTargetName = 'None';
         let fetchedGlobalTableLayouts = {};
-        let fetchedUiSettings = { showSynackSection: false }; 
+        let fetchedAppSettings = { // Default structure if API call fails or returns unexpected data
+            ui: { showSynackSection: false },
+            missions: { enabled: false /* other mission defaults if needed by other parts of app.js */ }
+        };
 
         try {
             const currentTargetSetting = await apiService.getCurrentTargetSetting();
@@ -1052,17 +1059,28 @@ document.addEventListener('DOMContentLoaded', async function() {
             } 
 
             fetchedGlobalTableLayouts = await apiService.getTableLayouts();
-            fetchedUiSettings = await apiService.getUISettings();
+            const appSettingsFromApi = await apiService.getAppSettings();
+            console.log('[App.js] appSettingsFromApi:', JSON.parse(JSON.stringify(appSettingsFromApi)));
+
+            if (appSettingsFromApi && appSettingsFromApi.ui !== undefined && appSettingsFromApi.missions !== undefined) {
+                fetchedAppSettings = appSettingsFromApi;
+            } else {
+                console.warn("[App.js] getAppSettings did not return the expected structure. Using defaults for UI/Missions settings. API Response was:", JSON.parse(JSON.stringify(appSettingsFromApi)));
+                console.warn("[App.js] getAppSettings did not return the expected structure. Using defaults for UI/Missions settings.", appSettingsFromApi);
+                // fetchedAppSettings retains its default structure defined above
+            }
 
         } catch (error) {
             console.error("Error fetching initial settings:", error);
+            // fetchedAppSettings retains its default structure defined above in case of error
         } finally {
             initState({
                 currentTargetId: fetchedCurrentTargetId,
                 currentTargetName: fetchedCurrentTargetName,
                 globalTableLayouts: fetchedGlobalTableLayouts
             });
-            applyUiSettings(fetchedUiSettings); // This is the crucial call
+            console.log('[App.js] About to call applyUiSettings with fetchedAppSettings.ui:', JSON.parse(JSON.stringify(fetchedAppSettings.ui)));
+            applyUiSettings(fetchedAppSettings.ui); // Now fetchedAppSettings.ui will always be an object
 
             if (currentTargetDisplay) {
                 const appState = getState(); 

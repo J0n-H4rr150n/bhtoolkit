@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os" // Added import for os.Signal
 	// "os" // Not used
+	"os/signal"
+	"syscall"
 	"toolkit/config"
 	"toolkit/core"
+	"toolkit/database"
 	"toolkit/logger"
 
 	"github.com/spf13/cobra"
@@ -53,10 +58,39 @@ A CA certificate (e.g., mytool-ca.crt) must be generated (using 'proxy init-ca')
 		}
 		logger.ProxyInfo("Proxy using CA Cert: %s, CA Key: %s", caCertPath, caKeyPath)
 
-		err := core.StartMitmProxy(portToUse, targetIDToUse, caCertPath, caKeyPath)
-		if err != nil {
-			logger.ProxyError("Error starting proxy: %v", err)
+		// Create a context for graceful shutdown for the standalone proxy
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Initialize a mission service instance for the standalone proxy.
+		// If standalone proxy doesn't actively use mission features,
+		// its internal polling might not start if config.AppConfig.Missions.Enabled is false.
+		// However, core.StartMitmProxy now expects it.
+		missionService := core.NewSynackMissionService(ctx, &config.AppConfig, database.DB)
+		if config.AppConfig.Missions.Enabled {
+			logger.Info("Standalone Proxy: Synack Mission Polling Service is enabled, starting it.")
+			missionService.Start() // Start polling if enabled
+		} else {
+			logger.Info("Standalone Proxy: Synack Mission Polling Service is disabled.")
 		}
+
+		go func() {
+			if err := core.StartMitmProxy(ctx, portToUse, targetIDToUse, caCertPath, caKeyPath, missionService); err != nil {
+				logger.ProxyError("Error starting proxy: %v", err)
+				cancel() // Cancel context if proxy fails to start
+			}
+		}()
+
+		// Wait for termination signal to gracefully shut down the standalone proxy
+		sig := make(chan os.Signal, 1) 
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+
+		logger.ProxyInfo("Standalone proxy shutting down...")
+		cancel() // Trigger context cancellation
+		// Allow some time for services to shut down, though StartMitmProxy handles its own server.Shutdown
+		// missionService.Stop() // Context cancellation should handle this.
+		logger.ProxyInfo("Standalone proxy shutdown complete.")
 	},
 }
 

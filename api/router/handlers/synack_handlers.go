@@ -374,3 +374,61 @@ func RefreshSynackTargetFindingsHandler(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Findings refresh initiated. The data may take a few minutes to update."})
 }
+
+// ListObservedMissionsHandler handles GET requests to list observed Synack missions.
+func ListObservedMissionsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		logger.Error("ListObservedMissionsHandler: MethodNotAllowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	queryParams := r.URL.Query()
+	pageStr := queryParams.Get("page")
+	limitStr := queryParams.Get("limit")
+	sortByParam := queryParams.Get("sort_by")
+	sortOrderParam := strings.ToUpper(queryParams.Get("sort_order"))
+
+	page, _ := strconv.Atoi(pageStr)
+	if page < 1 {
+		page = 1
+	}
+
+	limit, _ := strconv.Atoi(limitStr)
+	if limit < 1 || limit > 200 { // Cap limit
+		limit = 50 // Default limit for missions
+	}
+	offset := (page - 1) * limit
+
+	// Define allowed sort keys for missions
+	allowedSortKeys := map[string]bool{"id": true, "title": true, "payout_amount": true, "status": true, "claimed_by_toolkit_at": true, "created_at": true, "updated_at": true}
+	dbSortColumnKey := sortByParam
+	if !allowedSortKeys[sortByParam] {
+		dbSortColumnKey = "created_at" // Default sort
+	}
+
+	dbSortOrder := "DESC" // Default sort order
+	if sortOrderParam == "ASC" {
+		dbSortOrder = "ASC"
+	}
+
+	missions, totalRecords, err := database.ListObservedMissionsPaginated(limit, offset, dbSortColumnKey, dbSortOrder)
+	if err != nil {
+		logger.Error("ListObservedMissionsHandler: Error listing observed missions: %v", err)
+		http.Error(w, "Failed to list observed missions", http.StatusInternalServerError)
+		return
+	}
+
+	response := models.PaginatedResponse{ // Using the generic paginated response
+		Page:         page,
+		Limit:        limit,
+		TotalRecords: int(totalRecords), // Cast totalRecords to int for generic struct
+		TotalPages:   int((totalRecords + int64(limit) - 1) / int64(limit)),
+		Records:      missions,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.Error("ListObservedMissionsHandler: Error encoding response: %v", err)
+	}
+}

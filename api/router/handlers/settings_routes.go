@@ -33,4 +33,10 @@ func RegisterSettingsRoutes(r chi.Router) {
 		r.Post("/", SetProxyExclusionRulesHandler)
 		r.Put("/", SetProxyExclusionRulesHandler)
 	})
+
+	// New route for general application settings (UI, Missions, etc.)
+	r.Route("/settings/app", func(r chi.Router) {
+		r.Get("/", GetApplicationSettingsHandler)  // New handler
+		r.Put("/", SaveApplicationSettingsHandler) // New handler
+	})
 }

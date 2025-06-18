@@ -114,6 +114,24 @@ let state = {
             commentText: { default: 'auto', id: 'col-comment-text', visible: true, label: 'Comment Text', sortKey: null }, // Not sortable by text directly
             contextBefore: { default: '25%', id: 'col-comment-ctxbefore', visible: true, label: 'Context Before', sortKey: null },
             contextAfter: { default: '25%', id: 'col-comment-ctxafter', visible: true, label: 'Context After', sortKey: null }
+        },
+        synackMissionsView: { // New state for Synack Missions list
+            currentPage: 1,
+            limit: 25,
+            sortBy: 'created_at', // Default sort column in DB
+            sortOrder: 'DESC',
+            totalPages: 0,
+            totalRecords: 0,
+        },
+        synackMissionsTableLayout: { // New layout for Synack Missions table
+            // Ensure sortKey matches the actual DB column name or an alias the backend can use
+            id: { label: 'Mission ID', default: '15%', visible: true, sortKey: 'synack_task_id', id: 'col-mission-list-id' },
+            title: { label: 'Title', default: '35%', visible: true, sortKey: 'title', id: 'col-mission-list-title' },
+            payout_amount: { label: 'Payout', default: '10%', visible: true, sortKey: 'payout_amount', id: 'col-mission-list-payout' },
+            status: { label: 'Status', default: '15%', visible: true, sortKey: 'status', id: 'col-mission-list-status' },
+            // Assuming 'updated_at' or 'created_at' for "Last Seen"
+            updated_at: { label: 'Last Seen/Updated', default: '15%', visible: true, sortKey: 'updated_at', id: 'col-mission-list-lastseen' },
+            claimed_by_toolkit_at: { label: 'Claimed By Toolkit', default: 'auto', visible: true, sortKey: 'claimed_by_toolkit_at', id: 'col-mission-list-claimed' },
         }
     }
 };

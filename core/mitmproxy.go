@@ -15,6 +15,7 @@ import (
 	"log" // Standard log package for goproxy.Logger config
 	"math/big"
 	"net"
+	"context" // Added for graceful shutdown
 	"net/http"
 	"net/url"
 	"os"
@@ -47,6 +48,7 @@ var (
 	globalExclusionRules  []models.ProxyExclusionRule
 	activeRecordingPageID *int64
 	// Added for rate limiting analytics calls
+	globalMissionService *SynackMissionService // To make mission service available to proxy handlers
 	analyticsFetchTicker *time.Ticker
 )
 
@@ -389,12 +391,18 @@ func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRul
 	return false
 }
 
-func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath string) error {
+// StartMitmProxy starts the MITM proxy server.
+// It now accepts a context for graceful shutdown and the SynackMissionService instance.
+func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertPath string, caKeyPath string, missionService *SynackMissionService) error {
 	if err := loadCA(caCertPath, caKeyPath); err != nil {
 		return fmt.Errorf("could not load CA certificate/key: %w. Please run 'proxy init-ca' or check config.", err)
 	}
 
 	setGoproxyCA(&tls.Certificate{
+		// Certificate: [][]byte{caCert.Raw}, // This was the old way
+		// PrivateKey:  caKey,
+		// Leaf:        caCert,
+		// The above is now handled by goproxy.GoproxyCa directly if setGoproxyCA is called with a valid cert.
 		Certificate: [][]byte{caCert.Raw},
 		PrivateKey:  caKey,
 		Leaf:        caCert,
@@ -402,6 +410,7 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 
 	scopeMu.Lock()
 	if cliTargetID != 0 {
+		// activeTargetID is already a pointer, so no need to take address of cliTargetID if it's not a pointer.
 		activeTargetID = &cliTargetID
 		logger.ProxyInfo("Proxy started with explicit target ID from CLI: %d", *activeTargetID)
 	} else {
@@ -455,6 +464,10 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 	} else {
 		parsedSynackTargetURL = nil
 	}
+
+	// Make the mission service instance available globally within this package
+	// or pass it into the handlers if a more encapsulated approach is preferred.
+	globalMissionService = missionService
 
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Logger = log.New(io.Discard, "", 0)
@@ -576,7 +589,12 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 				authToken := r.Header.Get("Authorization")
 				if strings.HasPrefix(authToken, "Bearer ") {
 					ctxData.SynackAuthToken = authToken
-					logger.ProxyInfo("Captured Authorization token for Synack target list request.")
+					// Also immediately update the mission service
+					if globalMissionService != nil {
+						globalMissionService.SetAuthToken(authToken)
+					} else {
+						logger.Warn("globalMissionService is nil, cannot set auth token for missions.")
+					}
 				} else if authToken != "" {
 					logger.ProxyInfo("WARNING: Found Authorization header for Synack target list, but it's not a Bearer token.")
 				}
@@ -667,7 +685,25 @@ func StartMitmProxy(port string, cliTargetID int64, caCertPath string, caKeyPath
 		})
 
 	logger.ProxyInfo("MITM Proxy server starting on :%s", port)
-	return http.ListenAndServe(":"+port, proxy)
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: proxy,
+	}
+
+	go func() {
+		<-ctx.Done() // Wait for cancellation signal
+		logger.ProxyInfo("MITM Proxy server shutting down...")
+		if err := server.Shutdown(context.Background()); err != nil {
+			logger.ProxyError("MITM Proxy server shutdown error: %v", err)
+		}
+	}()
+
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		logger.ProxyError("MITM Proxy server ListenAndServe error: %v", err)
+		return err
+	}
+	logger.ProxyInfo("MITM Proxy server stopped gracefully.")
+	return nil
 }
 
 func logHttpTraffic(logEntry *models.HTTPTrafficLog) {
