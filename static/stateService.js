@@ -93,6 +93,10 @@ let state = {
             filterSource: '',
             filterIsFavorite: false, // New filter state
             filterIsInScope: null, // null means 'all' (no filter), true for 'In Scope', false for 'Out of Scope'
+            filterHttpxScanStatus: 'all', // New: "all", "scanned", "not_scanned"
+            filterHTTPStatusCode: '', // New for dropdown
+            filterHTTPServer: '',     // New for dropdown
+            filterHTTPTech: '',       // New for dropdown
             totalPages: 0,
             totalRecords: 0,
         },
@@ -100,13 +104,19 @@ let state = {
             checkbox: { default: '3%', id: 'col-domain-checkbox', visible: true, label: '<input type="checkbox" id="selectAllDomainsCheckbox" title="Select/Deselect All Visible">', sortKey: null, nonResizable: true, nonHideable: true, isHtmlLabel: true },
             id: { default: '4%', id: 'col-domain-row-number', visible: true, label: '#', sortKey: 'id' }, // Restore sortKey to 'id'
             is_favorite: { default: '4%', id: 'col-domain-favorite', visible: false, label: '★', sortKey: 'is_favorite', nonResizable: true }, // Hidden, will be part of actions
-            domain_name: { default: '30%', id: 'col-domain-name', visible: true, label: 'Domain Name', sortKey: 'domain_name' },
-            source: { default: '15%', id: 'col-domain-source', visible: true, label: 'Source', sortKey: 'source' },
-            is_in_scope: { default: '8%', id: 'col-domain-inscope', visible: true, label: 'In Scope?', sortKey: 'is_in_scope' },
+            domain_name: { default: '25%', id: 'col-domain-name', visible: true, label: 'Domain Name', sortKey: 'domain_name' },
+            source: { default: '10%', id: 'col-domain-source', visible: true, label: 'Source', sortKey: 'source' },
+            http_status_code: { default: '7%', id: 'col-domain-status', visible: true, label: 'Status', sortKey: 'http_status_code' },
+            http_content_length: { default: '7%', id: 'col-domain-length', visible: true, label: 'Length', sortKey: 'http_content_length' },
+            http_title: { default: '15%', id: 'col-domain-title', visible: true, label: 'Title', sortKey: 'http_title' },
+            http_tech: { default: '15%', id: 'col-domain-tech', visible: true, label: 'Tech', sortKey: 'http_tech' },
+            http_server: { default: '10%', id: 'col-domain-server', visible: true, label: 'Server', sortKey: 'http_server' },
+            is_in_scope: { default: '8%', id: 'col-domain-inscope', visible: false, label: 'In Scope?', sortKey: 'is_in_scope' },
             is_wildcard_scope: { default: '8%', id: 'col-domain-wildcard', visible: false, label: 'Wildcard?', sortKey: 'is_wildcard_scope'}, // Hidden
-            notes: { default: 'auto', id: 'col-domain-notes', visible: true, label: 'Notes', sortKey: 'notes' }, // 'auto' will take remaining space
-            created_at: { default: '10%', id: 'col-domain-created', visible: true, label: 'Created At', sortKey: 'created_at' },
-            actions: { default: '120px', id: 'col-domain-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true }
+            notes: { default: '15%', id: 'col-domain-notes', visible: true, label: 'Notes', sortKey: 'notes' },
+            last_httpx_result: { default: '12%', id: 'col-domain-httpx-scan', visible: true, label: 'Last HTTPX Result', sortKey: 'updated_at' }, // New column
+            created_at: { default: 'auto', id: 'col-domain-created', visible: true, label: 'Created At', sortKey: 'created_at' },
+            actions: { default: '150px', id: 'col-domain-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true }
         }, // Note: The actual database ID is still available in the `domain.id` object property for actions.
         commentAnalysisTableLayout: { // New layout for the comments table
             lineNumber: { default: '80px', id: 'col-comment-linenum', visible: true, label: 'Line#', sortKey: 'lineNumber' },

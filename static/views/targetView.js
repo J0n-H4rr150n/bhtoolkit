@@ -415,3 +415,159 @@ export async function loadTargetsView(viewContentContainer, platformIdFilter = n
 
     await fetchAndDisplayTargets(viewContentContainer, platformIdFilter);
 }
+
+/**
+ * Imports scope rules from JSON pasted from the clipboard.
+ * @param {number|string} targetId - The ID of the target to import rules for.
+ */
+export async function importScopeRulesFromClipboard(targetId) {
+    if (!apiService || !uiService) {
+        console.error("TargetView or its services not initialized for importScopeRulesFromClipboard.");
+        alert("Error: Import functionality not ready."); // Basic fallback
+        return;
+    }
+
+    const jsonString = prompt("Paste the JSON scope rules here:");
+    if (!jsonString) {
+        uiService.showModalMessage("Import Cancelled", "No JSON data provided.");
+        return;
+    }
+
+    try {
+        const parsedJson = JSON.parse(jsonString);
+
+        if (!parsedJson.target || !parsedJson.target.scope || (!parsedJson.target.scope.include && !parsedJson.target.scope.exclude)) {
+            uiService.showModalMessage("Invalid JSON Structure", "The JSON must have a 'target.scope' object with 'include' and/or 'exclude' arrays.");
+            return;
+        }
+
+        const scopeRules = {
+            include: parsedJson.target.scope.include || [],
+            exclude: parsedJson.target.scope.exclude || []
+        };
+
+        let successCount = 0;
+        let errorCount = 0;
+        const errors = [];
+
+        const processRule = async (rule, isInScope) => {
+            const payload = {
+                target_id: parseInt(targetId, 10),
+                pattern: rule.host,
+                item_type: "domain", // Assuming 'domain' can handle regex patterns or is a suitable default
+                is_in_scope: isInScope,
+                description: `Protocol: ${rule.protocol}, File: ${rule.file}`
+            };
+            try {
+                await apiService.addScopeRule(payload);
+                successCount++;
+            } catch (err) {
+                errorCount++;
+                errors.push(`Failed to add rule (pattern: ${rule.host}): ${err.message}`);
+                console.error("Error adding scope rule:", err);
+            }
+        };
+
+        for (const rule of scopeRules.include) {
+            await processRule(rule, true);
+        }
+
+        for (const rule of scopeRules.exclude) {
+            await processRule(rule, false);
+        }
+
+        let resultMessage = `Import complete for target ID ${targetId}.<br>Successfully added: ${successCount} rules.<br>Failed: ${errorCount} rules.`;
+        if (errorCount > 0) {
+            resultMessage += `<br>Errors:<br>${errors.join('<br>')}`;
+            uiService.showModalMessage("Import Partially Successful", resultMessage);
+        } else {
+            uiService.showModalMessage("Import Successful", resultMessage);
+        }
+
+        // After successful import, you would typically refresh the scope rules display in app.js
+        console.log("[TargetView] TODO: Refresh scope rules view in app.js after import. Consider calling a function like 'loadCurrentTargetView(targetId, 'scopeRulesTab')'.");
+    } catch (error) {
+        console.error("Error parsing or processing scope JSON:", error);
+        uiService.showModalMessage("Import Error", `Failed to import scope rules: ${error.message}`);
+    }
+}
+
+/**
+ * Imports scope rules from a JSON file.
+ * @param {number|string} targetId - The ID of the target to import rules for.
+ * @param {File} file - The JSON file object.
+ */
+export async function importScopeRulesFromFile(targetId, file) {
+    if (!apiService || !uiService) {
+        console.error("TargetView or its services not initialized for importScopeRulesFromFile.");
+        alert("Error: File import functionality not ready.");
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const jsonString = e.target.result;
+        try {
+            const parsedJson = JSON.parse(jsonString);
+
+            if (!parsedJson.target || !parsedJson.target.scope || (!parsedJson.target.scope.include && !parsedJson.target.scope.exclude)) {
+                uiService.showModalMessage("Invalid JSON Structure", "The JSON file must have a 'target.scope' object with 'include' and/or 'exclude' arrays.");
+                return;
+            }
+
+            const scopeRules = {
+                include: parsedJson.target.scope.include || [],
+                exclude: parsedJson.target.scope.exclude || []
+            };
+
+            let successCount = 0;
+            let errorCount = 0;
+            const errors = [];
+
+            const processRule = async (rule, isInScope) => {
+                const payload = {
+                    target_id: parseInt(targetId, 10),
+                    pattern: rule.host,
+                    item_type: "domain", // Assuming 'domain' can handle regex patterns or is a suitable default
+                    is_in_scope: isInScope,
+                    description: `Protocol: ${rule.protocol}, File: ${rule.file}`
+                };
+                try {
+                    await apiService.addScopeRule(payload);
+                    successCount++;
+                } catch (err) {
+                    errorCount++;
+                    errors.push(`Failed to add rule (pattern: ${rule.host}): ${err.message}`);
+                    console.error("Error adding scope rule from file:", err);
+                }
+            };
+
+            for (const rule of scopeRules.include) {
+                await processRule(rule, true);
+            }
+
+            for (const rule of scopeRules.exclude) {
+                await processRule(rule, false);
+            }
+
+            let resultMessage = `File import complete for target ID ${targetId}.<br>Successfully added: ${successCount} rules.<br>Failed: ${errorCount} rules.`;
+            if (errorCount > 0) {
+                resultMessage += `<br>Errors:<br>${errors.join('<br>')}`;
+                uiService.showModalMessage("Import Partially Successful", resultMessage);
+            } else {
+                uiService.showModalMessage("Import Successful", resultMessage);
+            }
+
+            console.log("[TargetView] TODO: Refresh scope rules view in app.js after file import. Consider calling 'loadCurrentTargetView(targetId, 'scopeRulesTab')'.");
+
+        } catch (error) {
+            console.error("Error parsing or processing scope JSON from file:", error);
+            uiService.showModalMessage("Import Error", `Failed to import scope rules from file: ${error.message}`);
+        }
+    };
+    reader.onerror = (e) => {
+        console.error("FileReader error:", e);
+        uiService.showModalMessage("File Read Error", "Could not read the selected file.");
+    };
+    reader.readAsText(file);
+}

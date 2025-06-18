@@ -12,7 +12,7 @@ import {
     handleAddPlatform as handleAddPlatformModule,
     fetchAndDisplayPlatforms as fetchAndDisplayPlatformsModule
 } from './views/platformView.js';
-import { initTargetView, loadTargetsView, cancelActiveTargetEdit } from './views/targetView.js';
+import { initTargetView, loadTargetsView, cancelActiveTargetEdit, importScopeRulesFromClipboard } from './views/targetView.js';
 import { initProxyLogView, loadProxyLogView, loadProxyLogDetailView } from './views/proxyLogView.js';
 import { initSynackView, loadSynackTargetsView, loadSynackAnalyticsView } from './views/synackView.js';
 import { initChecklistView, fetchAndDisplayChecklistItems, cancelActiveChecklistItemEdit } from './views/checklistView.js';
@@ -21,6 +21,7 @@ import { initSettingsView, loadSettingsView } from './views/settingsView.js';
 import { initSitemapView, loadSitemapView } from './views/sitemapView.js';
 import { initModifierView, loadModifierView } from './views/modifierView.js';
 import { initPageSitemapView, loadPageSitemapView } from './views/pageSitemapView.js';
+import { initDomainDetailView, loadDomainDetailView } from './views/domainDetailView.js';
 import { initVisualizerView, loadVisualizerView } from './views/visualizerView.js';
 import { initDomainsView, loadDomainsView } from './views/domainsView.js';
 import { initSynackMissionsView, loadSynackMissionsView } from './views/synackMissionsView.js';
@@ -142,6 +143,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initModifierView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initPageSitemapView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
+    initDomainDetailView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initVisualizerView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI });
     initDomainsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
     initSynackMissionsView({ apiService, uiService: uiServiceAPI, stateService: stateServiceAPI, tableService: tableServiceAPI });
@@ -176,6 +178,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             loadModifierView: (params) => loadModifierView(viewContentContainer, params),
             loadPageSitemapView: () => loadPageSitemapView(viewContentContainer),
             loadVisualizerView: () => loadVisualizerView(viewContentContainer),
+            loadDomainDetailView: (container, domainId) => loadDomainDetailView(container, domainId),
             loadDomainsView: () => loadDomainsView(viewContentContainer),
             loadSynackMissionsView: () => loadSynackMissionsView(viewContentContainer)
         },
@@ -269,6 +272,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
                     <div id="scopeRulesTab" class="tab-content">
                         <h3>Scope Rules</h3>
+                        <button id="importScopeFromFileBtn" class="secondary small-button" style="margin-bottom: 10px; margin-right: 5px;">Import From File</button>
+                        <input type="file" id="scopeFileImportInput" style="display: none;" accept=".json">
                         <div id="addScopeRuleMessage" class="message-area" style="margin-bottom: 15px;"></div>
                         <div class="scope-forms-container" style="display: flex; gap: 20px; margin-bottom:20px;">
                             <form id="addInScopeRuleForm" class="scope-rule-form" data-in-scope="true" style="flex:1; padding:15px; border:1px solid #ddd; border-radius:4px;">
@@ -295,6 +300,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                         <div id="current-target-scope"></div>
                     </div>
                 `;
+                // Add import button to the scope rules tab *within* the innerHTML
+                const scopeTabContent = viewContentContainer.querySelector('#scopeRulesTab');
+                if (scopeTabContent) {
+                    const importButton = `<button id="importScopeFromClipboardBtn" class="secondary small-button" style="margin-bottom: 10px;">Import Scope from Clipboard</button>`;
+                    scopeTabContent.insertAdjacentHTML('afterbegin', importButton);
+                }
                 renderScopeRulesTable(document.getElementById('current-target-scope'), target.scope_rules || []);
 
                 const clearBtn = document.getElementById('clearCurrentTargetBtn');
@@ -305,7 +316,12 @@ document.addEventListener('DOMContentLoaded', async function() {
 
                 document.getElementById('addInScopeRuleForm')?.addEventListener('submit', handleAddScopeRule);
                 document.getElementById('addOutOfScopeRuleForm')?.addEventListener('submit', handleAddScopeRule);
-
+                document.getElementById('importScopeFromFileBtn')?.addEventListener('click', () => document.getElementById('scopeFileImportInput').click());
+                document.getElementById('scopeFileImportInput')?.addEventListener('change', (event) => handleScopeFileSelected(event, target.id));
+                document.getElementById('importScopeFromClipboardBtn')?.addEventListener('click', () => importScopeRulesFromClipboard(target.id));
+                
+                
+                
                 document.getElementById('editTargetNotesBtn')?.addEventListener('click', handleEditTargetNotes);
                 document.getElementById('saveTargetNotesBtn')?.addEventListener('click', handleSaveTargetNotes);
                 document.getElementById('cancelTargetNotesBtn')?.addEventListener('click', cancelTargetNotesEdit);
@@ -578,6 +594,27 @@ document.addEventListener('DOMContentLoaded', async function() {
                 showModalMessage('Error', `Error deleting scope rule: ${error.message}`);
             }
         });
+    }
+
+    async function handleScopeFileSelected(event, targetId) {
+        const file = event.target.files[0];
+        if (!file) {
+            showModalMessage("File Error", "No file selected.");
+            return;
+        }
+        if (file.type !== "application/json") {
+            showModalMessage("File Error", "Please select a valid JSON file (.json).");
+            return;
+        }
+
+        // We'll need a function in targetView.js to handle the file reading and API call
+        // For now, let's assume it exists and is named importScopeRulesFromFile
+        if (typeof importScopeRulesFromFile === 'function') { // Check if the function exists
+            importScopeRulesFromFile(targetId, file);
+        } else {
+            showModalMessage("Error", "File import functionality is not fully implemented yet (targetView.js).");
+        }
+        event.target.value = null; // Reset file input
     }
 
     async function fetchAndDisplayTargetFindings(targetId) {

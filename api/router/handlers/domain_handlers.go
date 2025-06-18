@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -156,7 +155,17 @@ func GetDomainsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	domains, totalRecords, err := database.GetDomains(filters)
+	// Filter by httpx scan status
+	filters.HttpxScanStatus = r.URL.Query().Get("httpx_scan_status")
+	if filters.HttpxScanStatus == "" {
+		filters.HttpxScanStatus = "all" // Default if not provided
+	}
+
+	// New distinct filters
+	filters.FilterHTTPStatusCode = r.URL.Query().Get("filter_http_status_code")
+	filters.FilterHTTPServer = r.URL.Query().Get("filter_http_server")
+	filters.FilterHTTPTech = r.URL.Query().Get("filter_http_tech")
+	domains, totalRecords, distinctValues, err := database.GetDomains(filters)
 	if err != nil {
 		logger.Error("GetDomainsHandler: Error getting domains for target %d: %v", targetID, err)
 		http.Error(w, "Failed to retrieve domains", http.StatusInternalServerError)
@@ -175,7 +184,7 @@ func GetDomainsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models.PaginatedDomainsResponse{
+	response := models.PaginatedDomainsResponse{
 		Page:         filters.Page,
 		Limit:        filters.Limit,
 		TotalRecords: totalRecords,
@@ -183,7 +192,13 @@ func GetDomainsHandler(w http.ResponseWriter, r *http.Request) {
 		SortBy:       filters.SortBy,
 		SortOrder:    filters.SortOrder,
 		Records:      domains,
-	})
+	}
+	if distinctValues != nil { // Populate distinct values if returned
+		response.DistinctHttpStatusCodes = distinctValues.DistinctHttpStatusCodes
+		response.DistinctHttpServers = distinctValues.DistinctHttpServers
+		response.DistinctHttpTechs = distinctValues.DistinctHttpTechs
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 // UpdateDomainHandler handles PUT requests to update an existing domain.
@@ -422,20 +437,59 @@ func ImportInScopeDomainsHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			domainToStore := originalPattern
+			// Default values
+			domainToStore := "" // Initialize to empty; will be set if rule is importable
 			isWildcard := false
-			var notesForDomain sql.NullString
+			notesForDomain := models.NullString(rule.Description) // Default to rule's description
 
 			if strings.HasPrefix(originalPattern, "*.") {
 				domainToStore = strings.TrimPrefix(originalPattern, "*.")
 				isWildcard = true
 				notesForDomain = models.NullString(fmt.Sprintf("Imported from wildcard scope: %s", originalPattern))
 			} else {
-				if rule.Description != "" {
-					notesForDomain = models.NullString(rule.Description)
+				// Attempt to simplify regex-like patterns
+				cleanedPattern := originalPattern
+				isPotentiallySimpleRegex := strings.HasPrefix(cleanedPattern, "^") && strings.HasSuffix(cleanedPattern, "$")
+
+				if isPotentiallySimpleRegex {
+					cleanedPattern = strings.TrimPrefix(cleanedPattern, "^")
+					cleanedPattern = strings.TrimSuffix(cleanedPattern, "$")
+				}
+				cleanedPattern = strings.ReplaceAll(cleanedPattern, "\\.", ".")
+
+				if strings.HasPrefix(cleanedPattern, ".+") {
+					domainPart := strings.TrimPrefix(cleanedPattern, ".+")
+					if strings.HasPrefix(domainPart, ".") {
+						domainToStore = strings.TrimPrefix(domainPart, ".")
+						notesForDomain = models.NullString(fmt.Sprintf("Imported from regex scope: %s (derived: %s)", originalPattern, domainToStore))
+					} else { // Should ideally have a dot, but handle if not
+						domainToStore = domainPart
+						notesForDomain = models.NullString(fmt.Sprintf("Imported from regex scope: %s (derived: %s)", originalPattern, domainToStore))
+					}
+				} else if !strings.ContainsAny(cleanedPattern, "^$+*?()[]{}|\\") {
+					// If no complex regex characters remain after basic cleaning
+					domainToStore = cleanedPattern
+					if originalPattern != cleanedPattern { // If simplification occurred
+						notesForDomain = models.NullString(fmt.Sprintf("Imported from regex-like scope: %s (simplified: %s)", originalPattern, domainToStore))
+					}
+				} else if strings.ContainsAny(originalPattern, "^$+*?()[]{}|\\") {
+					logger.Info("ImportInScopeDomainsHandler: Skipping import of complex regex scope rule '%s' into domains table for target %d.", originalPattern, targetID)
+					continue // Skip this rule
 				}
 			}
-
+			if domainToStore == "" && !isWildcard { // If not a wildcard and not simplified to a domain
+				if !strings.ContainsAny(originalPattern, "^$+*?()[]{}|\\") { // If it was a plain domain initially
+					domainToStore = originalPattern // Use original pattern if it was plain
+				} else {
+					// This case should ideally be caught by the complex regex skip, but as a fallback:
+					logger.Info("ImportInScopeDomainsHandler: Pattern '%s' for target %d was not converted to a simple domain and is not a wildcard; skipping.", originalPattern, targetID)
+					continue
+				}
+			}
+			if strings.TrimSpace(domainToStore) == "" {
+				logger.Info("ImportInScopeDomainsHandler: Derived domain to store is empty for original pattern '%s', target %d; skipping.", originalPattern, targetID)
+				continue
+			}
 			domainEntry := models.Domain{
 				TargetID:        targetID,
 				DomainName:      domainToStore,
@@ -503,6 +557,89 @@ func DeleteAllDomainsForTargetHandler(w http.ResponseWriter, r *http.Request) {
 		"deleted_count": deletedCount,
 	})
 	logger.Info("DeleteAllDomainsForTargetHandler: Deleted %d domains for target ID %d", deletedCount, targetID)
+}
+
+// GetDomainDetailHandler handles GET requests for details of a specific domain.
+// @Summary Get domain details
+// @Description Retrieves detailed information for a specific domain, including httpx results.
+// @Tags Domains
+// @Produce json
+// @Param domain_id path int true "Domain ID"
+// @Success 200 {object} models.Domain "Successfully retrieved domain details"
+// @Failure 400 {object} models.ErrorResponse "Invalid domain_id"
+// @Failure 404 {object} models.ErrorResponse "Domain not found"
+// @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Router /domains/{domain_id}/details [get]
+func GetDomainDetailHandler(w http.ResponseWriter, r *http.Request) {
+	domainIDStr := chi.URLParam(r, "domain_id")
+	domainID, err := strconv.ParseInt(domainIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid domain_id in path", http.StatusBadRequest)
+		return
+	}
+
+	domain, err := database.GetDomainByID(domainID) // This function will need to be updated
+	if err != nil {
+		// GetDomainByID should return a specific error for "not found"
+		http.Error(w, err.Error(), http.StatusNotFound) // Or InternalServerError based on error type
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(domain)
+}
+
+// RunHttpxForDomainsHandler handles POST requests to run httpx against selected domains.
+// @Summary Run httpx against selected domains
+// @Description Initiates an asynchronous httpx scan for a list of domain IDs associated with a target.
+// @Tags Domains
+// @Accept json
+// @Produce json
+// @Param target_id path int true "Target ID"
+// @Param domain_ids_request body object true "List of domain IDs" SchemaExample({"domain_ids": [1, 5, 10]})
+// @Success 202 {object} map[string]string "Httpx scan initiated"
+// @Failure 400 {object} models.ErrorResponse "Invalid request payload or target_id"
+// @Failure 500 {object} models.ErrorResponse "Internal server error or httpx not configured"
+// @Router /targets/{target_id}/domains/run-httpx [post]
+func RunHttpxForDomainsHandler(w http.ResponseWriter, r *http.Request) {
+	targetIDStr := chi.URLParam(r, "target_id")
+	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid target_id in path", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		DomainIDs []int64 `json:"domain_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("RunHttpxForDomainsHandler: Error decoding request body for target %d: %v", targetID, err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if len(req.DomainIDs) == 0 {
+		http.Error(w, "No domain IDs provided", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch domain names from the database based on IDs
+	domains, err := database.GetDomainsByIDs(req.DomainIDs)
+	if err != nil {
+		logger.Error("RunHttpxForDomainsHandler: Error fetching domains by IDs for target %d: %v", targetID, err)
+		http.Error(w, "Failed to retrieve domain details", http.StatusInternalServerError)
+		return
+	}
+
+	go RunHttpxScan(targetID, domains) // Run asynchronously
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":   fmt.Sprintf("Httpx scan initiated for %d domain(s).", len(domains)),
+		"target_id": targetIDStr,
+	})
 }
 
 // SetDomainFavoriteHandler handles requests to set the favorite status of a domain.
@@ -587,4 +724,67 @@ func FavoriteAllFilteredDomainsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"message": "Domains updated successfully.", "updated_count": updatedCount})
+}
+
+// RunHttpxForAllFilteredDomainsHandler handles POST requests to run httpx against all domains matching filter criteria for a target.
+// @Summary Run httpx against all filtered domains
+// @Description Initiates an asynchronous httpx scan for all domains matching the provided filters for a target.
+// @Tags Domains
+// @Accept json
+// @Produce json
+// @Param target_id path int true "Target ID"
+// @Param filters body models.DomainFilters true "Filter criteria (domain_name_search, source_search, is_in_scope, is_favorite)"
+// @Success 202 {object} map[string]string "Httpx scan initiated for all filtered domains"
+// @Failure 400 {object} models.ErrorResponse "Invalid request payload or target_id"
+// @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Router /targets/{target_id}/domains/run-httpx-all-filtered [post]
+func RunHttpxForAllFilteredDomainsHandler(w http.ResponseWriter, r *http.Request) {
+	targetIDStr := chi.URLParam(r, "target_id")
+	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid target_id in path", http.StatusBadRequest)
+		return
+	}
+
+	var filters models.DomainFilters
+	if err := json.NewDecoder(r.Body).Decode(&filters); err != nil {
+		logger.Error("RunHttpxForAllFilteredDomainsHandler: Error decoding request body for target %d: %v", targetID, err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+	filters.TargetID = targetID // Ensure TargetID from path is used
+
+	// Get all domain IDs matching filters (no pagination)
+	// This new DB function will be created next.
+	domainIDs, err := database.GetDomainIDsByFilters(filters)
+	if err != nil {
+		logger.Error("RunHttpxForAllFilteredDomainsHandler: Error fetching domain IDs by filters for target %d: %v", targetID, err)
+		http.Error(w, "Failed to retrieve domain IDs for scan", http.StatusInternalServerError)
+		return
+	}
+
+	if len(domainIDs) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK) // Or 202, but 200 is fine if no action is taken.
+		json.NewEncoder(w).Encode(map[string]string{"message": "No domains found matching the filters. Httpx scan not initiated."})
+		return
+	}
+
+	// Fetch full domain objects for these IDs
+	domainsToScan, err := database.GetDomainsByIDs(domainIDs)
+	if err != nil {
+		logger.Error("RunHttpxForAllFilteredDomainsHandler: Error fetching full domain details by IDs for target %d: %v", targetID, err)
+		http.Error(w, "Failed to retrieve full domain details for scan", http.StatusInternalServerError)
+		return
+	}
+
+	go RunHttpxScan(targetID, domainsToScan) // Run asynchronously
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":   fmt.Sprintf("Httpx scan initiated for %d filtered domain(s).", len(domainsToScan)),
+		"target_id": targetIDStr,
+	})
 }

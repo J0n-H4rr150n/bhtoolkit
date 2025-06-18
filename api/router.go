@@ -31,6 +31,9 @@ func NewRouter() http.Handler {
 	handlers.RegisterVersionRoutes(router)   // Add version routes
 	handlers.RegisterSubfinderRoutes(router) // Add subfinder routes
 
+	// Register httpx status route directly on the API router
+	router.Get("/httpx/status", handlers.GetHttpxStatusHandler)
+
 	// Placeholder/Not Implemented Yet routes
 	handlers.RegisterRelationshipRoutes(router)
 	handlers.RegisterVisualizationRoutes(router)

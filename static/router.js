@@ -128,6 +128,10 @@ async function loadView(viewId, params = {}) {
             pageTitle = "Page Sitemap";
             breadcrumbSegments = [{ name: "Page Sitemap" }];
             break;
+        case 'domain-detail': // New case for Domain Detail view
+            pageTitle = params.id ? `Domain Detail #${params.id}` : "Domain Detail";
+            breadcrumbSegments = [{ name: "Domains", hash: "#domains" }, { name: `Detail ${params.id ? `(#${params.id})` : ''}` }];
+            break;
         default:
             if (viewContentContainer) viewContentContainer.innerHTML = `<h1>Page Not Found</h1><p>The view '${viewId}' is not implemented or the path is incorrect. Please select an option from the sidebar.</p>`;
             if (updateBreadcrumbs) updateBreadcrumbs([{ name: "Page Not Found" }]);
@@ -312,6 +316,10 @@ async function loadView(viewId, params = {}) {
             if (viewLoaders.loadVisualizerView) viewLoaders.loadVisualizerView();
             else console.error("loadVisualizerView not found in viewLoaders");
              break;
+        case 'domain-detail':
+            if (viewLoaders.loadDomainDetailView) viewLoaders.loadDomainDetailView(viewContentContainer, params.id);
+            else console.error("loadDomainDetailView not found in viewLoaders");
+            break;
     }
 }
 

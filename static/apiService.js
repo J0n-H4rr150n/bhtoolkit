@@ -41,6 +41,22 @@ async function handleResponse(response) {
 }
 
 /**
+ * Initiates an httpx scan for a list of domain IDs associated with a target.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {Array<number>} domainIds - An array of domain IDs to scan.
+ * @returns {Promise<Object>} The response from the server, typically a confirmation message.
+ */
+export async function runHttpxForDomains(targetId, domainIds) {
+    const endpoint = `${API_BASE}/targets/${targetId}/domains/run-httpx`;
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain_ids: domainIds })
+    });
+    return handleResponse(response);
+}
+
+/**
  * Fetches the current target settings.
  * @returns {Promise<Object>}
  */
@@ -1101,5 +1117,41 @@ export async function favoriteAllFilteredDomains(targetId, filters) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(filters)
     });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches details for a specific domain, including httpx results.
+ * @param {number|string} domainId - The ID of the domain.
+ * @returns {Promise<Object>} - API response containing the domain details.
+ */
+export async function getDomainDetails(domainId) {
+    const response = await fetch(`${API_BASE}/domains/${domainId}/details`); // New endpoint
+    return handleResponse(response);
+}
+
+/**
+ * Initiates an httpx scan for all domains matching the provided filters for a target.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {Object} filters - An object containing filter criteria (e.g., domain_name_search, source_search, is_in_scope, is_favorite).
+ * @returns {Promise<Object>} The response from the server, typically a confirmation message.
+ */
+export async function runHttpxForAllFilteredDomains(targetId, filters) {
+    const endpoint = `${API_BASE}/targets/${targetId}/domains/run-httpx-all-filtered`; // New endpoint
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filters) // Send the filters object directly
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Fetches the current status of httpx scans for a specific target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - API response containing httpx status.
+ */
+export async function getHttpxStatus(targetId) {
+    const response = await fetch(`${API_BASE}/httpx/status?target_id=${targetId}`);
     return handleResponse(response);
 }

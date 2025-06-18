@@ -252,21 +252,47 @@ func matchesRule(requestURL *url.URL, hostname, path string, rule models.ScopeRu
 	switch rule.ItemType {
 	case "domain":
 		if strings.HasPrefix(pattern, "*.") {
+			// Handle wildcard: *.example.com
 			domainPart := strings.TrimPrefix(pattern, "*.")
 			if hostname == domainPart || strings.HasSuffix(hostname, "."+domainPart) {
 				match = true
 			}
-		} else if hostname == pattern {
-			match = true
+		} else {
+			// Try to treat as regex first.
+			// If it's a simple string like "example.com", it will compile and match correctly.
+			// If it's a complex regex like "^.+\.example\.com$", it will compile and match.
+			// If it's an invalid regex, compilation fails, and we fall back to exact string match.
+			re, err := regexp.Compile(pattern)
+			if err == nil {
+				// Valid regex
+				if re.MatchString(hostname) {
+					match = true
+				}
+			} else {
+				// Not a valid regex, treat as an exact string match
+				if hostname == pattern {
+					match = true
+				}
+			}
 		}
 	case "subdomain":
 		if strings.HasPrefix(pattern, "*.") {
+			// Handle wildcard: *.example.com
 			domainPart := strings.TrimPrefix(pattern, "*.")
 			if hostname == domainPart || strings.HasSuffix(hostname, "."+domainPart) {
 				match = true
 			}
-		} else if hostname == pattern {
-			match = true
+		} else {
+			re, err := regexp.Compile(pattern)
+			if err == nil {
+				if re.MatchString(hostname) {
+					match = true
+				}
+			} else {
+				if hostname == pattern {
+					match = true
+				}
+			}
 		}
 	case "url_path":
 		rulePatternPath := rule.Pattern

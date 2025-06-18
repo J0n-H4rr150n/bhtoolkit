@@ -10,6 +10,7 @@ let tableService;
 // DOM element references
 let viewContentContainer;
 let currentDomainsData = []; // To store currently displayed domains for export
+let httpxStatusIntervalId = null; // For polling httpx status
 let subfinderStatusIntervalId = null; // For polling subfinder status
 
 /**
@@ -24,6 +25,19 @@ export function initDomainsView(services) {
     tableService = services.tableService;
     console.log("[DomainsView] Initialized.");
 }
+
+/**
+ * Stops any active httpx status polling.
+ */
+function stopHttpxStatusUpdates() {
+    if (httpxStatusIntervalId) {
+        clearInterval(httpxStatusIntervalId);
+        httpxStatusIntervalId = null;
+        console.log("[DomainsView] Httpx status polling stopped.");
+        // Optionally clear the message after a delay if needed
+    }
+}
+
 
 /**
  * Stops any active subfinder status polling.
@@ -65,15 +79,20 @@ function setMessageWithCloseButton(messageAreaElement, text, className, autoHide
     closeButton.className = 'message-close-button'; // Apply CSS class for styling (see notes below)
     closeButton.title = 'Close message';
     
-    let timeoutId = null; 
+    // Clear any existing auto-hide timeout for this specific message area
+    if (messageAreaElement.autoHideTimeoutId) {
+        clearTimeout(messageAreaElement.autoHideTimeoutId);
+        messageAreaElement.autoHideTimeoutId = null;
+    }
 
     const clearMessage = () => {
         messageAreaElement.innerHTML = '';
         messageAreaElement.className = 'message-area'; 
         messageAreaElement.style.display = 'none'; 
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
+        // Ensure the stored timeoutId on the element is also cleared if it was this one
+        if (messageAreaElement.autoHideTimeoutId) { // Check if it's still set (it should be if this timeout fired)
+            // No need to call clearTimeout again as it has already fired or been cleared by a new message, just nullify our reference
+            messageAreaElement.autoHideTimeoutId = null;
         }
     };
 
@@ -81,12 +100,10 @@ function setMessageWithCloseButton(messageAreaElement, text, className, autoHide
 
     messageAreaElement.appendChild(textSpan);   
     messageAreaElement.appendChild(closeButton); 
-    
     messageAreaElement.classList.add(className); 
     messageAreaElement.style.display = 'block'; // Ensure it's visible
-
     if (autoHideTimeout > 0) {
-        timeoutId = setTimeout(clearMessage, autoHideTimeout);
+        messageAreaElement.autoHideTimeoutId = setTimeout(clearMessage, autoHideTimeout);
     }
 }
 
@@ -117,6 +134,72 @@ function updateSubfinderStatusDisplay(statusData) {
 }
 
 /**
+ * Updates the httpx status message display.
+ * @param {Object} statusData - The status data from the API.
+ */
+function updateHttpxStatusDisplay(statusData) {
+    console.log("[DomainsView] updateHttpxStatusDisplay called with:", JSON.parse(JSON.stringify(statusData)));
+    const messageArea = document.getElementById('discoverSubdomainsMessage'); // Reusing for now
+    if (!messageArea) return;
+
+    const appState = stateService.getState();
+    const currentTargetId = appState.currentTargetId;
+
+    let displayMessage = statusData.message || "Querying httpx status...";
+    if (statusData.is_running) {
+        displayMessage += ` (Processed: ${statusData.domains_processed}/${statusData.domains_total})`;
+    }
+
+    const notInitializedMessage = "No active httpx scan for this target or status not initialized.";
+    // Only set a message if it's not the specific "not initialized" message when not running,
+    // or if it's any other type of message (running, completed, error).
+    if (!(!statusData.is_running && statusData.message === notInitializedMessage)) {
+        setMessageWithCloseButton(messageArea, escapeHtml(displayMessage), statusData.is_running ? 'info-message' : 'success-message', statusData.is_running ? 0 : 7000);
+    } else {
+        console.log("[DomainsView] Suppressing 'No active httpx scan...' message display. Polling continues.");
+    }
+
+    if (!statusData.is_running) {
+        // Only stop polling if it's a definitive "not running" state (e.g., completed, failed),
+        // not the initial "not initialized" state.
+        const notInitializedMessage = "No active httpx scan for this target or status not initialized.";
+        if (statusData.message !== notInitializedMessage) {
+            console.log("[DomainsView] Httpx scan is definitively not running (e.g. completed/failed). Stopping polling.");
+            if (statusData.last_error) {
+                // Display error more prominently or for longer if it's a real error
+                setMessageWithCloseButton(messageArea, `Httpx Error: ${escapeHtml(statusData.last_error)}`, 'error-message', 10000);
+            }
+            if (currentTargetId) fetchAndRenderDomainsTable(currentTargetId); // Refresh table on completion/error
+        } else {
+            console.log("[DomainsView] Httpx scan reported as not running, but message indicates it might be the initial 'not initialized' state. Polling will continue.");
+            // The message was suppressed above. Polling continues.
+            // The next poll should ideally get an updated status like "Initializing..." or "Starting..."
+        }
+    }
+}
+
+/**
+ * Fetches and displays the current httpx status.
+ * @param {number|string} targetId - The ID of the target.
+ */
+async function fetchAndDisplayHttpxStatus(targetId) {
+    if (!targetId) {
+        stopHttpxStatusUpdates();
+        return;
+    }
+    console.log("[DomainsView] fetchAndDisplayHttpxStatus: Fetching status for target", targetId);
+    try {
+        const statusData = await apiService.getHttpxStatus(targetId);
+        updateHttpxStatusDisplay(statusData);
+    } catch (error) {
+        console.error("Error fetching httpx status:", error);
+        const messageArea = document.getElementById('discoverSubdomainsMessage');
+        if (messageArea) setMessageWithCloseButton(messageArea, `Error fetching httpx status: ${escapeHtml(error.message)}`, 'error-message');
+        stopHttpxStatusUpdates();
+    }
+}
+
+/**
  * Fetches and displays the current subfinder status.
  * @param {number|string} targetId - The ID of the target for which to fetch status.
  */
@@ -133,6 +216,27 @@ async function fetchAndDisplaySubfinderStatus(targetId) {
         setMessageWithCloseButton(document.getElementById('discoverSubdomainsMessage'), `Error fetching subfinder status: ${escapeHtml(error.message)}`, 'error-message');
         stopSubfinderStatusUpdates(); // Stop polling on error
     }
+}
+
+/**
+ * Starts polling for httpx status updates.
+ * @param {number|string} targetId - The ID of the target.
+ * @param {string} initialMessage - An initial message to display.
+ */
+function startHttpxStatusUpdates(targetId, initialMessage) {
+    stopHttpxStatusUpdates(); // Clear any existing interval
+
+    console.log("[DomainsView] startHttpxStatusUpdates called for target", targetId, "with initial message:", initialMessage);
+    const messageArea = document.getElementById('discoverSubdomainsMessage'); // Reusing for now
+    if (messageArea && initialMessage) {
+        setMessageWithCloseButton(messageArea, initialMessage, 'info-message');
+    }
+
+    if (!targetId) return;
+
+    fetchAndDisplayHttpxStatus(targetId); // Fetch immediately once to get initial status
+    httpxStatusIntervalId = setInterval(() => fetchAndDisplayHttpxStatus(targetId), 5000); // Poll every 5 seconds
+    console.log("[DomainsView] Httpx status polling started for target:", targetId);
 }
 
 /**
@@ -170,6 +274,7 @@ export async function loadDomainsView(mainViewContainer) {
 
     // Stop status polling when the view is reloaded/changed
     stopSubfinderStatusUpdates();
+    stopHttpxStatusUpdates(); // Also stop httpx polling
 
     if (!apiService || !uiService || !stateService || !tableService ) {
         console.error("DomainsView not initialized. Call initDomainsView with services first.");
@@ -201,6 +306,7 @@ export async function loadDomainsView(mainViewContainer) {
                     sortOrder: 'ASC',
                     filterDomainName: '',
                     filterSource: '',
+                    filterIsFavorite: false, 
                     filterIsInScope: null, // null means 'all'
                     totalPages: 0,
                     totalRecords: 0,
@@ -230,6 +336,12 @@ export async function loadDomainsView(mainViewContainer) {
                 <input type="checkbox" id="domainFavoriteFilter" style="margin-right: 5px;">
                 <label for="domainFavoriteFilter" style="font-weight: normal;">Favorites Only</label>
             </div>
+            <select id="domainHttpxScanStatusFilter" style="margin-left: 10px;">
+                <option value="all">All (HTTPX Status)</option>
+                <option value="scanned">HTTPX Scanned</option>
+                <option value="not_scanned">HTTPX Not Scanned</option>
+            </select>
+            <!-- The old checkbox for Hide HTTPX Scanned is removed -->
             <button id="resetDomainFiltersBtn" class="secondary small-button">Reset</button>
         </div>
         <div id="discoverSubdomainsMessage" class="message-area" style="margin-bottom: 10px;"></div>
@@ -243,7 +355,9 @@ export async function loadDomainsView(mainViewContainer) {
                         <a href="#" id="importInScopeDomainsBtnLink">Import In-Scope Domains</a>
                         <a href="#" id="deleteAllDomainsBtnLink">Delete All Domains</a>
                         <a href="#" id="sendSelectedToSubfinderBtnLink">Send Selected to Subfinder</a>
+                        <a href="#" id="sendSelectedToHttpxBtnLink">Send Selected to httpx</a>
                         <a href="#" id="discoverSubdomainsBtnLink">Discover Subdomains (subfinder)</a>
+                        <a href="#" id="sendAllFilteredToHttpxBtnLink">Send All Filtered to httpx</a>
                         <a href="#" id="favoriteAllFilteredBtnLink">Favorite All Filtered</a>
                     </div>
                 </div>
@@ -276,6 +390,15 @@ export async function loadDomainsView(mainViewContainer) {
     if (domainInScopeFilterInput) domainInScopeFilterInput.value = currentDomainsFilters.filterIsInScope === null ? "" : String(currentDomainsFilters.filterIsInScope);
     const domainFavoriteFilterInput = document.getElementById('domainFavoriteFilter');
     if (domainFavoriteFilterInput) domainFavoriteFilterInput.checked = currentDomainsFilters.filterIsFavorite;
+    const domainHttpxScanStatusFilterInput = document.getElementById('domainHttpxScanStatusFilter'); // For the existing dropdown
+    if (domainHttpxScanStatusFilterInput) domainHttpxScanStatusFilterInput.value = currentDomainsFilters.filterHttpxScanStatus || 'all';
+    // New: Initialize new dropdowns if they exist (they will be created by renderDomainsTable)
+    const statusCodeFilterEl = document.getElementById('colHeaderFilter-http_status_code');
+    if (statusCodeFilterEl) statusCodeFilterEl.value = currentDomainsFilters.filterHTTPStatusCode || '';
+    const serverFilterEl = document.getElementById('colHeaderFilter-http_server');
+    if (serverFilterEl) serverFilterEl.value = currentDomainsFilters.filterHTTPServer || '';
+    const techFilterEl = document.getElementById('colHeaderFilter-http_tech');
+    if (techFilterEl) techFilterEl.value = currentDomainsFilters.filterHTTPTech || '';
 
     // Add event listeners for filter controls
     document.getElementById('resetDomainFiltersBtn')?.addEventListener('click', resetAndFetchDomains);
@@ -291,6 +414,11 @@ export async function loadDomainsView(mainViewContainer) {
     }, 500));
     document.getElementById('domainInScopeFilter')?.addEventListener('change', () => fetchAndRenderDomainsTable(currentTargetId));
     document.getElementById('domainFavoriteFilter')?.addEventListener('change', () => fetchAndRenderDomainsTable(currentTargetId));
+    document.getElementById('domainHttpxScanStatusFilter')?.addEventListener('change', () => fetchAndRenderDomainsTable(currentTargetId));
+    // New: Event listeners for new header dropdowns will be attached in renderDomainsTable
+    // because those elements are dynamically created.
+
+
     
     document.getElementById('addDomainBtn')?.addEventListener('click', () => displayAddDomainModal(currentTargetId));
     document.getElementById('saveDomainsLayoutBtn')?.addEventListener('click', () => {
@@ -313,6 +441,11 @@ export async function loadDomainsView(mainViewContainer) {
         handleSendSelectedToSubfinder(currentTargetId);
         document.getElementById('moreDomainActionsDropdownMenu').classList.remove('show');
     });
+    document.getElementById('sendSelectedToHttpxBtnLink')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleSendSelectedToHttpx(currentTargetId);
+        document.getElementById('moreDomainActionsDropdownMenu').classList.remove('show');
+    });
     document.getElementById('discoverSubdomainsBtnLink')?.addEventListener('click', (e) => {
         e.preventDefault();
         displayDiscoverSubdomainsModal(currentTargetId, currentTargetName);
@@ -321,6 +454,11 @@ export async function loadDomainsView(mainViewContainer) {
     document.getElementById('favoriteAllFilteredBtnLink')?.addEventListener('click', (e) => {
         e.preventDefault();
         handleFavoriteAllFiltered(currentTargetId);
+        document.getElementById('moreDomainActionsDropdownMenu').classList.remove('show');
+    });
+    document.getElementById('sendAllFilteredToHttpxBtnLink')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleSendAllFilteredToHttpx(currentTargetId);
         document.getElementById('moreDomainActionsDropdownMenu').classList.remove('show');
     });
     document.getElementById('refreshDomainsTableBtn')?.addEventListener('click', () => fetchAndRenderDomainsTable(currentTargetId));
@@ -382,12 +520,21 @@ async function fetchAndRenderDomainsTable(targetId) {
     const sourceSearchEl = document.getElementById('domainSourceSearch');
     const inScopeFilterEl = document.getElementById('domainInScopeFilter');
     const favoriteFilterEl = document.getElementById('domainFavoriteFilter');
+    const httpxScanStatusEl = document.getElementById('domainHttpxScanStatusFilter'); // Existing dropdown
+    // New: Read from new header dropdowns
+    const statusCodeFilterEl = document.getElementById('colHeaderFilter-http_status_code');
+    const serverFilterEl = document.getElementById('colHeaderFilter-http_server');
+    const techFilterEl = document.getElementById('colHeaderFilter-http_tech');
     
     // Update domainsViewState with current UI filter values
     domainsViewState.filterDomainName = domainNameSearchEl ? domainNameSearchEl.value : domainsViewState.filterDomainName;
     domainsViewState.filterSource = sourceSearchEl ? sourceSearchEl.value : domainsViewState.filterSource;
     domainsViewState.filterIsInScope = (inScopeFilterEl && inScopeFilterEl.value !== "") ? (inScopeFilterEl.value === 'true') : null;
     domainsViewState.filterIsFavorite = favoriteFilterEl ? favoriteFilterEl.checked : domainsViewState.filterIsFavorite; // Update state here
+    domainsViewState.filterHttpxScanStatus = httpxScanStatusEl ? httpxScanStatusEl.value : (domainsViewState.filterHttpxScanStatus || 'all');
+    domainsViewState.filterHTTPStatusCode = statusCodeFilterEl ? statusCodeFilterEl.value : (domainsViewState.filterHTTPStatusCode || '');
+    domainsViewState.filterHTTPServer = serverFilterEl ? serverFilterEl.value : (domainsViewState.filterHTTPServer || '');
+    domainsViewState.filterHTTPTech = techFilterEl ? techFilterEl.value : (domainsViewState.filterHTTPTech || '');
 
 
     const params = {
@@ -405,6 +552,19 @@ async function fetchAndRenderDomainsTable(targetId) {
     if (domainsViewState.filterIsFavorite === true) { // Only add if true
         params.is_favorite = 'true';
     }
+    if (domainsViewState.filterHttpxScanStatus && domainsViewState.filterHttpxScanStatus !== 'all') {
+        params.httpx_scan_status = domainsViewState.filterHttpxScanStatus;
+    }
+    // New: Add new filters to API params
+    if (domainsViewState.filterHTTPStatusCode) {
+        params.filter_http_status_code = domainsViewState.filterHTTPStatusCode;
+    }
+    if (domainsViewState.filterHTTPServer) {
+        params.filter_http_server = domainsViewState.filterHTTPServer;
+    }
+    if (domainsViewState.filterHTTPTech) {
+        params.filter_http_tech = domainsViewState.filterHTTPTech;
+    }
 
     try {
         const response = await apiService.getDomains(targetId, params);
@@ -417,6 +577,9 @@ async function fetchAndRenderDomainsTable(targetId) {
                     limit: response.limit,
                     totalPages: response.total_pages,
                     totalRecords: response.total_records,
+                    distinctHttpStatusCodes: response.distinct_http_status_codes || [], // Store distinct values
+                    distinctHttpServers: response.distinct_http_servers || [],
+                    distinctHttpTechs: response.distinct_http_techs || [],
                     sortBy: response.sort_by || domainsViewState.sortBy,
                     sortOrder: response.sort_order || domainsViewState.sortOrder
                 }
@@ -424,7 +587,7 @@ async function fetchAndRenderDomainsTable(targetId) {
         });
 
         currentDomainsData = response.records || []; // Store for export
-        renderDomainsTable(response.records || []);
+        renderDomainsTable(response.records || [], response); // Pass full response for distinct values
         
         if (topPaginationControlsDiv) renderDomainsPaginationControls(topPaginationControlsDiv, response);
         if (bottomPaginationControlsDiv) renderDomainsPaginationControls(bottomPaginationControlsDiv, response);
@@ -437,33 +600,48 @@ async function fetchAndRenderDomainsTable(targetId) {
     }
 }
 
-function renderDomainsTable(domains) {
+function renderDomainsTable(domains, apiResponseData = {}) { // Added apiResponseData
     const tableContainer = document.getElementById('domainsTableContainer');
     if (!tableContainer) {
         console.error("domainsTableContainer not found in renderDomainsTable");
         return;
     }
 
-    const appState = stateService.getState();
+    let appState = stateService.getState(); // Use let for potential re-fetch if needed for distinct values
     const { sortBy, sortOrder } = appState.paginationState.domainsView;
-    const columnConfig = appState.paginationState.domainsTableLayout;
+    const columnConfig = appState.paginationState.domainsTableLayout || {
+        checkbox: { default: '3%', id: 'col-domain-checkbox', visible: true, label: '<input type="checkbox" id="selectAllDomainsCheckbox" title="Select/Deselect All Visible">', sortKey: null, nonResizable: true, nonHideable: true, isHtmlLabel: true },
+        id: { default: '4%', id: 'col-domain-row-number', visible: true, label: '#', sortKey: 'id' },
+        domain_name: { default: '25%', id: 'col-domain-name', visible: true, label: 'Domain Name', sortKey: 'domain_name' },
+        source: { default: '10%', id: 'col-domain-source', visible: true, label: 'Source', sortKey: 'source' },
+        http_status_code: { default: '7%', id: 'col-domain-status', visible: true, label: 'Status', sortKey: 'http_status_code' },
+        http_content_length: { default: '7%', id: 'col-domain-length', visible: true, label: 'Length', sortKey: 'http_content_length' },
+        http_title: { default: '15%', id: 'col-domain-title', visible: true, label: 'Title', sortKey: 'http_title' },
+        http_tech: { default: '15%', id: 'col-domain-tech', visible: true, label: 'Tech', sortKey: 'http_tech' },
+        http_server: { default: '10%', id: 'col-domain-server', visible: true, label: 'Server', sortKey: 'http_server' },
+        is_in_scope: { default: '8%', id: 'col-domain-inscope', visible: false, label: 'In Scope?', sortKey: 'is_in_scope' },
+        is_wildcard_scope: { default: '8%', id: 'col-domain-wildcard', visible: false, label: 'Wildcard?', sortKey: 'is_wildcard_scope'},
+        notes: { default: '15%', id: 'col-domain-notes', visible: false, label: 'Notes', sortKey: 'notes' },
+        last_httpx_result: { default: '12%', id: 'col-domain-httpx-scan', visible: true, label: 'Last HTTPX Result', sortKey: 'updated_at' },
+        created_at: { default: 'auto', id: 'col-domain-created', visible: true, label: 'Created At', sortKey: 'created_at' }, // Ensure this is after last_httpx_result if 'auto' is used for width
+        actions: { default: '150px', id: 'col-domain-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true }
+    };
     const globalTableLayouts = appState.globalTableLayouts || {};
     const tableKey = 'domainsTable';
     const savedTableWidths = globalTableLayouts[tableKey]?.columns || {};
 
+    // Get distinct values from the API response or state
+    const distinctHttpStatusCodes = apiResponseData.distinct_http_status_codes || appState.paginationState.domainsView.distinctHttpStatusCodes || [];
+    const distinctHttpServers = apiResponseData.distinct_http_servers || appState.paginationState.domainsView.distinctHttpServers || [];
+    const distinctHttpTechs = apiResponseData.distinct_http_techs || appState.paginationState.domainsView.distinctHttpTechs || [];
+
+
     if (!domains || domains.length === 0) {
         tableContainer.innerHTML = "<p>No domains found for this target with the current filters.</p>";
-
-        // Clear pagination controls as well
         const topPaginationForReset = document.getElementById('domainsPaginationControlsTop');
-        if (topPaginationForReset) {
-            topPaginationForReset.innerHTML = '';
-        }
+        if (topPaginationForReset) topPaginationForReset.innerHTML = '';
         const bottomPaginationForReset = document.getElementById('domainsPaginationControls');
-        if (bottomPaginationForReset) {
-            bottomPaginationForReset.innerHTML = '';
-        }
-
+        if (bottomPaginationForReset) bottomPaginationForReset.innerHTML = '';
         return;
     }
 
@@ -477,15 +655,41 @@ function renderDomainsTable(domains) {
         if (col.sortKey === sortBy) {
             sortIndicator = sortOrder === 'ASC' ? ' <span class="sort-arrow">▲</span>' : ' <span class="sort-arrow">▼</span>';
         }
-        const labelContent = col.isHtmlLabel ? col.label : escapeHtml(col.label);
-        
+        let labelContent = col.isHtmlLabel ? col.label : escapeHtml(col.label);
         const thStyleWidth = savedTableWidths[key]?.width || col.default || 'auto';
+
+        // Add dropdowns for specific columns
+        let headerDropdownHTML = '';
+        if (key === 'http_status_code' && distinctHttpStatusCodes.length > 0) {
+            const currentFilter = appState.paginationState.domainsView.filterHTTPStatusCode || '';
+            headerDropdownHTML = `<br><select class="table-header-filter" id="colHeaderFilter-http_status_code" data-filter-key="http_status_code" style="width: 90%; margin-top: 5px;">
+                <option value="">All Status</option>
+                ${distinctHttpStatusCodes.map(valObj => `<option value="${valObj.Int64}" ${String(valObj.Int64) === currentFilter ? 'selected' : ''}>${valObj.Int64}</option>`).join('')}
+                <option value="NULL" ${currentFilter === 'NULL' ? 'selected' : ''}>N/A</option>
+            </select>`;
+        } else if (key === 'http_server' && distinctHttpServers.length > 0) {
+            const currentFilter = appState.paginationState.domainsView.filterHTTPServer || '';
+            headerDropdownHTML = `<br><select class="table-header-filter" id="colHeaderFilter-http_server" data-filter-key="http_server" style="width: 90%; margin-top: 5px;">
+                <option value="">All Servers</option>
+                ${distinctHttpServers.map(valObj => `<option value="${escapeHtmlAttribute(valObj.String)}" ${valObj.String === currentFilter ? 'selected' : ''}>${escapeHtml(valObj.String)}</option>`).join('')}
+                <option value="NULL" ${currentFilter === 'NULL' ? 'selected' : ''}>N/A</option>
+            </select>`;
+        } else if (key === 'http_tech' && distinctHttpTechs.length > 0) {
+            const currentFilter = appState.paginationState.domainsView.filterHTTPTech || '';
+            headerDropdownHTML = `<br><select class="table-header-filter" id="colHeaderFilter-http_tech" data-filter-key="http_tech" style="width: 90%; margin-top: 5px;">
+                <option value="">All Tech</option>
+                ${distinctHttpTechs.map(valObj => `<option value="${escapeHtmlAttribute(valObj.String)}" ${valObj.String === currentFilter ? 'selected' : ''}>${escapeHtml(valObj.String)}</option>`).join('')}
+                <option value="NULL" ${currentFilter === 'NULL' ? 'selected' : ''}>N/A</option>
+            </select>`;
+        }
+        if (headerDropdownHTML) {
+            labelContent += headerDropdownHTML;
+        }
         tableHTML += `<th style="width: ${thStyleWidth};" class="${sortableClass}" ${col.sortKey ? `data-sort-key="${col.sortKey}"` : ''} data-col-key="${key}" id="${col.id}">${labelContent}${sortIndicator}</th>`;
     }
     tableHTML += `</tr></thead><tbody>`;
 
     domains.forEach((domain, index) => {
-        console.log(`Rendering domain ID: ${domain.id}, Name: ${domain.domain_name}, Is Favorite: ${domain.is_favorite}, Type: ${typeof domain.is_favorite}`); // <-- ADD THIS LINE
         tableHTML += `<tr data-domain-id="${domain.id}">`;
         for (const key in columnConfig) {
             const col = columnConfig[key];
@@ -496,7 +700,7 @@ function renderDomainsTable(domains) {
                 case 'checkbox':
                     cellContent = `<input type="checkbox" class="domain-item-checkbox" value="${domain.id}" data-domain-name="${escapeHtmlAttribute(domain.domain_name)}">`;
                     break;
-                case 'id': // This now represents the row number column
+                case 'id':
                     const { currentPage, limit, totalRecords, sortBy: currentSortBy, sortOrder: currentSortOrder } = appState.paginationState.domainsView;
                     if (currentSortBy === 'id' && currentSortOrder === 'DESC') {
                         cellContent = totalRecords - ((currentPage - 1) * limit) - index;
@@ -504,16 +708,27 @@ function renderDomainsTable(domains) {
                         cellContent = (currentPage - 1) * limit + index + 1;
                     }
                     break;
-                case 'domain_name': cellContent = escapeHtml(domain.domain_name); break;
-                case 'source': cellContent = escapeHtml(domain.source?.String || ''); break;
-                case 'is_in_scope': cellContent = domain.is_in_scope ? 'Yes' : ''; break;
+                case 'domain_name':       cellContent = escapeHtml(domain.domain_name); break;
+                case 'source':            cellContent = escapeHtml(domain.source?.String || ''); break;
+                case 'http_status_code':  cellContent = domain.http_status_code?.Valid ? domain.http_status_code.Int64 : '-'; break;
+                case 'http_content_length': cellContent = domain.http_content_length?.Valid ? domain.http_content_length.Int64 : '-'; break;
+                case 'http_title':        cellContent = escapeHtml(domain.http_title?.String || '-'); break;
+                case 'http_tech':         cellContent = escapeHtml(domain.http_tech?.String || '-'); break;
+                case 'http_server':       cellContent = escapeHtml(domain.http_server?.String || '-'); break;
+                case 'is_in_scope':       cellContent = domain.is_in_scope ? 'Yes' : ''; break;
                 case 'is_wildcard_scope': cellContent = domain.is_wildcard_scope ? 'Yes' : ''; break;
-                case 'notes': cellContent = escapeHtml(domain.notes?.String || '-'); break;
-                case 'created_at': cellContent = new Date(domain.created_at).toLocaleString(); break;
+                case 'notes':             cellContent = escapeHtml(domain.notes?.String || '-'); break;
+                case 'last_httpx_result':
+                    cellContent = (domain.httpx_full_json && domain.httpx_full_json.Valid && domain.httpx_full_json.String !== "") ? new Date(domain.updated_at).toLocaleString() : '-';
+                    break;
+                case 'created_at':        cellContent = new Date(domain.created_at).toLocaleString(); break;
                 case 'actions':
                     const favClassForAction = domain.is_favorite ? 'favorited' : '';
-                    const favoriteStarHTML = `<span class="favorite-toggle domain-favorite-toggle ${favClassForAction}" data-domain-id="${domain.id}" data-is-favorite="${domain.is_favorite}" title="Toggle Favorite" style="margin-right: 8px; font-size: 1.2em; vertical-align: middle; cursor:pointer;">★</span>`;
-                    cellContent = `${favoriteStarHTML}<button class="action-button edit-domain" data-id="${domain.id}" title="Edit Domain">✏️</button><button class="action-button delete-domain" data-id="${domain.id}" title="Delete Domain" style="margin-left: 5px;">🗑️</button>`;
+                    const favoriteStarHTML = `<span class="favorite-toggle domain-favorite-toggle ${favClassForAction}" data-domain-id="${domain.id}" data-is-favorite="${domain.is_favorite}" title="Toggle Favorite" style="margin-right: 8px; vertical-align: middle; cursor:pointer;">★</span>`;
+                    const viewDetailsLink = `<a href="#domain-detail?id=${domain.id}" class="action-button view-domain-details" data-id="${domain.id}" title="View Domain Details" style="margin-right: 5px; vertical-align: middle;">👁️</a>`;
+                    const editButton = `<button class="action-button edit-domain" data-id="${domain.id}" title="Edit Domain" style="vertical-align: middle;">✏️</button>`;
+                    const deleteButton = `<button class="action-button delete-domain" data-id="${domain.id}" title="Delete Domain" style="margin-left: 5px; vertical-align: middle;">🗑️</button>`;
+                    cellContent = `${favoriteStarHTML}${viewDetailsLink}${editButton}${deleteButton}`;
                     break;
                 default: cellContent = '-';
             }
@@ -537,8 +752,41 @@ function renderDomainsTable(domains) {
         selectAllCheckbox.addEventListener('change', handleSelectAllDomainsChange);
     }
 
+    // Add event listeners for new header dropdowns
+    document.querySelectorAll('.table-header-filter').forEach(select => {
+        select.addEventListener('change', (event) => {
+            const currentAppState = stateService.getState(); // Get current state
+            const filterElementId = event.target.id; // e.g., "colHeaderFilter-http_status_code"
+            const filterValue = event.target.value;
+            let newFilterStatePartial = {};
+
+            if (filterElementId === 'colHeaderFilter-http_status_code') {
+                newFilterStatePartial.filterHTTPStatusCode = filterValue;
+            } else if (filterElementId === 'colHeaderFilter-http_server') {
+                newFilterStatePartial.filterHTTPServer = filterValue;
+            } else if (filterElementId === 'colHeaderFilter-http_tech') {
+                newFilterStatePartial.filterHTTPTech = filterValue;
+            }
+            
+            // Update the global state immediately
+            stateService.updateState({
+                paginationState: {
+                    ...currentAppState.paginationState,
+                    domainsView: {
+                        ...currentAppState.paginationState.domainsView,
+                        ...newFilterStatePartial, // Apply the specific filter change
+                        currentPage: 1 // Reset to page 1 on any filter change
+                    }
+                }
+            });
+            // Now call fetchAndRender, which will use the updated global state
+            fetchAndRenderDomainsTable(currentAppState.currentTargetId);
+        });
+    });
+
     tableService.makeTableColumnsResizable('domainsTableHead', columnConfig);
 }
+
 
 function renderDomainsPaginationControls(containerElement, paginationData) {
     const container = containerElement;
@@ -571,6 +819,19 @@ function renderDomainsPaginationControls(containerElement, paginationData) {
         }
         if (currentDomainsViewState.filterIsFavorite === true) { // Only add if true
             queryParams.set('is_favorite', 'true');
+        }
+        if (currentDomainsViewState.filterHttpxScanStatus && currentDomainsViewState.filterHttpxScanStatus !== 'all') {
+            queryParams.set('httpx_scan_status', currentDomainsViewState.filterHttpxScanStatus);
+        }
+        // New: Add new filters to pagination links
+        if (currentDomainsViewState.filterHTTPStatusCode) {
+            queryParams.set('filter_http_status_code', currentDomainsViewState.filterHTTPStatusCode);
+        }
+        if (currentDomainsViewState.filterHTTPServer) {
+            queryParams.set('filter_http_server', currentDomainsViewState.filterHTTPServer);
+        }
+        if (currentDomainsViewState.filterHTTPTech) {
+            queryParams.set('filter_http_tech', currentDomainsViewState.filterHTTPTech);
         }
         return `#domains?${queryParams.toString()}`;
     };
@@ -628,6 +889,10 @@ function resetAndFetchDomains() {
         filterSource: '',
         filterIsFavorite: false,
         filterIsInScope: null,
+        filterHTTPStatusCode: '', // Reset new filters
+        filterHTTPServer: '',
+        filterHTTPTech: '',
+        filterHttpxScanStatus: 'all',
         totalPages: 0,
         totalRecords: 0,
     };
@@ -640,11 +905,21 @@ function resetAndFetchDomains() {
     const domainNameSearchEl = document.getElementById('domainNameSearch');
     const sourceSearchEl = document.getElementById('domainSourceSearch');
     const inScopeFilterEl = document.getElementById('domainInScopeFilter');
+    const favoriteFilterEl = document.getElementById('domainFavoriteFilter'); // Corrected variable name
+    const httpxScanStatusEl = document.getElementById('domainHttpxScanStatusFilter'); // For existing dropdown
+    // New: Reset new header dropdowns
+    const statusCodeFilterEl = document.getElementById('colHeaderFilter-http_status_code');
+    const serverFilterEl = document.getElementById('colHeaderFilter-http_server');
+    const techFilterEl = document.getElementById('colHeaderFilter-http_tech');
+
     if(domainNameSearchEl) domainNameSearchEl.value = '';
-    const favoriteFilterEl = document.getElementById('domainFavoriteFilter');
-    if(favoriteFilterEl) favoriteFilterEl.checked = false;
+    if(favoriteFilterEl) favoriteFilterEl.checked = false; // Reset favorite filter
     if(sourceSearchEl) sourceSearchEl.value = '';
     if(inScopeFilterEl) inScopeFilterEl.value = '';
+    if(httpxScanStatusEl) httpxScanStatusEl.value = 'all';
+    if(statusCodeFilterEl) statusCodeFilterEl.value = '';
+    if(serverFilterEl) serverFilterEl.value = '';
+    if(techFilterEl) techFilterEl.value = '';
 
     // Clear pagination controls as well
     const topPaginationForReset = document.getElementById('domainsPaginationControlsTop');
@@ -886,6 +1161,11 @@ async function handleExportDomainsCSV(event) {
                     case 'id': return allDomainsForExport.indexOf(domain) + 1;
                     case 'domain_name': return domain.domain_name;
                     case 'source': return domain.source?.String || '';
+                    case 'http_status_code': return domain.http_status_code?.Valid ? domain.http_status_code.Int64 : '';
+                    case 'http_content_length': return domain.http_content_length?.Valid ? domain.http_content_length.Int64 : '';
+                    case 'http_title': return domain.http_title?.String || '';
+                    case 'http_tech': return domain.http_tech?.String || '';
+                    case 'http_server': return domain.http_server?.String || '';
                     case 'is_favorite': return domain.is_favorite ? 'Yes' : 'No';
                     case 'is_in_scope': return domain.is_in_scope ? 'Yes' : 'No';
                     case 'is_wildcard_scope': return domain.is_wildcard_scope ? 'Yes' : 'No';
@@ -962,10 +1242,18 @@ async function handleEditDomain(domainId) {
         return;
     }
 
-    const currentDomainName = domainRow.cells[1].textContent;
-    const currentSource = domainRow.cells[2].textContent === '-' ? '' : domainRow.cells[2].textContent;
-    const currentIsInScope = domainRow.cells[3].textContent === 'Yes';
-    const currentNotes = domainRow.cells[4].textContent === '-' ? '' : domainRow.cells[4].textContent;
+    // Find the domain data from currentDomainsData to get full, un-truncated values
+    const domainData = currentDomainsData.find(d => d.id == domainId);
+    if (!domainData) {
+        uiService.showModalMessage("Error", "Could not retrieve full domain data for editing.");
+        return;
+    }
+
+    const currentDomainName = domainData.domain_name;
+    const currentSource = domainData.source?.String || '';
+    const currentIsInScope = domainData.is_in_scope;
+    const currentNotes = domainData.notes?.String || '';
+
 
     const modalContentHTML = `
         <form id="editDomainForm">
@@ -1056,6 +1344,27 @@ async function handleDeleteAllDomains(targetId, targetName) {
     });
 }
 
+async function handleSendSelectedToHttpx(targetId) {
+    const selectedCheckboxes = document.querySelectorAll('.domain-item-checkbox:checked');
+    if (selectedCheckboxes.length === 0) {
+        uiService.showModalMessage("Info", "No domains selected to send to httpx.");
+        return;
+    }
+
+    const domainIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.value, 10));
+
+    const messageArea = document.getElementById('discoverSubdomainsMessage');
+    if (messageArea) {
+        try {
+            startHttpxStatusUpdates(targetId, `Sending ${domainIds.length} selected domain(s) for httpx scan...`);
+            await apiService.runHttpxForDomains(targetId, domainIds); // Fire and forget, status polling will handle UI
+        } catch (error) {
+        if (messageArea) setMessageWithCloseButton(messageArea, `Error initiating httpx scan: ${escapeHtml(error.message)}`, 'error-message');
+        console.error("Error initiating httpx scan:", error);
+    }
+}
+}
+
 async function handleDomainFavoriteToggle(event) {
     const button = event.currentTarget;
     const domainId = button.getAttribute('data-domain-id');
@@ -1067,8 +1376,6 @@ async function handleDomainFavoriteToggle(event) {
         button.innerHTML = '★'; // Always show star, class handles color
         button.classList.toggle('favorited', newFavoriteState);
         button.setAttribute('data-is-favorite', newFavoriteState.toString());
-        // Optionally, refresh the table if the "Favorites Only" filter is active
-        // or just update the row visually. For now, just visual update.
     } catch (favError) {
         console.error("Error toggling domain favorite:", favError);
         uiService.showModalMessage("Error", `Failed to update favorite status for domain ${domainId}: ${favError.message}`);
@@ -1081,7 +1388,6 @@ async function handleFavoriteAllFiltered(targetId) {
         return;
     }
 
-    // Gather current filter values from the UI
     const domainNameSearch = document.getElementById('domainNameSearch')?.value || '';
     const sourceSearch = document.getElementById('domainSourceSearch')?.value || '';
     const inScopeFilterEl = document.getElementById('domainInScopeFilter');
@@ -1105,10 +1411,40 @@ async function handleFavoriteAllFiltered(targetId) {
                 };
                 const result = await apiService.favoriteAllFilteredDomains(targetId, filters);
                 uiService.showModalMessage("Success", `${result.updated_count || 0} domain(s) marked as favorite.`, true, 3000);
-                fetchAndRenderDomainsTable(targetId); // Refresh the table
+                fetchAndRenderDomainsTable(targetId);
             } catch (error) {
                 uiService.showModalMessage("Error", `Failed to favorite all filtered domains: ${escapeHtml(error.message)}`);
             }
         }
     );
+}
+
+async function handleSendAllFilteredToHttpx(targetId) {
+    if (!targetId) {
+        uiService.showModalMessage("Error", "Target ID is missing.");
+        return;
+    }
+
+    const appState = stateService.getState();
+    const currentFilters = appState.paginationState.domainsView;
+
+    const filtersForAPI = {
+        domain_name_search: currentFilters.filterDomainName,
+        source_search: currentFilters.filterSource,
+        is_in_scope: currentFilters.filterIsInScope,
+        is_favorite: currentFilters.filterIsFavorite,
+    };
+
+    const messageArea = document.getElementById('discoverSubdomainsMessage'); // Reuse existing message area
+    if (messageArea) {
+        try {
+            // Start polling and then make the API call
+            startHttpxStatusUpdates(targetId, `Initiating httpx scan for ALL filtered domains... This might take a while.`);
+            // The API call itself is fire-and-forget from the UI's perspective; status polling handles updates.
+            await apiService.runHttpxForAllFilteredDomains(targetId, filtersForAPI);
+        } catch (error) {
+            if (messageArea) setMessageWithCloseButton(messageArea, `Error initiating httpx scan for all filtered domains: ${escapeHtml(error.message)}`, 'error-message');
+            console.error("Error initiating httpx scan for all filtered domains:", error);
+        }
+    }
 }

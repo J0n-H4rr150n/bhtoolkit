@@ -59,37 +59,18 @@
     table-layout: fixed; /* Important for resizable columns */
 }
 
-#domainsTableContainer th,
-#domainsTableContainer td {
-    padding: 10px;
-    border: 1px solid #e0e0e0;
-    text-align: left;
-    font-size: 0.9em;
-    word-break: break-word; /* Prevent long strings from breaking layout */
-}
-
 #domainsTableContainer th {
-    background-color: #f2f2f2;
     font-weight: bold;
     position: relative; /* For resizer */
 }
 
 #domainsTableContainer th.sortable:hover {
-    background-color: #e8e8e8;
     cursor: pointer;
 }
 
 #domainsTableContainer .sort-arrow {
     font-size: 0.8em;
     margin-left: 5px;
-}
-
-#domainsTableContainer tbody tr:nth-child(even) {
-    background-color: #f9f9f9;
-}
-
-#domainsTableContainer tbody tr:hover {
-    background-color: #f1f1f1;
 }
 
 /* Checkbox column styling */

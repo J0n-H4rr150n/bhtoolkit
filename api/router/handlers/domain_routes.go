@@ -16,6 +16,7 @@ func RegisterDomainRoutes(r chi.Router) {
 	r.Route("/domains/{domain_id}", func(subRouter chi.Router) {
 		subRouter.Put("/", UpdateDomainHandler)
 		subRouter.Delete("/", DeleteDomainHandler)
+		subRouter.Get("/details", GetDomainDetailHandler)
 		subRouter.Put("/favorite", SetDomainFavoriteHandler) // New route for favorite
 	})
 
@@ -30,4 +31,10 @@ func RegisterDomainRoutes(r chi.Router) {
 
 	// Favorite all domains matching filters for a specific target
 	r.Post("/targets/{target_id}/domains/favorite-filtered", FavoriteAllFilteredDomainsHandler)
+
+	// Run httpx for selected domains of a specific target
+	r.Post("/targets/{target_id}/domains/run-httpx", RunHttpxForDomainsHandler)
+
+	// Run httpx for ALL domains matching filters for a specific target
+	r.Post("/targets/{target_id}/domains/run-httpx-all-filtered", RunHttpxForAllFilteredDomainsHandler)
 }
