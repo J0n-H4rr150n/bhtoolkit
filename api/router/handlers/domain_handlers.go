@@ -755,9 +755,13 @@ func RunHttpxForAllFilteredDomainsHandler(w http.ResponseWriter, r *http.Request
 	defer r.Body.Close()
 	filters.TargetID = targetID // Ensure TargetID from path is used
 
+	// Log the received filters to check if DomainNameSearch is present
+	logger.Info("RunHttpxForAllFilteredDomainsHandler: Received filters: %+v", filters)
+
 	// Get all domain IDs matching filters (no pagination)
 	// This new DB function will be created next.
 	domainIDs, err := database.GetDomainIDsByFilters(filters)
+	logger.Info("RunHttpxForAllFilteredDomainsHandler: GetDomainIDsByFilters returned %d IDs for target %d with filters: %+v", len(domainIDs), targetID, filters)
 	if err != nil {
 		logger.Error("RunHttpxForAllFilteredDomainsHandler: Error fetching domain IDs by filters for target %d: %v", targetID, err)
 		http.Error(w, "Failed to retrieve domain IDs for scan", http.StatusInternalServerError)
@@ -773,12 +777,14 @@ func RunHttpxForAllFilteredDomainsHandler(w http.ResponseWriter, r *http.Request
 
 	// Fetch full domain objects for these IDs
 	domainsToScan, err := database.GetDomainsByIDs(domainIDs)
+	logger.Info("RunHttpxForAllFilteredDomainsHandler: GetDomainsByIDs returned %d full domain objects for target %d", len(domainsToScan), targetID)
 	if err != nil {
 		logger.Error("RunHttpxForAllFilteredDomainsHandler: Error fetching full domain details by IDs for target %d: %v", targetID, err)
 		http.Error(w, "Failed to retrieve full domain details for scan", http.StatusInternalServerError)
 		return
 	}
 
+	logger.Info("RunHttpxForAllFilteredDomainsHandler: Initiating RunHttpxScan with %d domains for target %d", len(domainsToScan), targetID)
 	go RunHttpxScan(targetID, domainsToScan) // Run asynchronously
 
 	w.Header().Set("Content-Type", "application/json")

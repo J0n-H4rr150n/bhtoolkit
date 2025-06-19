@@ -23,38 +23,38 @@ type Domain struct {
 	HTTPContentLength sql.NullInt64  `json:"http_content_length,omitempty"`
 	HTTPTitle         sql.NullString `json:"http_title,omitempty"`
 	HTTPServer        sql.NullString `json:"http_server,omitempty"`
-	HTTPTech          sql.NullString `json:"http_tech,omitempty"`    // Comma-separated list of technologies
+	HTTPTech          sql.NullString `json:"http_tech,omitempty"`       // Comma-separated list of technologies
 	HttpxFullJson     sql.NullString `json:"httpx_full_json,omitempty"` // Store the full JSON output from httpx
 }
 
 // PaginatedDomainsResponse is the structure for paginated domain results.
 type PaginatedDomainsResponse struct {
-	Page         int      `json:"page"`
-	Limit        int      `json:"limit"`
-	TotalRecords int64    `json:"total_records"`
-	TotalPages   int64    `json:"total_pages"`
-	SortBy       string   `json:"sort_by,omitempty"`
-	SortOrder    string   `json:"sort_order,omitempty"`
-	Filter       string   `json:"filter,omitempty"` // General filter text, if applicable
+	Page         int    `json:"page"`
+	Limit        int    `json:"limit"`
+	TotalRecords int64  `json:"total_records"`
+	TotalPages   int64  `json:"total_pages"`
+	SortBy       string `json:"sort_by,omitempty"`
+	SortOrder    string `json:"sort_order,omitempty"`
+	Filter       string `json:"filter,omitempty"` // General filter text, if applicable
 	// Distinct values for dropdown filters
 	DistinctHttpStatusCodes []sql.NullInt64  `json:"distinct_http_status_codes,omitempty"`
 	DistinctHttpServers     []sql.NullString `json:"distinct_http_servers,omitempty"`
 	DistinctHttpTechs       []sql.NullString `json:"distinct_http_techs,omitempty"`
-	Records      []Domain `json:"records"`
+	Records                 []Domain         `json:"records"`
 }
 
 // DomainFilters defines the available filters for querying domains.
 type DomainFilters struct {
-	TargetID         int64
-	Page             int
-	Limit            int
-	SortBy           string
-	SortOrder        string
-	DomainNameSearch string // Filter by domain name (e.g., using LIKE)
-	SourceSearch     string // Filter by source (e.g., using LIKE)
-	IsInScope        *bool  // Pointer to allow filtering by true, false, or not filtering at all
-	IsFavorite       *bool  `json:"is_favorite,omitempty"` // New filter for favorite status
-	HttpxScanStatus  string `json:"httpx_scan_status,omitempty"`  // Filter by httpx scan status: "all", "scanned", "not_scanned"
+	TargetID             int64
+	Page                 int
+	Limit                int
+	SortBy               string
+	SortOrder            string
+	DomainNameSearch     string `json:"domain_name_search,omitempty"`      // Filter by domain name (e.g., using LIKE)
+	SourceSearch         string `json:"source_search,omitempty"`           // Filter by source (e.g., using LIKE)
+	IsInScope            *bool  `json:"is_in_scope,omitempty"`             // Pointer to allow filtering by true, false, or not filtering at all
+	IsFavorite           *bool  `json:"is_favorite,omitempty"`             // New filter for favorite status
+	HttpxScanStatus      string `json:"httpx_scan_status,omitempty"`       // Filter by httpx scan status: "all", "scanned", "not_scanned"
 	FilterHTTPStatusCode string `json:"filter_http_status_code,omitempty"` // New: For exact status code match
 	FilterHTTPServer     string `json:"filter_http_server,omitempty"`      // New: For exact server match
 	FilterHTTPTech       string `json:"filter_http_tech,omitempty"`        // New: For exact tech string match

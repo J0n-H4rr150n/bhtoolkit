@@ -119,9 +119,9 @@ let state = {
             http_server: { default: '10%', id: 'col-domain-server', visible: true, label: 'Server', sortKey: 'http_server' },
             is_in_scope: { default: '8%', id: 'col-domain-inscope', visible: false, label: 'In Scope?', sortKey: 'is_in_scope' },
             is_wildcard_scope: { default: '8%', id: 'col-domain-wildcard', visible: false, label: 'Wildcard?', sortKey: 'is_wildcard_scope'}, // Hidden
-            notes: { default: '15%', id: 'col-domain-notes', visible: true, label: 'Notes', sortKey: 'notes' },
+            notes: { default: '15%', id: 'col-domain-notes', visible: false, label: 'Notes', sortKey: 'notes' },
             last_httpx_result: { default: '12%', id: 'col-domain-httpx-scan', visible: true, label: 'Last HTTPX Result', sortKey: 'updated_at' }, // New column
-            created_at: { default: 'auto', id: 'col-domain-created', visible: true, label: 'Created At', sortKey: 'created_at' },
+            created_at: { default: 'auto', id: 'col-domain-created', visible: false, label: 'Created At', sortKey: 'created_at' },
             actions: { default: '150px', id: 'col-domain-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true }
         }, // Note: The actual database ID is still available in the `domain.id` object property for actions.
         commentAnalysisTableLayout: { // New layout for the comments table

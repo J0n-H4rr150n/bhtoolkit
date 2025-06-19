@@ -1155,3 +1155,14 @@ export async function getHttpxStatus(targetId) {
     const response = await fetch(`${API_BASE}/httpx/status?target_id=${targetId}`);
     return handleResponse(response);
 }
+
+/**
+ * Sends a request to stop an ongoing httpx scan for a target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Object>} - The response from the server.
+ */
+export async function stopHttpxScan(targetId) {
+    const endpoint = `${API_BASE}/httpx/stop?target_id=${targetId}`;
+    const response = await fetch(endpoint, { method: 'POST' }); // Using POST as it changes state
+    return handleResponse(response);
+}
