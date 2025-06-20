@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context" // Added for graceful shutdown
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -15,7 +16,6 @@ import (
 	"log" // Standard log package for goproxy.Logger config
 	"math/big"
 	"net"
-	"context" // Added for graceful shutdown
 	"net/http"
 	"net/url"
 	"os"
@@ -340,13 +340,24 @@ func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionR
 		return false
 	}
 
-	pattern := rule.Pattern
+	// Use the existing matchesRule function, but we need to ensure the inputs are correct.
+	// For global exclusions, the 'pattern' is directly from rule.Pattern.
+
+	// Normalize URL for logging and consistent matching if rule.RuleType is 'url_regex'
+	normalizedFullURL := requestURL.String() // Default to original if normalization fails or not needed
+	if rule.RuleType == "url_regex" {
+		if normURL, err := normalizeURL(requestURL.String()); err == nil {
+			normalizedFullURL = normURL
+		}
+	}
+
 	hostname := requestURL.Hostname()
 	path := requestURL.Path
-	fullURL := requestURL.String()
+	// fullURL := requestURL.String() // This was used before, now normalizedFullURL is preferred for regex
 
 	switch rule.RuleType {
 	case "file_extension":
+		pattern := rule.Pattern
 		// Ensure pattern starts with a dot if it's meant to be an extension
 		if !strings.HasPrefix(pattern, ".") {
 			pattern = "." + pattern
@@ -355,6 +366,7 @@ func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionR
 			return true
 		}
 	case "url_regex":
+		pattern := rule.Pattern
 		// Consider compiling regexes once at startup if performance becomes an issue
 		re, err := regexp.Compile(pattern)
 		if err != nil {
@@ -362,10 +374,11 @@ func matchesGlobalExclusionRule(requestURL *url.URL, rule models.ProxyExclusionR
 			// Invalid regex shouldn't match anything
 			return false
 		}
-		if re.MatchString(fullURL) {
+		if re.MatchString(normalizedFullURL) { // Use normalizedFullURL for regex matching
 			return true
 		}
 	case "domain":
+		pattern := rule.Pattern
 		return strings.ToLower(hostname) == strings.ToLower(pattern)
 	}
 	return false
@@ -376,17 +389,24 @@ func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRul
 		return false
 	}
 
+	normalizedFullURL, err := normalizeURL(requestURL.String())
+	if err != nil {
+		logger.ProxyError("Error normalizing URL '%s': %v", requestURL.String(), err)
+		// Decide if this should be fatal for scope checking. For now, proceed with original URL for logging.
+		normalizedFullURL = requestURL.String()
+	}
 	hostname := requestURL.Hostname()
 	path := requestURL.Path
 
 	for _, rule := range allRules {
 		// allRules contains both IN and OUT rules.
 		// The logic correctly handles this by checking rule.IsInScope below.
-		pattern := rule.Pattern
+		// The 'pattern' variable needs to be defined here for logging.
+		rulePattern := rule.Pattern // Use a different name to avoid conflict if 'pattern' is a package name
 		match := matchesRule(requestURL, hostname, path, rule)
 
 		if match && !rule.IsInScope {
-			logger.ProxyDebug("Request URL '%s' matched OUT OF SCOPE rule: Type=%s, Pattern='%s'", requestURL.String(), rule.ItemType, pattern)
+			logger.ProxyDebug("Request URL '%s' matched OUT OF SCOPE rule: Type=%s, Pattern='%s'", normalizedFullURL, rule.ItemType, rulePattern)
 			return false
 		}
 	}
@@ -401,19 +421,20 @@ func isRequestEffectivelyInScope(requestURL *url.URL, allRules []models.ScopeRul
 
 	// If there are no IN SCOPE rules defined for the target, consider everything in scope (default allow).
 	if len(inScopeRules) == 0 {
-		logger.ProxyDebug("Request URL '%s' is IN SCOPE by default (no specific IN_SCOPE rules defined and no OUT_OF_SCOPE match).", requestURL.String())
+		logger.ProxyDebug("Request URL '%s' is IN SCOPE by default (no specific IN_SCOPE rules defined and no OUT_OF_SCOPE match).", normalizedFullURL)
 		return true
 	}
 
 	// If IN SCOPE rules exist, at least one must match
 	for _, rule := range inScopeRules {
+		rulePattern := rule.Pattern // Define for logging
 		if matchesRule(requestURL, hostname, path, rule) {
-			logger.ProxyDebug("Request URL '%s' matched IN SCOPE rule: Type=%s, Pattern='%s'", requestURL.String(), rule.ItemType, rule.Pattern)
+			logger.ProxyDebug("Request URL '%s' matched IN SCOPE rule: Type=%s, Pattern='%s'", normalizedFullURL, rule.ItemType, rulePattern)
 			return true
 		}
 	}
 	// If no IN_SCOPE rules matched (and no OUT_OF_SCOPE rules matched earlier), it's effectively out of scope.
-	logger.ProxyDebug("Request URL '%s' did not match any IN_SCOPE rules (and no OUT_OF_SCOPE match). Effectively OUT OF SCOPE.", requestURL.String())
+	logger.ProxyDebug("Request URL '%s' did not match any IN_SCOPE rules (and no OUT_OF_SCOPE match). Effectively OUT OF SCOPE.", normalizedFullURL)
 	return false
 }
 
@@ -425,10 +446,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 	}
 
 	setGoproxyCA(&tls.Certificate{
-		// Certificate: [][]byte{caCert.Raw}, // This was the old way
-		// PrivateKey:  caKey,
-		// Leaf:        caCert,
-		// The above is now handled by goproxy.GoproxyCa directly if setGoproxyCA is called with a valid cert.
 		Certificate: [][]byte{caCert.Raw},
 		PrivateKey:  caKey,
 		Leaf:        caCert,
@@ -436,7 +453,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 
 	scopeMu.Lock()
 	if cliTargetID != 0 {
-		// activeTargetID is already a pointer, so no need to take address of cliTargetID if it's not a pointer.
 		activeTargetID = &cliTargetID
 		logger.ProxyInfo("Proxy started with explicit target ID from CLI: %d", *activeTargetID)
 	} else {
@@ -473,7 +489,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 	globalExclusionRules, errLoadExclusions = database.GetProxyExclusionRules()
 	if errLoadExclusions != nil {
 		logger.ProxyError("Failed to load global proxy exclusion rules: %v. Proxy will not apply global exclusions.", errLoadExclusions)
-		// Ensure it's an empty slice
 		globalExclusionRules = []models.ProxyExclusionRule{}
 	} else {
 		logger.ProxyInfo("Loaded %d global proxy exclusion rules.", len(globalExclusionRules))
@@ -491,8 +506,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 		parsedSynackTargetURL = nil
 	}
 
-	// Make the mission service instance available globally within this package
-	// or pass it into the handlers if a more encapsulated approach is preferred.
 	globalMissionService = missionService
 
 	proxy := goproxy.NewProxyHttpServer()
@@ -572,7 +585,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 			serverSeenURL := r.URL.String()
 			var requestFullURLWithFragment sql.NullString
 
-			// Ensure this is being set
 			if toolkitFullURL := r.Header.Get("X-Toolkit-Full-URL"); toolkitFullURL != "" && r.Header.Get("X-Toolkit-Initiated") == "true" {
 				requestFullURLWithFragment.String = toolkitFullURL
 				requestFullURLWithFragment.Valid = true
@@ -615,7 +627,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 				authToken := r.Header.Get("Authorization")
 				if strings.HasPrefix(authToken, "Bearer ") {
 					ctxData.SynackAuthToken = authToken
-					// Also immediately update the mission service
 					if globalMissionService != nil {
 						globalMissionService.SetAuthToken(authToken)
 					} else {
@@ -633,8 +644,6 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 
 	proxy.OnResponse().DoFunc(
 		func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-			// If UserData is nil, it means the request was deemed out of scope.
-			// Or if it's not our custom context data type.
 			pCtxData, ok := ctx.UserData.(*proxyRequestContextData)
 			if !ok || pCtxData == nil || pCtxData.TrafficLog == nil {
 				logger.ProxyDebug("RESP: Skipping response processing for out-of-scope or non-TrafficLog request: %s %s", ctx.Req.Method, ctx.Req.URL.String())
@@ -752,26 +761,22 @@ func logHttpTraffic(logEntry *models.HTTPTrafficLog) {
 		logEntry.ResponseBodySize, logEntry.DurationMs, logEntry.ClientIP, logEntry.IsHTTPS,
 		logEntry.IsPageCandidate, logEntry.Notes,
 		logEntry.LogSource, logEntry.PageSitemapID)
-	// Note: is_favorite defaults to FALSE in schema, not explicitly set here.
 	if err != nil {
 		logger.ProxyError("DB log error on response for %s %s: %v", logEntry.RequestMethod.String, logEntry.RequestURL.String, err)
 	}
 }
 
 type rawSynackFindingItem struct {
-	// Fields from "exploitable_locations"
-	Type       string `json:"type"` // e.g., "url"
-	Value      string `json:"value"`
-	CreatedAt  int64  `json:"created_at"` // Unix timestamp
-	Status     string `json:"status"`     // e.g., "fixed"
-	OutOfScope *bool  `json:"outOfScope"` // Pointer to handle null
-
-	// Fields that might not be present in exploitable_locations, but are in models.SynackFinding
+	Type        string          `json:"type"`
+	Value       string          `json:"value"`
+	CreatedAt   int64           `json:"created_at"`
+	Status      string          `json:"status"`
+	OutOfScope  *bool           `json:"outOfScope"`
 	ID          string          `json:"id"`
 	Title       string          `json:"title"`
 	Category    string          `json:"category"`
 	Severity    string          `json:"severity"`
-	FullDetails json.RawMessage `json:"-"` // To store the whole finding JSON
+	FullDetails json.RawMessage `json:"-"`
 }
 
 func processSynackTargetList(jsonData []byte, authToken string) {
@@ -862,12 +867,9 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 				logger.ProxyError("Synack Analytics: Error checking existing analytics for target DB_ID %d (Synack ID %s): %v", dbID, synackID, errCheck)
 			}
 
-			// For now, if analytics exist at all (lastFetchTime is not nil), don't refetch.
-			// Later, a freshness check can be added: e.g., if lastFetchTime != nil && time.Since(*lastFetchTime) < 24*time.Hour
 			if lastFetchTime != nil {
 				logger.ProxyInfo("Synack Analytics: Analytics data already exists for target DB_ID %d (Synack ID %s), fetched at %s. Skipping fetch.", dbID, synackID, lastFetchTime.Format(time.RFC3339))
 			} else {
-				// Rate limit the API calls using the ticker.
 				logger.ProxyDebug("Synack Analytics: Waiting for analyticsFetchTicker for target DB_ID %d (Synack ID %s)...", dbID, synackID)
 				<-analyticsFetchTicker.C
 				logger.ProxyInfo("Synack Analytics: No existing analytics found for target DB_ID %d (Synack ID %s) or fetch time is nil. Proceeding to fetch.", dbID, synackID)
@@ -894,8 +896,6 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 					var rawAnalyticsItems []struct {
 						Categories           []string        `json:"categories"`
 						ExploitableLocations json.RawMessage `json:"exploitable_locations"`
-						// Other fields like count, total_amount_paid, average_amount_paid from the old structure are not in the new example.
-						// If they exist in other responses, this struct might need to be more flexible or have more fields.
 					}
 
 					if errUnmarshal := json.Unmarshal([]byte(categoriesResult.Raw), &rawAnalyticsItems); errUnmarshal != nil {
@@ -933,7 +933,6 @@ func processSynackTargetList(jsonData []byte, authToken string) {
 										logger.ProxyError("Synack Findings: Error unmarshalling exploitable_locations for category group (target DB_ID %d): %v. Raw JSON: %s", dbID, errUnmarshalEL, string(rawItem.ExploitableLocations[:min(len(rawItem.ExploitableLocations), 200)]))
 									} else {
 										logger.ProxyInfo("Synack Findings: Found %d exploitable_locations for this category group (target DB_ID %d).", len(exploitableLocationsList), dbID)
-										// >2 to avoid logging for empty array "[]"
 										if len(exploitableLocationsList) == 0 && len(rawItem.ExploitableLocations) > 2 {
 											logger.ProxyInfo("Warning: Synack Findings: Unmarshalled 0 exploitable_locations, but raw JSON was not empty for target DB_ID %d. Check rawSynackFindingItem struct against API response.", dbID)
 										}
@@ -1017,31 +1016,24 @@ func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 		return nil
 	}
 
-	// IMPORTANT: Configure this client to use your running proxy.
-	// The proxy address and port should come from your application's config.
-	// If config.AppConfig.Proxy.Port is a string (e.g., "8778")
 	proxyURLString := fmt.Sprintf("http://localhost:%s", config.AppConfig.Proxy.Port)
 	proxyURL, err := url.Parse(proxyURLString)
 	if err != nil {
 		return fmt.Errorf("invalid proxy URL from config: %w", err)
 	}
 
-	// Create a new CertPool and add the proxy's CA certificate to it
 	customCAPool := x509.NewCertPool()
 	if caCert != nil {
 		customCAPool.AddCert(caCert)
 	} else {
 		logger.Error("Core: SendGETRequestsThroughProxy - caCert is nil, cannot add to custom CA pool. HTTPS requests might fail verification.")
-		// Potentially return an error here or proceed with system CAs only
 	}
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-			// Configure TLS to trust our custom CA
+			Proxy:           http.ProxyURL(proxyURL),
 			TLSClientConfig: &tls.Config{RootCAs: customCAPool},
 		},
-		// Set a reasonable timeout
 		Timeout: 15 * time.Second,
 	}
 
@@ -1052,42 +1044,35 @@ func SendGETRequestsThroughProxy(targetID int64, urls []string) error {
 		req, err := http.NewRequest("GET", u, nil)
 		if err != nil {
 			logger.Error("Core: Error creating request for %s: %v", u, err)
-			// Skip this URL
 			continue
 		}
 
-		// Add custom headers to identify these requests and potentially
-		// prevent them from triggering further analysis loops in the proxy handler.
 		req.Header.Set("X-Toolkit-Initiated", "true")
 		req.Header.Set("X-Toolkit-Source", "JS-Path-Sender")
-		// Ensure this is being set
 		req.Header.Set("X-Toolkit-Full-URL", u)
-		req.Header.Set("User-Agent", "BHToolkit-Path-Tester/1.0")
+		req.Header.Set("User-Agent", "Toolkit-Path-Tester/1.0")
 
-		// Note: We are NOT explicitly setting the TargetID here in the request headers.
-		// The proxy's OnRequest handler will need to be modified if you want these
-		// specific requests to be logged with the provided `targetID` instead of
-		// the globally active one or no target ID if out of scope.
-		// For now, they will be logged based on the proxy's standard scope rules.
 		logger.Info("Core: SendGETRequestsThroughProxy - Sending request with X-Toolkit-Full-URL header set to: %s", u)
 
 		resp, err := client.Do(req)
 		if err != nil {
 			logger.Error("Core: Error sending request to %s: %v", u, err)
-			// Log this error. The request might still appear in the proxy log
-			// if it reached the proxy but failed to reach the target.
 			continue
 		}
 		if resp != nil && resp.Body != nil {
-			// Read and discard body to reuse connection
 			io.Copy(io.Discard, resp.Body)
-			// Ensure response body is closed
 			resp.Body.Close()
 		}
 		logger.Debug("Core: Request to %s completed with status: %s", u, resp.Status)
-		// The actual logging of this request/response happens in the main proxy handlers
-		// in mitmproxy.go's OnRequest/OnResponse DoFuncs. This function just initiates the request.
 	}
 	logger.Info("Core: Finished sending %d GET requests for target %d.", len(urls), targetID)
 	return nil
+}
+
+func normalizeURL(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	return parsedURL.String(), nil
 }

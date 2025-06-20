@@ -31,6 +31,7 @@ func NewRouter() http.Handler {
 	handlers.RegisterVersionRoutes(router)   // Add version routes
 	handlers.RegisterSubfinderRoutes(router) // Add subfinder routes
 	handlers.RegisterHttpxRoutes(router)     // Register httpx routes (status and stop)
+	handlers.RegisterTagRoutes(router)       // Register tag and tag association routes
 
 	// Placeholder/Not Implemented Yet routes
 	handlers.RegisterRelationshipRoutes(router)

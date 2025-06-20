@@ -1,0 +1,200 @@
+[
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "broken-access-control",
+    "tag": "p_bac",
+    "color": "#FFC107",
+    "value": [
+      "id",
+      "uid",
+      "user_id",
+      "account_id",
+      "customer_id",
+      "role",
+      "profile",
+      "path",
+      "file",
+      "url",
+      "_method"
+    ]
+  },
+  {
+    "type": "request-header",
+    "category": "vulnerability",
+    "name": "broken-access-control",
+    "tag": "rh_bac",
+    "color": "#FFC107",
+    "value": [
+      "X-Original-URL",
+      "X-Rewrite-URL"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "command-injection",
+    "tag": "p_ci",
+    "color": "#F44336",
+    "value": [
+      "cli",
+      "cmd",
+      "daemon",
+      "dir",
+      "download",
+      "execute",
+      "host",
+      "log",
+      "ip",
+      "upload"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "cryptographic-failures",
+    "tag": "p_cf",
+    "color": "#9C27B0",
+    "value": [
+      "token",
+      "session_id",
+      "iv",
+      "algorithm",
+      "alg",
+      "key"
+    ]
+  },
+  {
+    "type": "request-header",
+    "category": "vulnerability",
+    "name": "cryptographic-failures",
+    "tag": "rh_cf",
+    "color": "#9C27B0",
+    "value": [
+      "Location",
+      "Set-Cookie"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "cross-site-scripting",
+    "tag": "p_xss",
+    "color": "#2196F3",
+    "value": [
+      "q",
+      "search",
+      "next",
+      "redirect_url",
+      "callback",
+      "message",
+      "input",
+      "s"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "insecure-direct-object-reference",
+    "tag": "p_idor",
+    "color": "#FF5722",
+    "value": [
+      "step",
+      "action",
+      "price",
+      "discount_code",
+      "quantity",
+      "coupon",
+      "code",
+      "filename",
+      "content_type"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "ldap-injection",
+    "tag": "p_ldap",
+    "color": "#607D8B",
+    "value": [
+      "user",
+      "dn"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "server-side-request-forgery",
+    "tag": "p_ssrf",
+    "color": "#795548",
+    "value": [
+      "url",
+      "uri",
+      "dest",
+      "path",
+      "image_url",
+      "import_url",
+      "next",
+      "redirect",
+      "continue",
+      "window",
+      "data",
+      "reference"
+    ]
+  },
+  {
+    "type": "param",
+    "category": "vulnerability",
+    "name": "xml-injection",
+    "tag": "p_xml",
+    "color": "#00BCD4",
+    "value": [
+      "xml",
+      "data"
+    ]
+  },
+  {
+    "type": "response-header",
+    "category": "technology",
+    "name": "nginx",
+    "tag": "tech_nginx",
+    "color": "#4CAF50",
+    "value": [
+      "nginx"
+    ]
+  },
+  {
+    "type": "response-header",
+    "category": "technology",
+    "name": "apache",
+    "tag": "tech_apache",
+    "color": "#FF9800",
+    "value": [
+      "apache"
+    ]
+  },
+  {
+    "type": "url-path",
+    "category": "debug",
+    "name": "debug-endpoints",
+    "tag": "ep_debug",
+    "color": "#9E9E9E",
+    "value": [
+      "/debug/",
+      "/console/",
+      "/admin/logs"
+    ]
+  },
+  {
+    "type": "url-path",
+    "category": "admin",
+    "name": "admin-panel",
+    "tag": "ep_admin",
+    "color": "#673AB7",
+    "value": [
+      "/admin/",
+      "/administrator/",
+      "/login"
+    ]
+  }
+]

@@ -59,7 +59,11 @@ func InitDB(dataSourceName string) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 	logger.Info("Database migrations applied successfully (or no changes).")
-	return seedInitialChecklistTemplates()
+	if err := seedInitialChecklistTemplates(); err != nil {
+		return fmt.Errorf("failed to seed checklist templates: %w", err)
+	}
+	// Seed tags after checklist templates
+	return seedTagsFromJSON()
 }
 
 func columnExists(tableName string, columnName string) (bool, error) {
@@ -320,6 +324,47 @@ func seedInitialChecklistTemplates() error {
 		}
 	}
 	logger.Info("Initial checklist templates seeding attempted.")
+	return nil
+}
+
+// seedTagsFromJSON reads tags from the seed/tags.json file and adds them to the database.
+func seedTagsFromJSON() error {
+	jsonFilePath := filepath.Join("database", "seed", "tags.json")
+	jsonDataBytes, errFile := ioutil.ReadFile(jsonFilePath)
+	if errFile != nil {
+		logger.Error("seedTagsFromJSON: Failed to read tags.json: %v. Skipping tag seeding.", errFile)
+		return nil // Non-fatal, allow app to start without seeded tags
+	}
+
+	var seedTags []struct {
+		Name  string `json:"name"` // This is the user-facing name of the tag
+		Tag   string `json:"tag"`  // This is the short, unique identifier (actual tag value)
+		Color string `json:"color"`
+		// Other fields like type, category, value are for the auto-tagging logic, not directly stored in 'tags' table
+	}
+
+	err := json.Unmarshal(jsonDataBytes, &seedTags)
+	if err != nil {
+		logger.Error("seedTagsFromJSON: Failed to unmarshal tags.json: %v. Skipping tag seeding.", err)
+		return nil // Non-fatal
+	}
+
+	var createdCount, skippedCount int
+	for _, seedTag := range seedTags {
+		tagToCreate := models.Tag{
+			Name:  seedTag.Tag, // Use the "tag" field from JSON as the unique tag name
+			Color: sql.NullString{String: seedTag.Color, Valid: seedTag.Color != ""},
+		}
+		_, createErr := CreateTag(tagToCreate) // CreateTag handles if it already exists
+		if createErr != nil {
+			logger.Warn("seedTagsFromJSON: Could not create/seed tag '%s': %v", tagToCreate.Name, createErr)
+			skippedCount++
+		} else {
+			createdCount++
+		}
+	}
+
+	logger.Info("Tag seeding from JSON complete. Created: %d, Skipped/Existing: %d", createdCount, skippedCount)
 	return nil
 }
 

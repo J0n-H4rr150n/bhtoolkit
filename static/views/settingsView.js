@@ -54,6 +54,7 @@ export async function loadSettingsView(mainViewContainer) {
             <button class="tab-button active" data-tab="proxyExclusionsTab">Proxy Exclusions</button>
             <button class="tab-button" data-tab="tableLayoutsTab">Table Layouts</button>
             <button class="tab-button" data-tab="uiSettingsTab">UI Settings</button>
+            <button class="tab-button" data-tab="tagsManagementTab">Manage Tags</button>
         </div>
 
         <div id="proxyExclusionsTab" class="tab-content active">
@@ -80,12 +81,25 @@ export async function loadSettingsView(mainViewContainer) {
                 <p>Loading UI settings...</p>
             </div>
         </div>
+
+        <div id="tagsManagementTab" class="tab-content">
+            <h2>Global Tag Management</h2>
+            <p>Create, edit, and delete tags used throughout the application.</p>
+            <div id="tagsManagementMessage" class="message-area" style="margin-top: 10px;"></div>
+            <div id="tagsManagementContainer" style="margin-top:15px;">
+                <p>Loading tags...</p>
+            </div>
+        </div>
+
+        </div>
     `;
 
     console.log('[SettingsView.js] Tabbed HTML structure set for settings page.');
     await loadAndDisplayUISettings();
     await loadAndDisplayTableLayoutSettings();
-    await loadAndDisplayProxyExclusionSettings(); // Placeholder for now
+    await loadAndDisplayProxyExclusionSettings();
+    await loadAndDisplayTagsManagement();
+
 
     document.querySelectorAll('.tabs .tab-button').forEach(button => {
         button.addEventListener('click', () => {
@@ -228,6 +242,7 @@ async function handleSaveUISettings() {
         messageArea.classList.add('error-message');
     }
 }
+
 
 async function loadAndDisplayTableLayoutSettings() {
     const container = document.getElementById('tableLayoutsSettingsContainer');
@@ -468,4 +483,201 @@ async function handleSaveAllProxyExclusions() {
         messageArea.textContent = `Error saving rules: ${escapeHtml(error.message)}`;
         messageArea.classList.add('error-message');
     }
+}
+
+// --- Tags Management Functions ---
+
+async function loadAndDisplayTagsManagement() {
+    const container = document.getElementById('tagsManagementContainer');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div id="addTagFormContainer" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">
+            <h4>Add New Tag</h4>
+            <form id="addGlobalTagForm" class="inline-form">
+                <div class="form-group">
+                    <label for="newGlobalTagName">Name:</label>
+                    <input type="text" id="newGlobalTagName" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="newGlobalTagColor">Color:</label>
+                    <input type="color" id="newGlobalTagColor" name="color" value="#6c757d"> <!-- Default to a neutral color -->
+                </div>
+                <button type="submit" class="primary">Add Tag</button>
+            </form>
+            <div id="addGlobalTagMessage" class="message-area" style="margin-top: 10px;"></div>
+        </div>
+        <h4>Existing Tags</h4>
+        <div id="existingTagsListContainer">
+            <p>Loading tags...</p>
+        </div>
+    `;
+
+    document.getElementById('addGlobalTagForm')?.addEventListener('submit', handleAddGlobalTag);
+    await fetchAndRenderGlobalTags();
+}
+
+async function fetchAndRenderGlobalTags() {
+    const listContainer = document.getElementById('existingTagsListContainer');
+    if (!listContainer) return;
+
+    try {
+        const tags = await apiService.getAllTags();
+        if (tags && tags.length > 0) {
+            let tableHTML = `<table class="settings-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Color</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+            tags.forEach(tag => {
+                tableHTML += `
+                    <tr data-tag-id="${tag.id}">
+                        <td class="global-tag-name" data-current-name="${escapeHtmlAttribute(tag.name)}">${escapeHtml(tag.name)}</td>
+                        <td class="global-tag-color" data-current-color="${escapeHtmlAttribute(tag.color?.String || '#6c757d')}">
+                            <span style="display: inline-block; width: 20px; height: 20px; background-color: ${escapeHtmlAttribute(tag.color?.String || '#6c757d')}; border: 1px solid #ccc; border-radius: 3px; vertical-align: middle;"></span>
+                            <span style="margin-left: 5px;">${escapeHtml(tag.color?.String || '#6c757d')}</span>
+                        </td>
+                        <td>
+                            <button class="action-button edit-global-tag" data-tag-id="${tag.id}" title="Edit Tag">✏️</button>
+                            <button class="action-button delete-global-tag" data-tag-id="${tag.id}" title="Delete Tag">🗑️</button>
+                        </td>
+                    </tr>`;
+            });
+            tableHTML += `</tbody></table>`;
+            listContainer.innerHTML = tableHTML;
+
+            // Attach event listeners for edit/delete after rendering
+            listContainer.querySelectorAll('.edit-global-tag').forEach(btn => btn.addEventListener('click', handleEditGlobalTagClick));
+            listContainer.querySelectorAll('.delete-global-tag').forEach(btn => btn.addEventListener('click', handleDeleteGlobalTagClick));
+        } else {
+            listContainer.innerHTML = '<p>No tags created yet.</p>';
+        }
+    } catch (error) {
+        console.error("Error fetching global tags:", error);
+        listContainer.innerHTML = `<p class="error-message">Error loading tags: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function handleAddGlobalTag(event) {
+    event.preventDefault();
+    const form = event.target;
+    const tagName = form.elements.name.value.trim();
+    const tagColor = form.elements.color.value;
+    const messageArea = document.getElementById('addGlobalTagMessage');
+
+    if (!tagName) {
+        messageArea.textContent = 'Tag name cannot be empty.';
+        messageArea.className = 'message-area error-message';
+        return;
+    }
+
+    try {
+        await apiService.createTag({ name: tagName, color: tagColor });
+        messageArea.textContent = `Tag "${escapeHtml(tagName)}" added successfully.`;
+        messageArea.className = 'message-area success-message';
+        form.reset();
+        document.getElementById('newGlobalTagColor').value = '#6c757d'; // Reset color picker to default
+        await fetchAndRenderGlobalTags(); // Refresh list
+    } catch (error) {
+        console.error("Error adding global tag:", error);
+        messageArea.textContent = `Error adding tag: ${escapeHtml(error.message)}`;
+        messageArea.className = 'message-area error-message';
+    }
+}
+
+function handleEditGlobalTagClick(event) {
+    const tagId = event.target.closest('button').dataset.tagId;
+    const row = event.target.closest('tr');
+    if (!row.classList.contains('editing-tag')) {
+        // If another row is being edited, cancel that first
+        const currentlyEditingRow = document.querySelector('tr.editing-tag');
+        if (currentlyEditingRow && currentlyEditingRow !== row) {
+            cancelTagEdit(currentlyEditingRow.dataset.tagId);
+        }
+
+        row.classList.add('editing-tag');
+        const nameCell = row.querySelector('.global-tag-name');
+        const colorCell = row.querySelector('.global-tag-color');
+        const actionsCell = row.querySelector('td:last-child');
+
+        const currentName = nameCell.dataset.currentName;
+        const currentColor = colorCell.dataset.currentColor;
+
+        nameCell.innerHTML = `<input type="text" class="edit-tag-name-input" value="${escapeHtmlAttribute(currentName)}" style="width: 90%;">`;
+        colorCell.innerHTML = `<input type="color" class="edit-tag-color-input" value="${escapeHtmlAttribute(currentColor)}">`;
+        actionsCell.innerHTML = `
+            <button class="action-button save-tag-edit" data-tag-id="${tagId}" title="Save Changes">✔️</button>
+            <button class="action-button cancel-tag-edit" data-tag-id="${tagId}" title="Cancel Edit">❌</button>
+        `;
+
+        actionsCell.querySelector('.save-tag-edit').addEventListener('click', () => saveTagEdit(tagId));
+        actionsCell.querySelector('.cancel-tag-edit').addEventListener('click', () => cancelTagEdit(tagId));
+        nameCell.querySelector('input').focus();
+    }
+}
+
+async function saveTagEdit(tagId) {
+    const row = document.querySelector(`tr[data-tag-id="${tagId}"]`);
+    if (!row) return;
+
+    const nameInput = row.querySelector('.edit-tag-name-input');
+    const colorInput = row.querySelector('.edit-tag-color-input');
+    const messageArea = document.getElementById('tagsManagementMessage');
+
+    const newName = nameInput.value.trim();
+    const newColor = colorInput.value;
+
+    if (!newName) {
+        messageArea.textContent = 'Tag name cannot be empty.';
+        messageArea.className = 'message-area error-message';
+        return;
+    }
+
+    try {
+        await apiService.updateTag(tagId, { name: newName, color: newColor });
+        messageArea.textContent = `Tag ID ${tagId} updated successfully.`;
+        messageArea.className = 'message-area success-message';
+        await fetchAndRenderGlobalTags(); // Refresh the list to show updated values and restore row
+    } catch (error) {
+        console.error(`Error updating tag ${tagId}:`, error);
+        messageArea.textContent = `Error updating tag: ${escapeHtml(error.message)}`;
+        messageArea.className = 'message-area error-message';
+        cancelTagEdit(tagId); // For now, cancel edit on error
+    }
+}
+
+function cancelTagEdit(tagId) {
+    const row = document.querySelector(`tr[data-tag-id="${tagId}"]`);
+    if (!row || !row.classList.contains('editing-tag')) return;
+
+    row.classList.remove('editing-tag');
+    fetchAndRenderGlobalTags(); // Re-fetch the whole list to restore the row
+}
+
+async function handleDeleteGlobalTagClick(event) {
+    const tagId = event.target.closest('button').dataset.tagId;
+    const row = event.target.closest('tr');
+    const tagName = row.querySelector('.global-tag-name').dataset.currentName;
+    const messageArea = document.getElementById('tagsManagementMessage');
+
+    uiService.showModalConfirm(
+        "Confirm Delete Tag",
+        `Are you sure you want to delete the tag "${escapeHtml(tagName)}" (ID: ${tagId})? This will also remove its associations from all items.`,
+        async () => {
+            try {
+                await apiService.deleteTag(tagId);
+                messageArea.textContent = `Tag "${escapeHtml(tagName)}" deleted successfully.`;
+                messageArea.className = 'message-area success-message';
+                await fetchAndRenderGlobalTags(); // Refresh list
+            } catch (error) {
+                console.error(`Error deleting tag ${tagId}:`, error);
+                messageArea.textContent = `Error deleting tag: ${escapeHtml(error.message)}`;
+                messageArea.className = 'message-area error-message';
+            }
+        }
+    );
 }

@@ -321,15 +321,24 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
     const baseParams = passedParams || defaultProxyLogPaginationState;
     const validatedParams = {
         ...baseParams,
-        // Prioritize saved pageSize, then passed param, then default state
-        limit: savedLayoutForThisTable?.pageSize ? parseInt(savedLayoutForThisTable.pageSize, 10) : (baseParams.limit ? parseInt(baseParams.limit, 10) : defaultProxyLogPaginationState.limit),
-        currentPage: baseParams.currentPage ? parseInt(baseParams.currentPage, 10) : defaultProxyLogPaginationState.currentPage
+        // Prioritize limit from passedParams (e.g., from hash change via dropdown)
+        // Then fallback to saved layout's page size, then to default state's limit.
+        limit: (baseParams && baseParams.limit)
+               ? parseInt(baseParams.limit, 10)
+               : (savedLayoutForThisTable?.pageSize
+                  ? parseInt(savedLayoutForThisTable.pageSize, 10)
+                  : (defaultProxyLogPaginationState.limit ? parseInt(defaultProxyLogPaginationState.limit, 10) : 25)),
+        currentPage: (baseParams && baseParams.currentPage)
+                     ? parseInt(baseParams.currentPage, 10)
+                     : (defaultProxyLogPaginationState.currentPage ? parseInt(defaultProxyLogPaginationState.currentPage, 10) : 1)
     };
-    if (isNaN(validatedParams.limit) || validatedParams.limit <= 0) validatedParams.limit = defaultProxyLogPaginationState.limit;
-    if (isNaN(validatedParams.currentPage) || validatedParams.currentPage <= 0) validatedParams.currentPage = defaultProxyLogPaginationState.currentPage;
+    // Ensure limit and currentPage are valid numbers after potential parsing
+    if (isNaN(validatedParams.limit) || validatedParams.limit <= 0) validatedParams.limit = defaultProxyLogPaginationState.limit || 25;
+    if (isNaN(validatedParams.currentPage) || validatedParams.currentPage <= 0) validatedParams.currentPage = defaultProxyLogPaginationState.currentPage || 1;
+
 
     // Use passedParams if available, otherwise fallback to global state (for initial load or non-filter-driven reloads)
-    const { currentPage, limit, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText } = validatedParams;
+    const { currentPage, limit, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText, filterTagIDs } = validatedParams;
 
     console.log(`[ProxyLogView] fetchAndDisplayProxyLogs using filterMethod: "${filterMethod}"`, validatedParams);
     // const globalTableLayouts = appState.globalTableLayouts; // Already declared above
@@ -349,10 +358,15 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
             method: filterMethod,
             status: filterStatus,
             type: filterContentType,
-            search: filterSearchText
+            search: filterSearchText,
+            filter_tag_ids: filterTagIDs && filterTagIDs.length > 0 ? filterTagIDs.join(',') : ''
         };
         const apiResponse = await apiService.getProxyLog(paramsForAPI);
         const logs = apiResponse.logs || [];
+
+        // Store distinct tags from response for the filter dropdown
+        const distinctTagsForFilter = apiResponse.distinct_values?.tags || [];
+        renderTagFilterDropdown(distinctTagsForFilter); // New function call
 
         stateService.updateState({
             paginationState: {
@@ -384,6 +398,7 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
             { key: 'status', sortKey: 'response_status_code', filter: true },
             { key: 'type', sortKey: 'response_content_type', filter: true },
             { key: 'size', sortKey: 'response_body_size', filter: false },
+            { key: 'tags', sortKey: 'tags', filter: false },
             { key: 'actions', sortKey: null, filter: false }
         ];
 
@@ -493,6 +508,14 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                                          `${log.response_content_type?.Valid && log.response_content_type.String && log.response_content_type.String.length > 30 ? '...' : ''}` +
                                          `</td>`;
                             break;
+                        case 'tags':
+                            let tagsHTML = log.tags && log.tags.length > 0
+                                ? log.tags.map(tag =>
+                                    `<span class="tag-chip-table" style="background-color: ${tag.color?.String || '#6c757d'}; color: white; padding: 1px 4px; border-radius: 3px; margin-right: 3px; font-size: 0.8em; display: inline-block;">
+                                        ${escapeHtml(tag.name)}
+                                    </span>`).join(' ')
+                                : '-';
+                            tableHTML += `<td>${tagsHTML}</td>`; break;
                         case 'size': tableHTML += `<td>${log.response_body_size || 0}</td>`; break;
                         case 'actions':
                             tableHTML += `<td class="actions-cell proxy-log-actions-column">
@@ -1130,6 +1153,7 @@ export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
                     <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
                 </div>
             </div>
+            <div id="proxyLogTagFilterContainer" style="margin-top: 10px; margin-bottom: 10px;"></div>
             <div style="margin-bottom: 10px;">
                 <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs" style="margin-right: 10px;">🔄</button>
                 <button id="saveProxyLogLayoutBtn" class="secondary small-button" style="margin-right: 10px;">Save Column Layout</button>
@@ -1617,6 +1641,25 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
             ${associatedFindingsHTML}
             <div class="log-meta-info" style="margin-bottom: 15px; padding: 10px; background-color: #f9f9f9; border-radius: 4px;">
                 <p><strong>Timestamp:</strong> ${new Date(logEntry.timestamp).toLocaleString()}</p>
+                <!-- Tags Management Section -->
+                <div id="logEntryTagsSection" style="margin-top: 10px;">
+                    <strong style="display: block; margin-bottom: 5px;">Tags:</strong>
+                    <div id="logEntryTagsContainer" style="margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 5px;">
+                        ${logEntry.tags && logEntry.tags.length > 0
+                            ? logEntry.tags.map(tag =>
+                                `<span class="tag-chip" data-tag-id="${tag.id}" style="background-color: ${tag.color?.String || '#6c757d'}; color: white; padding: 3px 8px; border-radius: 12px; font-size: 0.9em; display: inline-flex; align-items: center;">
+                                    ${escapeHtml(tag.name)}
+                                    <button class="remove-tag-btn" data-tag-id="${tag.id}" data-log-id="${logEntry.id}" style="margin-left: 6px; background: none; border: none; color: white; cursor: pointer; font-size: 1.1em; padding: 0 3px;" title="Remove tag">&times;</button>
+                                </span>`).join('')
+                            : '<span id="noTagsMessage" style="font-style: italic;">No tags associated.</span>'}
+                    </div>
+                    <div id="addTagControls">
+                        <input type="text" id="newTagInput" placeholder="Add tag..." list="allTagsDatalist" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc; margin-right: 5px;">
+                        <datalist id="allTagsDatalist"></datalist>
+                        <button id="addTagBtn" data-log-id="${logEntry.id}" class="secondary small-button">Add</button>
+                    </div>
+                    <div id="tagManagementMessage" class="message-area" style="margin-top: 5px;"></div>
+                </div>
                 ${/* Display Page Name in detail view if available - MOVED UP */''}
                 ${(logEntry.page_sitemap_id?.Valid && logEntry.page_sitemap_name?.Valid && logEntry.page_sitemap_name.String) ? `<p><strong>Associated Page:</strong> <a href="#page-sitemap?page_id=${logEntry.page_sitemap_id.Int64}" title="View Page: ${escapeHtmlAttribute(logEntry.page_sitemap_name.String)}">${escapeHtml(logEntry.page_sitemap_name.String)} (ID: ${logEntry.page_sitemap_id.Int64})</a></p>`
                 : (logEntry.page_sitemap_id?.Valid ? `<p><strong>Associated Page ID:</strong> ${logEntry.page_sitemap_id.Int64} (Name not found)</p>` : '')}
@@ -1746,6 +1789,9 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
                     console.log('[ProxyLogView] Detail view "more actions" (⋮) button CLICKED for logId:', logEntry.id);
                     openDetailViewMoreActionsDropdown(event, logEntry.id);
                 });
+                // Attach listeners for tag management
+                document.getElementById('addTagBtn')?.addEventListener('click', handleAddTagToLogEntry);
+                document.querySelectorAll('.remove-tag-btn').forEach(btn => btn.addEventListener('click', handleRemoveTagFromLogEntry));
                 console.log('[ProxyLogView] loadProxyLogDetailView: Event listener ATTACHED to #proxyLogDetailMoreActionsBtn.');
             } else {
                 console.error('[ProxyLogView] loadProxyLogDetailView: #proxyLogDetailMoreActionsBtn found, but its parentNode is null. Cannot attach listener.');
@@ -1821,6 +1867,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
             // Default to requestTab if specified tab is invalid
             document.querySelector('.tab-button[data-tab="requestTab"]')?.click();
         }
+        fetchAllTagsForDatalist(); // Fetch tags for the datalist
     } catch (error) {
         viewContentContainer.innerHTML = `<h1>Log Entry Detail</h1><p class="error-message">Error loading details for Log ID ${logId}: ${escapeHtml(error.message)}</p>`;
     }
@@ -2267,4 +2314,146 @@ async function prepareAndSaveProxyLogLayout() {
     // We need to construct it based on current state and DOM here.
     // For now, this just saves widths and page size. Visibility is handled by updating globalTableLayouts directly.
     tableService.saveCurrentTableLayout('proxyLogTable', 'proxyLogTableHead', currentPageSize);
+}
+
+function renderTagFilterDropdown(tags) {
+    const container = document.getElementById('proxyLogTagFilterContainer');
+    if (!container) return;
+
+    const appState = stateService.getState();
+    const currentSelectedTagIDs = appState.paginationState.proxyLog.filterTagIDs || [];
+
+    if (!tags || tags.length === 0) {
+        container.innerHTML = '<p style="font-style: italic; font-size: 0.9em;">No tags available for filtering in the current log view.</p>';
+        return;
+    }
+
+    let selectHTML = `<label for="proxyLogTagFilterSelect" style="margin-right: 5px;">Filter by Tags:</label>
+                      <select id="proxyLogTagFilterSelect" multiple style="min-width: 250px; height: auto; max-height: 100px;">`;
+
+    tags.forEach(tag => {
+        const isSelected = currentSelectedTagIDs.includes(String(tag.id)); // Ensure comparison with string IDs if needed
+        selectHTML += `<option value="${tag.id}" ${isSelected ? 'selected' : ''} style="color: ${tag.color?.String || 'inherit'};">
+                           ${escapeHtml(tag.name)}
+                       </option>`;
+    });
+    selectHTML += `</select>
+                   <button id="clearTagFilterBtn" class="secondary small-button" style="margin-left: 10px;" title="Clear Tag Filter">Clear</button>`;
+
+    container.innerHTML = selectHTML;
+
+    const selectElement = document.getElementById('proxyLogTagFilterSelect');
+    if (selectElement) {
+        selectElement.addEventListener('change', handleTagFilterChange);
+    }
+    const clearButton = document.getElementById('clearTagFilterBtn');
+    if (clearButton) {
+        clearButton.addEventListener('click', () => {
+            if (selectElement) {
+                Array.from(selectElement.options).forEach(option => option.selected = false);
+            }
+            handleTagFilterChange(); // Trigger change with empty selection
+        });
+    }
+}
+
+function handleTagFilterChange() {
+    const selectElement = document.getElementById('proxyLogTagFilterSelect');
+    const selectedTagIDs = Array.from(selectElement.selectedOptions).map(option => option.value);
+
+    const appState = stateService.getState();
+    stateService.updateState({ paginationState: { ...appState.paginationState, proxyLog: { ...appState.paginationState.proxyLog, filterTagIDs: selectedTagIDs, currentPage: 1 } } });
+    fetchAndDisplayProxyLogs(stateService.getState().paginationState.proxyLog); // Pass the updated state
+}
+
+async function fetchAllTagsForDatalist() {
+    const datalist = document.getElementById('allTagsDatalist');
+    if (!datalist) return;
+
+    try {
+        const tags = await apiService.getAllTags(); // Assuming apiService.getAllTags() exists
+        datalist.innerHTML = ''; // Clear existing options
+        tags.forEach(tag => {
+            const option = document.createElement('option');
+            option.value = escapeHtmlAttribute(tag.name);
+            datalist.appendChild(option);
+        });
+    } catch (error) {
+        console.error("Error fetching all tags for datalist:", error);
+        // Optionally display an error to the user or log it
+    }
+}
+
+async function handleAddTagToLogEntry(event) {
+    const logId = event.target.dataset.logId;
+    const newTagInput = document.getElementById('newTagInput');
+    const tagName = newTagInput.value.trim();
+    const messageArea = document.getElementById('tagManagementMessage');
+
+    if (!tagName) {
+        messageArea.textContent = 'Tag name cannot be empty.';
+        messageArea.className = 'message-area error-message';
+        return;
+    }
+
+    try {
+        // 1. Create the tag (backend handles if it already exists)
+        const tag = await apiService.createTag({ name: tagName }); // Assuming apiService.createTag exists
+
+        // 2. Associate the tag with the log entry
+        await apiService.associateTagWithItem(tag.id, logId, 'httplog'); // Assuming this API exists
+
+        // 3. Update UI
+        const tagsContainer = document.getElementById('logEntryTagsContainer');
+        const noTagsMsg = document.getElementById('noTagsMessage');
+        if (noTagsMsg) noTagsMsg.remove();
+
+        const tagChip = document.createElement('span');
+        tagChip.className = 'tag-chip';
+        tagChip.dataset.tagId = tag.id;
+        tagChip.style.backgroundColor = tag.color?.String || '#6c757d';
+        tagChip.style.color = 'white';
+        tagChip.style.padding = '3px 8px';
+        tagChip.style.borderRadius = '12px';
+        tagChip.style.fontSize = '0.9em';
+        tagChip.style.display = 'inline-flex';
+        tagChip.style.alignItems = 'center';
+        tagChip.innerHTML = `${escapeHtml(tag.name)} <button class="remove-tag-btn" data-tag-id="${tag.id}" data-log-id="${logId}" style="margin-left: 6px; background: none; border: none; color: white; cursor: pointer; font-size: 1.1em; padding: 0 3px;" title="Remove tag">&times;</button>`;
+        tagsContainer.appendChild(tagChip);
+        tagChip.querySelector('.remove-tag-btn').addEventListener('click', handleRemoveTagFromLogEntry);
+
+        newTagInput.value = ''; // Clear input
+        messageArea.textContent = `Tag "${escapeHtml(tagName)}" added.`;
+        messageArea.className = 'message-area success-message';
+        fetchAllTagsForDatalist(); // Refresh datalist in case a new tag was created
+    } catch (error) {
+        console.error("Error adding tag:", error);
+        messageArea.textContent = `Error adding tag: ${escapeHtml(error.message)}`;
+        messageArea.className = 'message-area error-message';
+    }
+}
+
+async function handleRemoveTagFromLogEntry(event) {
+    const tagId = event.target.dataset.tagId;
+    const logId = event.target.dataset.logId;
+    const messageArea = document.getElementById('tagManagementMessage');
+
+    try {
+        await apiService.removeTagFromItem(tagId, logId, 'httplog'); // Assuming this API exists
+
+        // Update UI
+        const tagChipToRemove = document.querySelector(`.tag-chip[data-tag-id="${tagId}"]`);
+        if (tagChipToRemove) tagChipToRemove.remove();
+
+        const tagsContainer = document.getElementById('logEntryTagsContainer');
+        if (tagsContainer.children.length === 0) {
+            tagsContainer.innerHTML = '<span id="noTagsMessage" style="font-style: italic;">No tags associated.</span>';
+        }
+        messageArea.textContent = 'Tag removed.';
+        messageArea.className = 'message-area success-message';
+    } catch (error) {
+        console.error("Error removing tag:", error);
+        messageArea.textContent = `Error removing tag: ${escapeHtml(error.message)}`;
+        messageArea.className = 'message-area error-message';
+    }
 }

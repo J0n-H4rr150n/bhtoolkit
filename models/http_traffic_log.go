@@ -34,4 +34,5 @@ type HTTPTrafficLog struct {
 	PageSitemapID              sql.NullInt64  `json:"page_sitemap_id,omitempty"`
 	PageSitemapName            sql.NullString `json:"page_sitemap_name,omitempty"`
 	AssociatedFindings         []FindingLink  `json:"associated_findings,omitempty"` // Already added in a previous step
+	Tags                       []Tag          `json:"tags,omitempty"`                // For associating tags with log entries
 }

@@ -31,7 +31,8 @@ let state = {
             totalPages: 1, totalRecords: 0,
             sortBy: 'id', sortOrder: 'DESC', filterFavoritesOnly: false,
             filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: '',
-            analysis_type: null // Added to proxyLog pagination state
+            analysis_type: null, // Added to proxyLog pagination state
+            filterTagIDs: [] // New: For storing selected tag IDs for filtering
         },
         targetChecklistItems: { // New state for target checklist
             currentPage: 1,
@@ -58,6 +59,7 @@ let state = {
             status: { default: '7%', id: 'col-proxylog-status', visible: true, label: 'Status' },
             type: { default: '15%', id: 'col-proxylog-type', visible: true, label: 'Content-Type' },
             size: { default: '7%', id: 'col-proxylog-size', visible: true, label: 'Size (B)' },
+            tags: { default: '15%', id: 'col-proxylog-tags', visible: true, label: 'Tags', sortKey: 'tags' }, // Updated: Tags column now sortable
             actions: { default: '150px', id: 'col-proxylog-actions', visible: true, label: 'Actions', nonResizable: true, nonHideable: true } // Actions column specific flags
         },
         parameterizedUrlsView: { // New state for this view

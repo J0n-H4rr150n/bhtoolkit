@@ -1166,3 +1166,90 @@ export async function stopHttpxScan(targetId) {
     const response = await fetch(endpoint, { method: 'POST' }); // Using POST as it changes state
     return handleResponse(response);
 }
+
+// --- Tags API ---
+
+/**
+ * Fetches all tags.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of tag objects.
+ */
+export async function getAllTags() {
+    const response = await fetch(`${API_BASE}/tags`);
+    return handleResponse(response);
+}
+
+/**
+ * Creates a new tag or returns an existing one if the name matches.
+ * @param {Object} tagData - Data for the new tag (e.g., { name: "important", color: "#ff0000" }).
+ * @returns {Promise<Object>} - A promise that resolves with the created or existing tag object.
+ */
+export async function createTag(tagData) {
+    const response = await fetch(`${API_BASE}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tagData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Updates an existing tag.
+ * @param {number|string} tagId - The ID of the tag to update.
+ * @param {Object} tagData - Data to update for the tag (e.g., { name: "new name", color: "#00ff00" }).
+ * @returns {Promise<Object>} - A promise that resolves with the updated tag object.
+ */
+export async function updateTag(tagId, tagData) {
+    const response = await fetch(`${API_BASE}/tags/${tagId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tagData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes a tag.
+ * @param {number|string} tagId - The ID of the tag to delete.
+ * @returns {Promise<Object>} - A promise that resolves (usually with an empty object on success).
+ */
+export async function deleteTag(tagId) {
+    const response = await fetch(`${API_BASE}/tags/${tagId}`, {
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Expects 204 No Content on success
+}
+
+/**
+ * Associates a tag with an item.
+ * @param {number|string} tagId - The ID of the tag.
+ * @param {number|string} itemId - The ID of the item to tag.
+ * @param {string} itemType - The type of the item (e.g., "httplog", "domain").
+ * @returns {Promise<Object>} - A promise that resolves with the association object.
+ */
+export async function associateTagWithItem(tagId, itemId, itemType) {
+    const response = await fetch(`${API_BASE}/tag-associations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag_id: parseInt(tagId, 10), item_id: parseInt(itemId, 10), item_type: itemType }),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Removes a tag association from an item.
+ * @param {number|string} tagId - The ID of the tag.
+ * @param {number|string} itemId - The ID of the item.
+ * @param {string} itemType - The type of the item.
+ * @returns {Promise<Object>} - A promise that resolves (usually with an empty object on success).
+ */
+export async function removeTagFromItem(tagId, itemId, itemType) {
+    const queryParams = new URLSearchParams({
+        tag_id: tagId,
+        item_id: itemId,
+        item_type: itemType,
+    });
+    const response = await fetch(`${API_BASE}/tag-associations?${queryParams.toString()}`, {
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Expects 204 No Content on success
+}

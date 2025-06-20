@@ -183,15 +183,16 @@ func GetDomains(filters models.DomainFilters) ([]models.Domain, int64, *Distinct
 	if !allowedSortCols[filters.SortBy] {
 		filters.SortBy = "domain_name"
 	}
-	if filters.SortOrder != "ASC" && filters.SortOrder != "DESC" {
+	if strings.ToUpper(filters.SortOrder) != "ASC" && strings.ToUpper(filters.SortOrder) != "DESC" {
 		filters.SortOrder = "ASC"
 	}
 	orderByClause := fmt.Sprintf("ORDER BY %s %s, id %s", filters.SortBy, filters.SortOrder, filters.SortOrder)
-	selectQuery += orderByClause
+
+	selectQuery += " " + orderByClause // Add space before ORDER BY
 
 	if filters.Limit > 0 {
 		offset := (filters.Page - 1) * filters.Limit
-		selectQuery += " LIMIT ? OFFSET ?"
+		selectQuery += " LIMIT ? OFFSET ?" // Add space before LIMIT
 		args = append(args, filters.Limit, offset)
 	}
 

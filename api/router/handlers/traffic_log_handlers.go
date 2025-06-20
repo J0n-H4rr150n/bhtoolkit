@@ -32,6 +32,7 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	filterStatus := r.URL.Query().Get("status")
 	filterContentType := r.URL.Query().Get("type")
 	filterSearchText := r.URL.Query().Get("search")
+	filterTagIDsStr := r.URL.Query().Get("filter_tag_ids") // New: Filter by tag IDs
 
 	if targetIDStr == "" {
 		logger.Error("GetTrafficLogHandler: target_id query parameter is required")
@@ -65,23 +66,35 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	whereClauses := []string{"htl.target_id = ?"} // Qualified target_id
 	queryArgs := []interface{}{targetID}
 
+	var tagIDsFilter []int64
+	if filterTagIDsStr != "" {
+		tagIDParts := strings.Split(filterTagIDsStr, ",")
+		for _, part := range tagIDParts {
+			trimmedPart := strings.TrimSpace(part)
+			if id, errConv := strconv.ParseInt(trimmedPart, 10, 64); errConv == nil && id > 0 {
+				tagIDsFilter = append(tagIDsFilter, id)
+			}
+		}
+	}
+
 	distinctWhereClauses := []string{"target_id = ?"}
 	distinctQueryArgs := []interface{}{targetID}
 
 	if favOnly, err := strconv.ParseBool(favoritesOnlyStr); err == nil && favOnly {
-		whereClauses = append(whereClauses, "is_favorite = TRUE")
+		whereClauses = append(whereClauses, "htl.is_favorite = TRUE") // Alias added
 		distinctWhereClauses = append(distinctWhereClauses, "is_favorite = TRUE")
 	}
 
 	if filterMethod != "" {
-		whereClauses = append(whereClauses, "UPPER(request_method) = ?")
+		whereClauses = append(whereClauses, "UPPER(htl.request_method) = ?") // Alias added
 		queryArgs = append(queryArgs, filterMethod)
+		// distinctWhereClauses for method is not explicitly added here, it's part of finalDistinctWhereClause construction
 	}
 
 	if filterStatus != "" {
 		statusCode, err := strconv.ParseInt(filterStatus, 10, 64)
 		if err == nil {
-			whereClauses = append(whereClauses, "response_status_code = ?")
+			whereClauses = append(whereClauses, "htl.response_status_code = ?") // Alias added
 			queryArgs = append(queryArgs, statusCode)
 		} else {
 			logger.Info("GetTrafficLogHandler: Invalid status code filter '%s': %v. Ignoring filter.", filterStatus, err)
@@ -89,23 +102,41 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if filterContentType != "" {
-		whereClauses = append(whereClauses, "LOWER(response_content_type) LIKE LOWER(?)")
+		whereClauses = append(whereClauses, "LOWER(htl.response_content_type) LIKE LOWER(?)") // Alias added
 		queryArgs = append(queryArgs, "%"+filterContentType+"%")
 	}
 
 	if filterSearchText != "" {
-		searchClause := `(LOWER(request_url) LIKE LOWER(?) OR UPPER(request_method) LIKE UPPER(?) OR LOWER(response_content_type) LIKE LOWER(?) OR CAST(response_status_code AS TEXT) LIKE ?)`
-		whereClauses = append(whereClauses, searchClause)
-		distinctWhereClauses = append(distinctWhereClauses, searchClause)
+		unaliasedSearchClause := `(LOWER(request_url) LIKE LOWER(?) OR UPPER(request_method) LIKE UPPER(?) OR LOWER(response_content_type) LIKE LOWER(?) OR CAST(response_status_code AS TEXT) LIKE ?)`
+		aliasedSearchClause := `(LOWER(htl.request_url) LIKE LOWER(?) OR UPPER(htl.request_method) LIKE UPPER(?) OR LOWER(htl.response_content_type) LIKE LOWER(?) OR CAST(htl.response_status_code AS TEXT) LIKE ?)`
+		whereClauses = append(whereClauses, aliasedSearchClause)
+		distinctWhereClauses = append(distinctWhereClauses, unaliasedSearchClause)
 		searchPattern := "%" + filterSearchText + "%"
 		queryArgs = append(queryArgs, searchPattern, searchPattern, searchPattern, searchPattern)
 		distinctQueryArgs = append(distinctQueryArgs, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 
+	if len(tagIDsFilter) > 0 {
+		placeholders := make([]string, len(tagIDsFilter))
+		tagIDArgs := make([]interface{}, len(tagIDsFilter))
+		for i, id := range tagIDsFilter {
+			placeholders[i] = "?"
+			tagIDArgs[i] = id
+		}
+		tagFilterClause := fmt.Sprintf("htl.id IN (SELECT DISTINCT item_id FROM tag_associations WHERE item_type = 'httplog' AND tag_id IN (%s))", strings.Join(placeholders, ","))
+		whereClauses = append(whereClauses, tagFilterClause)
+		queryArgs = append(queryArgs, tagIDArgs...)
+
+		// For distinct values, we need to ensure the logs considered for distinct methods/statuses etc. also match the tag filter.
+		// The distinctWhereClauses and distinctQueryArgs are used for fetching distinct methods, statuses, types.
+		// If we want these dropdowns to be reactive to the tag filter, we add the tag filter here too.
+		distinctWhereClauses = append(distinctWhereClauses, fmt.Sprintf("id IN (SELECT DISTINCT item_id FROM tag_associations WHERE item_type = 'httplog' AND tag_id IN (%s))", strings.Join(placeholders, ",")))
+		distinctQueryArgs = append(distinctQueryArgs, tagIDArgs...)
+	}
+
 	finalWhereClause := strings.Join(whereClauses, " AND ")
-	finalWhereClauseForCount := strings.Replace(finalWhereClause, "htl.target_id", "target_id", 1) // Use unaliased target_id for count query
 	finalDistinctWhereClause := strings.Join(distinctWhereClauses, " AND ")
-	distinctValues := make(map[string][]string)
+	distinctValues := make(map[string]interface{}) // Changed to interface{} to support different value types
 
 	methodQuery := fmt.Sprintf("SELECT DISTINCT request_method FROM http_traffic_log WHERE %s ORDER BY request_method ASC", finalDistinctWhereClause)
 	rows, err := database.DB.Query(methodQuery, distinctQueryArgs...)
@@ -115,8 +146,13 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 		var method string
 		for rows.Next() {
-			if err := rows.Scan(&method); err == nil {
-				distinctValues["method"] = append(distinctValues["method"], method)
+			if err := rows.Scan(&method); err == nil && strings.TrimSpace(method) != "" {
+				// Ensure distinctValues["method"] is initialized as []string if it doesn't exist or is not the correct type
+				currentMethods, ok := distinctValues["method"].([]string)
+				if !ok {
+					currentMethods = []string{}
+				}
+				distinctValues["method"] = append(currentMethods, method)
 			}
 		}
 		if err = rows.Err(); err != nil {
@@ -133,7 +169,11 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		var status sql.NullInt64
 		for rows.Next() {
 			if err := rows.Scan(&status); err == nil && status.Valid {
-				distinctValues["status"] = append(distinctValues["status"], strconv.FormatInt(status.Int64, 10))
+				currentStatuses, ok := distinctValues["status"].([]string)
+				if !ok {
+					currentStatuses = []string{}
+				}
+				distinctValues["status"] = append(currentStatuses, strconv.FormatInt(status.Int64, 10))
 			}
 		}
 		if err = rows.Err(); err != nil {
@@ -141,8 +181,8 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var totalRecords int64
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM http_traffic_log WHERE %s", finalWhereClauseForCount) // Use the modified where clause for counting
-	err = database.DB.QueryRow(countQuery, queryArgs...).Scan(&totalRecords)                              // queryArgs are still valid
+	countQuery := fmt.Sprintf("SELECT COUNT(htl.id) FROM http_traffic_log htl WHERE %s", finalWhereClause)
+	err = database.DB.QueryRow(countQuery, queryArgs...).Scan(&totalRecords)
 	if err != nil {
 		logger.Error("GetTrafficLogHandler: Error counting traffic logs for target %d: %v", targetID, err)
 		w.Header().Set("Content-Type", "application/json")
@@ -159,13 +199,45 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 		var contentType sql.NullString
 		for rows.Next() {
-			if err := rows.Scan(&contentType); err == nil && contentType.Valid {
-				distinctValues["type"] = append(distinctValues["type"], contentType.String)
+			if err := rows.Scan(&contentType); err == nil && contentType.Valid && strings.TrimSpace(contentType.String) != "" {
+				currentTypes, ok := distinctValues["type"].([]string)
+				if !ok {
+					currentTypes = []string{}
+				}
+				distinctValues["type"] = append(currentTypes, contentType.String)
 			}
 		}
 		if err = rows.Err(); err != nil {
 			logger.Error("GetTrafficLogHandler: Error iterating distinct content types: %v", err)
 		}
+	}
+
+	// Fetch distinct tags for the current target's logs (respecting other filters)
+	distinctTagQuery := fmt.Sprintf(`
+		SELECT DISTINCT t.id, t.name, t.color
+		FROM tags t
+		JOIN tag_associations ta ON t.id = ta.tag_id
+		JOIN http_traffic_log htl_tags ON ta.item_id = htl_tags.id AND ta.item_type = 'httplog'
+		WHERE %s -- Use finalDistinctWhereClause which includes target_id and other filters
+		ORDER BY LOWER(t.name) ASC
+	`, strings.ReplaceAll(finalDistinctWhereClause, "target_id = ?", "htl_tags.target_id = ?")) // Adjust target_id qualification
+
+	tagRows, errTag := database.DB.Query(distinctTagQuery, distinctQueryArgs...)
+	if errTag != nil {
+		logger.Error("GetTrafficLogHandler: Error fetching distinct tags for target %d: %v", targetID, errTag)
+	} else {
+		var distinctTags []models.Tag
+		for tagRows.Next() {
+			var tag models.Tag
+			if err := tagRows.Scan(&tag.ID, &tag.Name, &tag.Color); err == nil {
+				distinctTags = append(distinctTags, tag)
+			}
+		}
+		tagRows.Close()
+		if errRows := tagRows.Err(); errRows != nil {
+			logger.Error("GetTrafficLogHandler: Error iterating distinct tags: %v", errRows)
+		}
+		distinctValues["tags"] = distinctTags // Store as []models.Tag
 	}
 
 	totalPages := int64(0)
@@ -187,7 +259,8 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		"response_content_type": "htl.response_content_type",
 		"response_body_size":    "htl.response_body_size",
 		"page_sitemap_id":       "htl.page_sitemap_id", // Qualified
-		"page_sitemap_name":     "page_sitemap_name",   // This is an alias from SELECT
+		"tags":                  "(SELECT GROUP_CONCAT(t_sort.name ORDER BY t_sort.name ASC) FROM tags t_sort JOIN tag_associations ta_sort ON t_sort.id = ta_sort.tag_id WHERE ta_sort.item_id = htl.id AND ta_sort.item_type = 'httplog')",
+		"page_sitemap_name":     "page_sitemap_name", // This is an alias from SELECT
 		"duration_ms":           "htl.duration_ms",
 	}
 
@@ -259,6 +332,23 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		t.TargetID = &targetID
 		logs = append(logs, t)
 	}
+
+	// Fetch tags for all logs retrieved in this page
+	if len(logs) > 0 {
+		logIDs := make([]int64, len(logs))
+		for i, lg := range logs {
+			logIDs[i] = lg.ID
+		}
+		tagsByLogID, errTags := database.GetTagsForMultipleItems(logIDs, "httplog")
+		if errTags != nil {
+			logger.Error("GetTrafficLogHandler: Error fetching tags for multiple log entries: %v", errTags)
+			// Continue without tags if there's an error
+		} else {
+			for i := range logs {
+				logs[i].Tags = tagsByLogID[logs[i].ID] // Assign tags, will be empty slice if no tags
+			}
+		}
+	}
 	if err = rows.Err(); err != nil {
 		logger.Error("GetTrafficLogHandler: Error iterating traffic log rows: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -272,8 +362,8 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		Page           int                     `json:"page"`
 		Limit          int                     `json:"limit"`
 		TotalRecords   int64                   `json:"total_records"`
-		TotalPages     int64                   `json:"total_pages"`
-		DistinctValues map[string][]string     `json:"distinct_values"`
+		TotalPages     int64                   `json:"total_pages"` // Corrected type
+		DistinctValues map[string]interface{}  `json:"distinct_values"`
 	}{
 		Logs:           logs,
 		Page:           page,
@@ -293,8 +383,9 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 // LogEntryDetailResponse is a wrapper for HTTPTrafficLog to include navigation IDs.
 type LogEntryDetailResponse struct {
 	models.HTTPTrafficLog
-	PrevLogID *int64 `json:"prev_log_id,omitempty"`
-	NextLogID *int64 `json:"next_log_id,omitempty"`
+	PrevLogID *int64       `json:"prev_log_id,omitempty"`
+	NextLogID *int64       `json:"next_log_id,omitempty"`
+	Tags      []models.Tag `json:"tags,omitempty"` // Added to include associated tags
 }
 
 // getTrafficLogEntryDetail fetches full details for a single traffic log entry,
@@ -429,6 +520,16 @@ func getTrafficLogEntryDetail(w http.ResponseWriter, r *http.Request, logID int6
 		} else if errNext != nil && errNext != sql.ErrNoRows {
 			logger.Error("getTrafficLogEntryDetail: Error querying next (filtered) log ID for log %d: %v", logID, errNext)
 		}
+	}
+
+	// Fetch associated tags
+	tags, tagsErr := database.GetTagsForItem(logID, "httplog") // Assuming "httplog" is the item_type for traffic logs
+	if tagsErr != nil {
+		logger.Error("getTrafficLogEntryDetail: Error fetching tags for log ID %d: %v", logID, tagsErr)
+		// Do not fail the entire request if tags can't be fetched, just log it.
+		responsePayload.Tags = []models.Tag{} // Ensure it's an empty slice, not null
+	} else {
+		responsePayload.Tags = tags
 	}
 
 	w.Header().Set("Content-Type", "application/json")

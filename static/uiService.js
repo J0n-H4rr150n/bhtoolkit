@@ -40,9 +40,9 @@ export function showModalMessage(title, messageOrElement) {
     }
     modalTitle.textContent = title;
     if (typeof messageOrElement === 'string') {
-        modalMessage.innerHTML = messageOrElement; // For HTML strings
+        modalMessage.textContent = messageOrElement; // For HTML strings
     } else if (messageOrElement instanceof HTMLElement) {
-        modalMessage.innerHTML = ''; // Clear previous content
+        modalMessage.textContent = ''; // Clear previous content
         modalMessage.appendChild(messageOrElement); // Append the element
     } else {
         modalMessage.textContent = String(messageOrElement); // Fallback for other types
@@ -68,7 +68,7 @@ export function showModalConfirm(title, message, onConfirm) {
        return;
     }
     modalTitle.textContent = title;
-    modalMessage.innerHTML = message;
+    modalMessage.textContent = message;
     modalConfirmBtn.classList.remove('hidden');
     modalCancelBtn.classList.remove('hidden');
     modalOkBtn.classList.add('hidden');
@@ -158,7 +158,7 @@ export function initUIService(elements) {
  */
 export function createButton(text, onClick, options = {}) { // Already exported, but good to confirm
     const button = document.createElement('button');
-    button.innerHTML = text; // Use innerHTML to allow for HTML entities like &laquo;
+    button.textContent = text;
     if (options.id) button.id = options.id;
     if (options.classNames && Array.isArray(options.classNames)) {
         button.classList.add(...options.classNames);

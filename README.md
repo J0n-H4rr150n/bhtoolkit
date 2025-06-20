@@ -44,10 +44,11 @@ The Bug Hunter Toolkit is a web application designed to assist bug bounty hunter
 *   Domains Management
     *   Manual domain/subdomain tracking per target
     *   Subfinder Integration for automated subdomain discovery
+    *   httpx Integration for automated domain checks
 *   Findings Management
 *   Synack Integration (optional, for Synack Red Team members)
 *   Graph Visualizations (Sitemap, Page Sitemap)
-*   Settings Management (UI preferences, proxy exclusions, table layouts)
+*   Settings Management (UI preferences, proxy exclusions, table layouts, tag management)
 *   SQLite backend with database migrations
 *   Chi-based router for the Go backend API
 *   Vanilla JavaScript frontend
