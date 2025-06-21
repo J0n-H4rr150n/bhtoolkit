@@ -15,4 +15,12 @@ func RegisterFindingRoutes(r chi.Router) {
 		subRouter.Put("/", UpdateTargetFindingHandler)
 		subRouter.Delete("/", DeleteTargetFindingHandler)
 	})
+
+	// Routes for Vulnerability Types
+	r.Post("/vulnerability-types", CreateVulnerabilityTypeHandler)
+	r.Get("/vulnerability-types", GetAllVulnerabilityTypesHandler)
+	r.Route("/vulnerability-types/{vulnerability_type_id}", func(subRouter chi.Router) {
+		subRouter.Put("/", UpdateVulnerabilityTypeHandler)
+		subRouter.Delete("/", DeleteVulnerabilityTypeHandler)
+	})
 }

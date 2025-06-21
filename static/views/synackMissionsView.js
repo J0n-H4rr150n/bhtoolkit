@@ -327,7 +327,7 @@ export async function loadSynackMissionsView(mainViewContainer) {
 
         <div id="synackMissionsListTab" class="tab-content active">
             <h2>Observed Missions</h2>
-            <div id="synackMissionsStatus" style="margin-bottom: 10px; padding: 8px; background-color: #f0f0f0; border-radius: 4px; font-style: italic;">Loading status...</div>
+            <div id="synackMissionsStatus" style="margin-bottom: 10px; padding: 8px; border-radius: 4px; font-style: italic;">Loading status...</div>
             <p>This table shows missions that have been observed and recorded by the toolkit.</p>
             <div id="synackMissionsListContainer" style="margin-top:15px;">
                 <p>Loading mission list...</p>

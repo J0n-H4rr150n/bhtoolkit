@@ -225,6 +225,7 @@ async function loadView(viewId, params = {}) {
                 filterContentType: params.type || '', // Use parsed 'type' from hash
                 filterSearchText: params.search || '', 
                 showIncompleteOnly: params.show_incomplete_only === 'true', // Add this for checklist
+                filterTagIDs: params.filterTagIDs || [], // Add this for tags
                 analysis_type: params.analysis_type || null // Ensure analysis_type is carried over
             };
             // The block below that resets filters if no '?' was in the hash might be problematic.
@@ -383,6 +384,8 @@ function handleHashChange() {
                     params.favorites_only = value; // Keep as string, loadView handles conversion
                 } else if (key === 'show_incomplete_only') { // New param for checklist
                     params.show_incomplete_only = value; 
+                } else if (key === 'filter_tag_ids') {
+                    params.filterTagIDs = value ? value.split(',') : [];
                 } else {
                     params[key] = value; // Catch-all for any other parameters
                     // Specifically capture 'tab' if it's not handled above

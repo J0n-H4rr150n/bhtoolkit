@@ -1253,3 +1253,55 @@ export async function removeTagFromItem(tagId, itemId, itemType) {
     });
     return handleResponse(response); // Expects 204 No Content on success
 }
+
+// --- Vulnerability Types API ---
+
+/**
+ * Fetches all vulnerability types.
+ * @returns {Promise<Array<Object>>} - A promise that resolves with an array of vulnerability type objects.
+ */
+export async function getAllVulnerabilityTypes() {
+    const response = await fetch(`${API_BASE}/vulnerability-types`);
+    return handleResponse(response);
+}
+
+/**
+ * Creates a new vulnerability type.
+ * @param {Object} vtData - Data for the new vulnerability type (e.g., { name: "SQL Injection", description: "..." }).
+ * @returns {Promise<Object>} - A promise that resolves with the created vulnerability type object.
+ */
+export async function createVulnerabilityType(vtData) {
+    const response = await fetch(`${API_BASE}/vulnerability-types`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vtData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Updates an existing vulnerability type.
+ * @param {number|string} vtId - The ID of the vulnerability type to update.
+ * @param {Object} vtData - The data to update (e.g., { name: "New Name", description: "New Desc" }).
+ * @returns {Promise<Object>} - A promise that resolves with the updated vulnerability type object.
+ */
+export async function updateVulnerabilityType(vtId, vtData) {
+    const response = await fetch(`${API_BASE}/vulnerability-types/${vtId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vtData),
+    });
+    return handleResponse(response);
+}
+
+/**
+ * Deletes a vulnerability type.
+ * @param {number|string} vtId - The ID of the vulnerability type to delete.
+ * @returns {Promise<Object>} - A promise that resolves (usually with an empty object on success).
+ */
+export async function deleteVulnerabilityType(vtId) {
+    const response = await fetch(`${API_BASE}/vulnerability-types/${vtId}`, {
+        method: 'DELETE',
+    });
+    return handleResponse(response); // Expects 204 No Content on success
+}

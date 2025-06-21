@@ -55,12 +55,25 @@ func InitDB(dataSourceName string) error {
 
 	logger.Info("Applying database migrations...")
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		logger.Error("Failed to apply migrations: %v", err)
+		// If a migration fails, the database is considered "dirty".
+		// We can try to get the version to help the user identify the problematic file.
+		version, dirty, vErr := m.Version()
+		if vErr != nil {
+			logger.Error("Failed to apply migrations and could not determine migration version: %v. Original migration error: %v", vErr, err)
+			return fmt.Errorf("failed to apply migrations: %w (version check failed: %v)", err, vErr)
+		}
+		if dirty {
+			logger.Error("Database is in a dirty state. The last attempted migration was version %d. Please check the migration file for this version for errors.", version)
+		}
+		logger.Error("Failed to apply migrations (raw error): %v", err)
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 	logger.Info("Database migrations applied successfully (or no changes).")
 	if err := seedInitialChecklistTemplates(); err != nil {
 		return fmt.Errorf("failed to seed checklist templates: %w", err)
+	}
+	if err := seedInitialVulnerabilityTypes(); err != nil {
+		return fmt.Errorf("failed to seed vulnerability types: %w", err)
 	}
 	// Seed tags after checklist templates
 	return seedTagsFromJSON()
@@ -365,6 +378,93 @@ func seedTagsFromJSON() error {
 	}
 
 	logger.Info("Tag seeding from JSON complete. Created: %d, Skipped/Existing: %d", createdCount, skippedCount)
+	return nil
+}
+
+func seedInitialVulnerabilityTypes() error {
+	types := []models.VulnerabilityType{
+		{Name: "SQL Injection (SQLi)", Description: models.NullString("Injecting SQL queries via input data to manipulate database commands.")},
+		{Name: "Cross-Site Scripting (XSS) - Reflected", Description: models.NullString("Injecting malicious scripts into web pages viewed by other users, where the script is reflected off a web server.")},
+		{Name: "Cross-Site Scripting (XSS) - Stored", Description: models.NullString("Injecting malicious scripts into a web application''s storage, which are then served to other users.")},
+		{Name: "Cross-Site Scripting (XSS) - DOM-based", Description: models.NullString("Manipulating the Document Object Model (DOM) in the victim''s browser to execute malicious scripts.")},
+		{Name: "XML External Entity (XXE) Injection", Description: models.NullString("Exploiting XML parsers that process external entities, potentially leading to information disclosure or SSRF.")},
+		{Name: "Server-Side Request Forgery (SSRF)", Description: models.NullString("Forcing an application to make requests to an unintended location or an internal resource.")},
+		{Name: "Insecure Direct Object References (IDOR)", Description: models.NullString("Accessing unauthorized data by manipulating object references (e.g., user IDs, file names).")},
+		{Name: "Broken Access Control", Description: models.NullString("Failures in enforcing restrictions on what authenticated users are allowed to do.")},
+		{Name: "Security Misconfiguration", Description: models.NullString("Incorrectly configured security settings, default credentials, or overly verbose error messages.")},
+		{Name: "Insecure Deserialization", Description: models.NullString("Exploiting flaws in the deserialization of untrusted data, leading to remote code execution or other impacts.")},
+		{Name: "Sensitive Data Exposure", Description: models.NullString("Exposing sensitive information such as PII, credentials, or financial data due to lack of encryption or other protections.")},
+		{Name: "Authentication Bypass", Description: models.NullString("Gaining unauthorized access by circumventing authentication mechanisms.")},
+		{Name: "Authorization Bypass", Description: models.NullString("Gaining access to functionalities or resources that should not be permitted for the current user role.")},
+		{Name: "Remote Code Execution (RCE)", Description: models.NullString("Ability to execute arbitrary code on the target server.")},
+		{Name: "Local File Inclusion (LFI)", Description: models.NullString("Including local files on the server, potentially exposing sensitive information or leading to RCE.")},
+		{Name: "Remote File Inclusion (RFI)", Description: models.NullString("Including remote files on the server, often leading to RCE.")},
+		{Name: "Directory Traversal / Path Traversal", Description: models.NullString("Accessing files and directories stored outside the web root folder.")},
+		{Name: "Command Injection", Description: models.NullString("Executing arbitrary commands on the host operating system via a vulnerable application.")},
+		{Name: "Cross-Site Request Forgery (CSRF)", Description: models.NullString("Forcing an end user to execute unwanted actions on a web application in which they are currently authenticated.")},
+		{Name: "Open Redirect", Description: models.NullString("Redirecting users to an arbitrary external URL, often used in phishing attacks.")},
+		{Name: "Subdomain Takeover", Description: models.NullString("Gaining control over a subdomain that points to a de-provisioned third-party service.")},
+		{Name: "Information Disclosure", Description: models.NullString("Revealing sensitive information that could aid an attacker (e.g., stack traces, internal paths, user data).")},
+		{Name: "Weak Cryptography", Description: models.NullString("Use of outdated or weak cryptographic algorithms or improper implementation of cryptography.")},
+		{Name: "Denial of Service (DoS)", Description: models.NullString("Overwhelming a system with traffic or requests to make it unavailable to legitimate users.")},
+		{Name: "Business Logic Flaws", Description: models.NullString("Exploiting flaws in the design and implementation of the application''s business logic.")},
+		{Name: "Race Conditions", Description: models.NullString("Exploiting timing discrepancies in the execution of concurrent operations.")},
+		{Name: "HTTP Request Smuggling", Description: models.NullString("Interfering with the way a sequence of HTTP requests are processed by one or more HTTP devices.")},
+		{Name: "Web Cache Deception", Description: models.NullString("Tricking a web cache to store and serve sensitive user-specific content to other users.")},
+		{Name: "Prototype Pollution (Client-Side)", Description: models.NullString("Injecting properties into `Object.prototype` in JavaScript, leading to XSS or other vulnerabilities.")},
+		{Name: "Prototype Pollution (Server-Side - Node.js)", Description: models.NullString("Injecting properties into `Object.prototype` in Node.js, potentially leading to RCE or other vulnerabilities.")},
+		{Name: "NoSQL Injection", Description: models.NullString("Injecting NoSQL database queries via input data.")},
+		{Name: "LDAP Injection", Description: models.NullString("Injecting LDAP queries via input data.")},
+		{Name: "Template Injection (SSTI)", Description: models.NullString("Injecting template language syntax into a template, leading to RCE or information disclosure.")},
+		{Name: "Insecure File Upload", Description: models.NullString("Allowing upload of malicious files that can be executed on the server or client-side.")},
+		{Name: "Missing HTTP Security Headers", Description: models.NullString("Absence of security headers like CSP, HSTS, X-Frame-Options, X-Content-Type-Options.")},
+		{Name: "CORS Misconfiguration", Description: models.NullString("Improperly configured Cross-Origin Resource Sharing policies, allowing unauthorized cross-origin access.")},
+		{Name: "GraphQL Injection / Batching Attacks", Description: models.NullString("Exploiting GraphQL implementations through malicious queries or batching.")},
+		{Name: "OAuth/OIDC Misconfigurations", Description: models.NullString("Flaws in OAuth 2.0 or OpenID Connect implementations leading to account takeover or information disclosure.")},
+		{Name: "Mass Assignment", Description: models.NullString("Binding client-controlled data to model properties or internal objects without proper validation or filtering.")},
+	}
+
+	for _, vt := range types {
+		var existingID int64
+		err := DB.QueryRow("SELECT id FROM vulnerability_types WHERE name = ?", vt.Name).Scan(&existingID)
+		if err == nil {
+			logger.Info("Vulnerability type '%s' already exists (ID: %d), skipping.", vt.Name, existingID)
+			continue
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("checking for existing vulnerability type '%s': %w", vt.Name, err)
+		}
+
+		stmt, err := DB.Prepare(`
+			INSERT INTO vulnerability_types (name, description, created_at, updated_at)
+			VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`)
+		if err != nil {
+			return fmt.Errorf("preparing insert vulnerability type statement for '%s': %w", vt.Name, err)
+		}
+		defer stmt.Close()
+
+		res, err := stmt.Exec(vt.Name, vt.Description)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+				// Known issue: SQLite unique constraint errors don't automatically skip.
+				// Log the skip and continue.
+				logger.Warn("Skipping existing vulnerability type (unique constraint): %s", vt.Name)
+			} else {
+				return fmt.Errorf("executing insert vulnerability type statement for '%s': %w", vt.Name, err)
+			}
+		} else {
+			id, err := res.LastInsertId()
+			if err != nil {
+				logger.Error("seedInitialVulnerabilityTypes: Could not get last insert id: %v", err)
+			} else {
+				logger.Info("Inserted initial vulnerability type: ID %d, Name '%s'", id, vt.Name)
+			}
+		}
+	}
+	// Ensure this function is called by InitDB
+	// It's currently missing from InitDB in the provided context.
+	// You will need to add `if err := seedInitialVulnerabilityTypes(); err != nil { return fmt.Errorf("failed to seed vulnerability types: %w", err) }` to InitDB.
 	return nil
 }
 

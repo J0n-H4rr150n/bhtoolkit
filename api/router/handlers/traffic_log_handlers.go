@@ -212,19 +212,21 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch distinct tags for the current target's logs (respecting other filters)
+	// Fetch all distinct tags for the CURRENT TARGET, ignoring other filters.
+	// This ensures the dropdown always shows all relevant tags for the target,
+	// allowing users to add/remove from their filter selection without options disappearing.
 	distinctTagQuery := fmt.Sprintf(`
 		SELECT DISTINCT t.id, t.name, t.color
-		FROM tags t
+		FROM tags t 
 		JOIN tag_associations ta ON t.id = ta.tag_id
 		JOIN http_traffic_log htl_tags ON ta.item_id = htl_tags.id AND ta.item_type = 'httplog'
-		WHERE %s -- Use finalDistinctWhereClause which includes target_id and other filters
+		WHERE htl_tags.target_id = ?
 		ORDER BY LOWER(t.name) ASC
-	`, strings.ReplaceAll(finalDistinctWhereClause, "target_id = ?", "htl_tags.target_id = ?")) // Adjust target_id qualification
+	`)
 
-	tagRows, errTag := database.DB.Query(distinctTagQuery, distinctQueryArgs...)
+	tagRows, errTag := database.DB.Query(distinctTagQuery, targetID) // Use only targetID for this query
 	if errTag != nil {
-		logger.Error("GetTrafficLogHandler: Error fetching distinct tags for target %d: %v", targetID, errTag)
+		logger.Error("GetTrafficLogHandler: Error fetching all distinct tags for target %d: %v", targetID, errTag)
 	} else {
 		var distinctTags []models.Tag
 		for tagRows.Next() {

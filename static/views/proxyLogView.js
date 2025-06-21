@@ -7,6 +7,7 @@ let uiService;
 let stateService;
 let tableService;
 
+let allAvailableTags = []; // Module-level cache for all tags
 // DOM element references (will be queried within functions or passed)
 let viewContentContainer; // Main container, passed to load functions
 
@@ -184,7 +185,8 @@ function handleProxyLogFilterChange(event) {
         method: finalMethod,
         status: finalStatus,
         type: finalContentType,
-        search: pState.filterSearchText
+        search: pState.filterSearchText,
+        filter_tag_ids: pState.filterTagIDs.length > 0 ? pState.filterTagIDs.join(',') : '' // Preserve existing tag filter
     });
     console.log('[ProxyLogView] New Hash Query Params:', queryParams.toString());
     window.location.hash = `#proxy-log?${queryParams.toString()}`;
@@ -302,79 +304,186 @@ function handleViewLogDetail(event) {
     }
 }
 
-async function fetchAndDisplayProxyLogs(passedParams = null) {
-    const listDiv = document.getElementById('proxyLogListContainer');
-    const paginationControlsDiv = document.getElementById('proxyLogPaginationControlsContainer');
-    if (!listDiv || !paginationControlsDiv) {
-        console.error("Proxy log list or pagination container not found.");
+/**
+ * Renders the static shell of the proxy log view.
+ * This function is called by the router before fetchAndDisplayProxyLogs.
+ * @param {HTMLElement} mainViewContainer - The main container element for the view.
+ * @param {Object} proxyLogParams - Parameters from the URL hash.
+ */
+export async function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
+    viewContentContainer = mainViewContainer;
+    if (!viewContentContainer) {
+        console.error("viewContentContainer not provided to loadProxyLogView!");
+        return;
+    }
+    console.log("[ProxyLogView] loadProxyLogView (static shell) called with params:", proxyLogParams);
+    if (!apiService || !uiService || !stateService || !tableService) {
+        console.error("ProxyLogView not initialized. Call initProxyLogView with services first.");
+        viewContentContainer.innerHTML = "<p class='error-message'>ProxyLogView module not initialized. Critical services are missing.</p>";
         return;
     }
 
     const appState = stateService.getState();
     const { currentTargetId, currentTargetName } = appState;
-    const defaultProxyLogPaginationState = appState.paginationState.proxyLog;
+    const activeParams = proxyLogParams || appState.paginationState.proxyLog;
+    const { filterFavoritesOnly, filterSearchText } = activeParams;
+
+    const targetInfo = currentTargetId ? `for Target: ${escapeHtml(currentTargetName)} (ID: ${currentTargetId})` : '(No Target Selected)';
+    viewContentContainer.innerHTML = `
+        <h1>Proxy Log ${targetInfo}</h1>
+
+        <div class="tabs">
+            <button class="tab-button" data-tab="allLogsTab">All Logs</button>
+            <button class="tab-button" data-tab="paramAnalysisTab">Parameter Analysis</button>
+        </div>
+
+        <div id="allLogsTab" class="tab-content">
+            <div style="margin-top:15px; margin-bottom: 15px; display: flex; align-items: center; gap: 20px;">
+                <div class="form-group" style="display: flex; align-items: center; margin-bottom: 0;">
+                    <input type="checkbox" id="filterFavoritesToggle" style="margin-right: 5px;" ${filterFavoritesOnly ? 'checked' : ''}>
+                    <label for="filterFavoritesToggle" style="font-weight: normal;">Favorites Only</label>
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; margin-left: 20px; margin-bottom: 0;">
+                    <input type="checkbox" id="defaultToResponseTabToggle" style="margin-right: 5px;">
+                    <label for="defaultToResponseTabToggle" style="font-weight: normal;">Default to Response Tab in Detail View</label>
+                </div>
+                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
+                    <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
+                </div>
+            </div>
+            <div id="proxyLogControlsRow" style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs">🔄</button>
+                    <button id="saveProxyLogLayoutBtn" class="secondary small-button">Save Column Layout</button>
+                    <button id="customizeProxyLogColumnsBtn" class="secondary small-button">Customize Columns</button>
+                    <button id="deleteAllTargetLogsBtn" class="secondary small-button" ${!currentTargetId ? 'disabled title="No target selected"' : `title="Delete all logs for ${escapeHtml(currentTargetName)}"`}>
+                        Delete All Logs for Target
+                    </button>
+                    <span id="proxyLogRefreshStatusMessage" class="message-area" style="margin-left: 10px; display: none;"></span>
+                </div>
+                <div id="proxyLogTagFilterContainer" style="display: flex; align-items: center; gap: 5px; margin-left: auto;"></div>
+            </div>
+            <div id="proxyLogListContainer">Loading proxy logs...</div>
+            <div id="proxyLogPaginationControlsContainer" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
+        </div>
+
+        <div id="paramAnalysisTab" class="tab-content">
+            <h3 style="margin-top:15px;">Logs with URL Parameters</h3>
+            <div style="margin-bottom: 15px;">
+                <button id="runParamAnalysisBtn" class="primary">Run/Refresh Analysis</button>
+            </div>
+            <div id="paramAnalysisContent"><p>Loading parameter analysis...</p></div>
+        </div>
+    `;
+
+    if (!currentTargetId) {
+        const allLogsContent = document.getElementById('allLogsTab');
+        if (allLogsContent) allLogsContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to view its proxy log.</p>';
+        const paramAnalysisContent = document.getElementById('paramAnalysisTab');
+        if (paramAnalysisContent) paramAnalysisContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to perform analysis.</p>';
+        const runBtn = document.getElementById('runParamAnalysisBtn');
+        if (runBtn) runBtn.disabled = true;
+        return;
+    }
+
+    // Attach event listeners to static elements after innerHTML is set
+    document.querySelectorAll('.tabs .tab-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const tabId = e.currentTarget.dataset.tab;
+            const currentHash = window.location.hash.split('?')[0];
+            const currentParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+            currentParams.set('analysis_type', tabId === 'paramAnalysisTab' ? 'params' : '');
+            window.location.hash = `${currentHash}?${currentParams.toString().replace(/analysis_type=&|&analysis_type=$/, '')}`;
+        });
+    });
+
+    document.getElementById('runParamAnalysisBtn')?.addEventListener('click', () => {
+        triggerAndFetchParamAnalysis(currentTargetId, currentTargetName);
+    });
+    document.getElementById('filterFavoritesToggle')?.addEventListener('change', handleProxyLogFavoriteFilterChange);
+    document.getElementById('proxyLogSearchInput')?.addEventListener('input', debounce(handleProxyLogSearch, 300));
+    document.getElementById('saveProxyLogLayoutBtn')?.addEventListener('click', prepareAndSaveProxyLogLayout);
+    document.getElementById('deleteAllTargetLogsBtn')?.addEventListener('click', handleDeleteAllTargetLogs);
+    document.getElementById('refreshProxyLogBtn')?.addEventListener('click', handleRefreshProxyLog);
+    document.getElementById('customizeProxyLogColumnsBtn')?.addEventListener('click', openCustomizeColumnsModal);
+
+    const defaultToResponseToggle = document.getElementById('defaultToResponseTabToggle');
+    if (defaultToResponseToggle) {
+        defaultToResponseToggle.checked = localStorage.getItem('proxyLogDefaultToResponseTab') === 'true';
+        defaultToResponseToggle.addEventListener('change', (event) => {
+            localStorage.setItem('proxyLogDefaultToResponseTab', event.target.checked);
+        });
+    }
+}
+
+export async function fetchAndDisplayProxyLogs(passedParams = null) {
+    const listDiv = document.getElementById('proxyLogListContainer');
+    const paginationControlsDiv = document.getElementById('proxyLogPaginationControlsContainer');
+    const appState = stateService.getState();
+    const { currentTargetId, currentTargetName } = appState;
+    const activeParams = passedParams || appState.paginationState.proxyLog;
+    const { filterFavoritesOnly, filterSearchText, analysis_type } = activeParams;
+
+    if (!listDiv || !paginationControlsDiv) {
+        console.error("Proxy log list or pagination container not found.");
+        return;
+    }
     const globalTableLayouts = appState.globalTableLayouts || {};
     const tableKey = 'proxyLogTable';
     const savedLayoutForThisTable = globalTableLayouts[tableKey];
+    const defaultProxyLogPaginationState = appState.paginationState.proxyLog;
+    const columnDefinitions = appState.paginationState.proxyLogTableLayout;
 
-    // Ensure all parameters are correctly typed, especially limit and currentPage
-    const baseParams = passedParams || defaultProxyLogPaginationState;
-    const validatedParams = {
-        ...baseParams,
-        // Prioritize limit from passedParams (e.g., from hash change via dropdown)
-        // Then fallback to saved layout's page size, then to default state's limit.
-        limit: (baseParams && baseParams.limit)
-               ? parseInt(baseParams.limit, 10)
-               : (savedLayoutForThisTable?.pageSize
-                  ? parseInt(savedLayoutForThisTable.pageSize, 10)
-                  : (defaultProxyLogPaginationState.limit ? parseInt(defaultProxyLogPaginationState.limit, 10) : 25)),
-        currentPage: (baseParams && baseParams.currentPage)
-                     ? parseInt(baseParams.currentPage, 10)
-                     : (defaultProxyLogPaginationState.currentPage ? parseInt(defaultProxyLogPaginationState.currentPage, 10) : 1)
-    };
-    // Ensure limit and currentPage are valid numbers after potential parsing
-    if (isNaN(validatedParams.limit) || validatedParams.limit <= 0) validatedParams.limit = defaultProxyLogPaginationState.limit || 25;
-    if (isNaN(validatedParams.currentPage) || validatedParams.currentPage <= 0) validatedParams.currentPage = defaultProxyLogPaginationState.currentPage || 1;
+    const validatedParams = { ...defaultProxyLogPaginationState, ...activeParams };
+    validatedParams.limit = (activeParams && activeParams.limit) ? parseInt(activeParams.limit, 10) : (savedLayoutForThisTable?.pageSize || defaultProxyLogPaginationState.limit);
+    validatedParams.currentPage = (activeParams && activeParams.currentPage) ? parseInt(activeParams.currentPage, 10) : defaultProxyLogPaginationState.currentPage;
+    if (isNaN(validatedParams.limit) || validatedParams.limit <= 0) validatedParams.limit = defaultProxyLogPaginationState.limit;
+    if (isNaN(validatedParams.currentPage) || validatedParams.currentPage <= 0) validatedParams.currentPage = defaultProxyLogPaginationState.currentPage;
 
+    const { currentPage, limit, sortBy, sortOrder, filterMethod, filterStatus, filterContentType, filterTagIDs } = validatedParams;
 
-    // Use passedParams if available, otherwise fallback to global state (for initial load or non-filter-driven reloads)
-    const { currentPage, limit, sortBy, sortOrder, filterFavoritesOnly, filterMethod, filterStatus, filterContentType, filterSearchText, filterTagIDs } = validatedParams;
+    document.getElementById('filterFavoritesToggle').checked = filterFavoritesOnly;
+    document.getElementById('proxyLogSearchInput').value = filterSearchText;
 
-    console.log(`[ProxyLogView] fetchAndDisplayProxyLogs using filterMethod: "${filterMethod}"`, validatedParams);
-    // const globalTableLayouts = appState.globalTableLayouts; // Already declared above
-    // const tableKey = 'proxyLogTable'; // Already declared above
-    const columnDefinitions = appState.paginationState.proxyLogTableLayout; // This holds default visibility, labels etc.
+    document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
-    listDiv.innerHTML = `<p>Fetching proxy logs for target ${escapeHtml(currentTargetName)} (ID: ${currentTargetId}), page ${currentPage}, sort by ${sortBy} ${sortOrder}...</p>`;
+    if (analysis_type === 'params') {
+        document.querySelector('.tab-button[data-tab="paramAnalysisTab"]')?.classList.add('active');
+        document.getElementById('paramAnalysisTab')?.classList.add('active');
+        displayParameterizedURLs();
+    } else {
+        document.querySelector('.tab-button[data-tab="allLogsTab"]')?.classList.add('active');
+        document.getElementById('allLogsTab')?.classList.add('active');
+    }
+
+    if (analysis_type !== 'params') {
+        listDiv.innerHTML = `<p>Fetching proxy logs for target ${escapeHtml(currentTargetName)} (ID: ${currentTargetId}), page ${currentPage}, sort by ${sortBy} ${sortOrder}...</p>`;
+    } else {
+        listDiv.innerHTML = '';
+    }
 
     try {
-        const paramsForAPI = {
-            target_id: currentTargetId,
-            page: currentPage,
-            limit: limit,
-            sort_by: sortBy,
-            sort_order: sortOrder,
-            favorites_only: filterFavoritesOnly,
-            method: filterMethod,
-            status: filterStatus,
-            type: filterContentType,
-            search: filterSearchText,
-            filter_tag_ids: filterTagIDs && filterTagIDs.length > 0 ? filterTagIDs.join(',') : ''
-        };
-        const apiResponse = await apiService.getProxyLog(paramsForAPI);
-        const logs = apiResponse.logs || [];
+        let apiResponse = { logs: [], distinct_values: {}, page: 1, limit: 0, total_pages: 0, total_records: 0 };
+        if (analysis_type !== 'params') {
+            const paramsForAPI = {
+                target_id: currentTargetId,
+                page: currentPage, limit: limit, sort_by: sortBy, sort_order: sortOrder,
+                favorites_only: filterFavoritesOnly, method: filterMethod, status: filterStatus,
+                type: filterContentType, search: filterSearchText,
+                filter_tag_ids: filterTagIDs && filterTagIDs.length > 0 ? filterTagIDs.join(',') : ''
+            };
+            apiResponse = await apiService.getProxyLog(paramsForAPI);
+        }
 
-        // Store distinct tags from response for the filter dropdown
         const distinctTagsForFilter = apiResponse.distinct_values?.tags || [];
-        renderTagFilterDropdown(distinctTagsForFilter); // New function call
+        renderTagFilterDropdown(distinctTagsForFilter);
 
         stateService.updateState({
             paginationState: {
-                ...appState.paginationState, // Preserve other pagination states (e.g., for checklist)
+                ...appState.paginationState,
                 proxyLog: {
-                    // Use the validated parameters (which have numeric limit and currentPage)
                     ...validatedParams,
-                    // Then, override with pagination details from the API response
                     currentPage: apiResponse.page || 1,
                     totalPages: apiResponse.total_pages || 1,
                     totalRecords: apiResponse.total_records || 0,
@@ -388,8 +497,7 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
         const savedLayout = globalTableLayouts[tableKey] || { columns: {}, pageSize: validatedParams.limit };
         const savedColumnSettings = savedLayout.columns || {};
 
-        // Define headers based on columnDefinitions, respecting visibility
-        const displayableHeaders = [ // Order matters for display
+        const displayableHeaders = [
             { key: 'index', sortKey: 'id', filter: false },
             { key: 'timestamp', sortKey: 'timestamp', filter: false },
             { key: 'method', sortKey: 'request_method', filter: true },
@@ -402,37 +510,22 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
             { key: 'actions', sortKey: null, filter: false }
         ];
 
-        // For debugging, let's log what layouts are available when rendering
-        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - globalTableLayouts:", JSON.parse(JSON.stringify(globalTableLayouts)));
-        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - tableKey:", tableKey);
-        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - savedLayout for this tableKey:", JSON.parse(JSON.stringify(savedLayout)));
-        console.log("[ProxyLogView] fetchAndDisplayProxyLogs - columnDefinitions (defaults from state):", JSON.parse(JSON.stringify(columnDefinitions)));
-
-        if (logs.length > 0) {
+        if (apiResponse.logs && apiResponse.logs.length > 0) {
             let tableHTML = `<table style="table-layout: fixed;"><thead id="proxyLogTableHead"><tr>`;
             displayableHeaders.forEach(h => {
                 const colDef = columnDefinitions[h.key];
                 const savedColSetting = savedColumnSettings[h.key];
-                const isVisible = savedColSetting ? savedColSetting.visible : (colDef ? colDef.visible : true); // Default to true if not in saved or default config
-
-                if (!isVisible) return; // Skip rendering this column
+                const isVisible = savedColSetting ? savedColSetting.visible : (colDef ? colDef.visible : true);
+                if (!isVisible) return;
 
                 let classes = h.sortKey ? 'sortable' : '';
                 if (h.sortKey === sortBy) classes += sortOrder === 'ASC' ? ' sorted-asc' : ' sorted-desc';
                 let filterDropdownHTML = '';
-                const colKey = h.key; // Use the key directly
-                let thStyleWidth;
-                
-                // Use saved width if available, otherwise default width from columnDefinitions
-                thStyleWidth = savedColSetting?.width || colDef?.default || 'auto';
-                if (colDef?.nonResizable) { // Apply fixed width for non-resizable like 'actions'
-                    thStyleWidth = colDef.default; 
-                }
+                const colKey = h.key;
+                let thStyleWidth = savedColSetting?.width || colDef?.default || 'auto';
+                if (colDef?.nonResizable) thStyleWidth = colDef.default;
+                if (colKey === 'actions') classes += ' proxy-log-actions-column';
 
-                // Add the specific class for the actions column header
-                if (colKey === 'actions') {
-                    classes += ' proxy-log-actions-column';
-                }
                 if (h.filter) {
                     let options = [];
                     let currentFilterValue = '';
@@ -444,58 +537,32 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                     options.unshift('');
                     filterDropdownHTML = `<br><select class="proxy-log-filter" data-filter-key="${h.key}" style="margin-top: 5px; width: 90%;">${options.map(opt => `<option value="${escapeHtmlAttribute(String(opt))}" ${String(opt) === String(currentFilterValue) ? 'selected' : ''}>${opt === '' ? 'All' : escapeHtmlAttribute(String(opt))}</option>`).join('')}</select>`;
                 }
-                // Log the width calculation for each header
-                console.log(`[ProxyLogView] Header: ${colDef?.label || h.key}, colKey: '${colKey}', savedWidth: '${savedColSetting?.width}', defaultWidth: '${colDef?.default}', finalWidth: '${thStyleWidth}'`);
-
                 tableHTML += `<th class="${classes}" style="width: ${thStyleWidth};" ${h.sortKey ? `data-sort-key="${h.sortKey}"` : ''} data-col-key="${colKey}" id="${colDef?.id || 'col-proxylog-' + colKey}">${colDef?.label || h.key}${filterDropdownHTML}</th>`;
             });
             tableHTML += `</tr></thead><tbody>`;
-            logs.forEach((log, index) => {
+            apiResponse.logs.forEach((log, index) => {
                 let itemIndex;
-                // Use total_records directly from the apiResponse for this rendering pass
-                // as appState.paginationState.proxyLog.totalRecords might not be updated yet
-                // for this specific execution context of fetchAndDisplayProxyLogs.
                 const recordsCountForThisRender = apiResponse.total_records || 0;
                 const { currentPage: currentDisplayPage, limit: currentLimit } = appState.paginationState.proxyLog;
-
-                // DEBUGGING: Log values used for itemIndex calculation
-                console.log(`[ProxyLogView] Calculating itemIndex: recordsCountForThisRender=${recordsCountForThisRender}, currentPage=${currentDisplayPage}, limit=${currentLimit}, index=${index}, sortBy=${sortBy}, sortOrder=${sortOrder}`);
-
-                // Corrected logic for descending ID sort
-                // The goal is to show the highest ID as #1 on page 1, then count down.
                 if (sortBy === 'id' && sortOrder === 'DESC') {
                     itemIndex = recordsCountForThisRender - ((currentDisplayPage - 1) * currentLimit) - index;
-                } else if (sortBy === 'id' && sortOrder === 'ASC') { // Handle ascending ID sort for index
-                    itemIndex = (currentDisplayPage - 1) * currentLimit + index + 1;
-                    // If you want to display the actual ID, you'd use log.id here instead of a calculated index
                 } else {
                     itemIndex = (currentDisplayPage - 1) * currentLimit + index + 1;
                 }
-                // Use full URL with fragment if available, otherwise fall back to request_url
-                const requestURLString = (log.request_full_url_with_fragment && log.request_full_url_with_fragment.Valid && log.request_full_url_with_fragment.String)
-                                           ? log.request_full_url_with_fragment.String
-                                           : (log.request_url?.String || '');
-                // Log the log object to inspect its contents, especially request_full_url_with_fragment
-                console.log('[ProxyLogView] Log object for list view (ID ' + log.id + '):', JSON.parse(JSON.stringify(log)));
+                const requestURLString = (log.request_full_url_with_fragment && log.request_full_url_with_fragment.Valid && log.request_full_url_with_fragment.String) ? log.request_full_url_with_fragment.String : (log.request_url?.String || '');
                 const safeURL = escapeHtml(requestURLString);
-                const pageNameDisplay = (log.page_sitemap_id?.Valid && log.page_sitemap_name?.Valid && log.page_sitemap_name.String)
-                    ? `<a href="#page-sitemap?page_id=${log.page_sitemap_id.Int64}" title="View Page: ${escapeHtmlAttribute(log.page_sitemap_name.String)}">${escapeHtml(log.page_sitemap_name.String)}</a>`
-                    : '-';
-                const logSourceDisplay = log.log_source?.Valid ? escapeHtml(log.log_source.String) : 'mitmproxy';
-
+                const pageNameDisplay = (log.page_sitemap_id?.Valid && log.page_sitemap_name?.Valid && log.page_sitemap_name.String) ? `<a href="#page-sitemap?page_id=${log.page_sitemap_id.Int64}" title="View Page: ${escapeHtmlAttribute(log.page_sitemap_name.String)}">${escapeHtml(log.page_sitemap_name.String)}</a>` : '-';
                 const ts = log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A';
                 tableHTML += `<tr>`;
                 displayableHeaders.forEach(h => {
                     const colDef = columnDefinitions[h.key];
                     const savedColSetting = savedColumnSettings[h.key];
                     const isVisible = savedColSetting ? savedColSetting.visible : (colDef ? colDef.visible : true);
-
                     if (!isVisible) return;
-
                     switch(h.key) {
                         case 'index': tableHTML += `<td>${itemIndex}</td>`; break;
                         case 'timestamp': tableHTML += `<td>${ts}</td>`; break;
-                        case 'method': tableHTML += `<td>${escapeHtml(log.request_method?.String || '')}</td>`; break; // Ensure .String is accessed
+                        case 'method': tableHTML += `<td>${escapeHtml(log.request_method?.String || '')}</td>`; break;
                         case 'page_name': tableHTML += `<td>${pageNameDisplay}</td>`; break;
                         case 'url':
                             const displayURL = safeURL.length > 256 ? safeURL.substring(0, 253) + '...' : safeURL;
@@ -503,71 +570,42 @@ async function fetchAndDisplayProxyLogs(passedParams = null) {
                             break;
                         case 'status': tableHTML += `<td>${log.response_status_code || '-'}</td>`; break;
                         case 'type':
-                            tableHTML += `<td title="${escapeHtmlAttribute(log.response_content_type?.String || '-')}">` +
-                                         `${escapeHtml(log.response_content_type?.Valid && log.response_content_type.String ? log.response_content_type.String.substring(0,30) : '-')}` +
-                                         `${log.response_content_type?.Valid && log.response_content_type.String && log.response_content_type.String.length > 30 ? '...' : ''}` +
-                                         `</td>`;
+                            tableHTML += `<td title="${escapeHtmlAttribute(log.response_content_type?.String || '-')}">` + `${escapeHtml(log.response_content_type?.Valid && log.response_content_type.String ? log.response_content_type.String.substring(0,30) : '-')}` + `${log.response_content_type?.Valid && log.response_content_type.String && log.response_content_type.String.length > 30 ? '...' : ''}` + `</td>`;
                             break;
                         case 'tags':
-                            let tagsHTML = log.tags && log.tags.length > 0
-                                ? log.tags.map(tag =>
-                                    `<span class="tag-chip-table" style="background-color: ${tag.color?.String || '#6c757d'}; color: white; padding: 1px 4px; border-radius: 3px; margin-right: 3px; font-size: 0.8em; display: inline-block;">
-                                        ${escapeHtml(tag.name)}
-                                    </span>`).join(' ')
-                                : '-';
+                            let tagsHTML = log.tags && log.tags.length > 0 ? log.tags.map(tag => `<span class="tag-chip-table" style="background-color: ${tag.color?.String || '#6c757d'}; color: white; padding: 1px 4px; border-radius: 3px; margin-right: 3px; font-size: 0.8em; display: inline-block;">${escapeHtml(tag.name)}</span>`).join(' ') : '-';
                             tableHTML += `<td>${tagsHTML}</td>`; break;
                         case 'size': tableHTML += `<td>${log.response_body_size || 0}</td>`; break;
                         case 'actions':
-                            tableHTML += `<td class="actions-cell proxy-log-actions-column">
-                                <span class="favorite-toggle table-row-favorite-toggle ${log.is_favorite ? 'favorited' : ''}" data-log-id="${log.id}" data-is-favorite="${log.is_favorite ? 'true' : 'false'}" title="Toggle Favorite" style="cursor: pointer; margin-right: 8px; font-size: 1.2em; vertical-align: middle;">${log.is_favorite ? '★' : '☆'}</span>
-                                <button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button>
-                                <button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="More Actions">⋮</button>
-                            </td>`;
+                            tableHTML += `<td class="actions-cell proxy-log-actions-column"><span class="favorite-toggle table-row-favorite-toggle ${log.is_favorite ? 'favorited' : ''}" data-log-id="${log.id}" data-is-favorite="${log.is_favorite ? 'true' : 'false'}" title="Toggle Favorite" style="cursor: pointer; margin-right: 8px; font-size: 1.2em; vertical-align: middle;">${log.is_favorite ? '★' : '☆'}</span><button class="action-button view-log-detail" data-log-id="${log.id}" title="View Details">👁️</button><button class="action-button more-actions" data-log-id="${log.id}" data-log-method="${escapeHtmlAttribute(log.request_method?.String || '')}" data-log-path="${escapeHtmlAttribute((log.request_url?.String || '').split('?')[0])}" title="More Actions">⋮</button></td>`;
                             break;
                     }
                 });
                 tableHTML += `</tr>`;
             });
-
             tableHTML += `</tbody></table>`;
             listDiv.innerHTML = tableHTML;
-            // For debugging, you can uncomment the next line to see the HTML being set:
-            // console.log("[ProxyLogView] listDiv.innerHTML was set. First 500 chars:", listDiv.innerHTML.substring(0, 500));
-        } else {
+        } else if (analysis_type !== 'params') {
             listDiv.innerHTML = `<p>No proxy logs found for target ${escapeHtml(currentTargetName)} (ID: ${currentTargetId}) with current filters.</p>`;
         }
         renderProxyLogPagination(paginationControlsDiv);
-
-        // Using requestAnimationFrame for DOM updates to ensure elements are ready
         requestAnimationFrame(() => {
             const tableHeadElement = document.getElementById('proxyLogTableHead');
-            console.log("[ProxyLogView] Inside requestAnimationFrame, tableHeadElement found:", tableHeadElement ? "Yes" : "No");
-
             if (tableHeadElement) {
                 tableHeadElement.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', handleProxyLogSort));
                 tableHeadElement.querySelectorAll('select.proxy-log-filter').forEach(select => {
                     select.addEventListener('change', handleProxyLogFilterChange);
-                    // Prevent clicks on the select from bubbling up to the TH and triggering a sort
-                    select.addEventListener('click', (event) => {
-                        event.stopPropagation();
-                    });
+                    select.addEventListener('click', (event) => event.stopPropagation());
                 });
-
                 if (tableService) {
-                    // Pass columnDefinitions to makeTableColumnsResizable
-                    // so it knows which columns are non-resizable
                     const currentColumnDefinitions = stateService.getState().paginationState.proxyLogTableLayout;
                     tableService.makeTableColumnsResizable('proxyLogTableHead', currentColumnDefinitions);
                 }
-            } else if (logs.length > 0) {
-                console.error("[ProxyLogView] Table head 'proxyLogTableHead' not found after rendering table (using requestAnimationFrame).");
             }
-
             listDiv.querySelectorAll('.view-log-detail').forEach(button => button.addEventListener('click', handleViewLogDetail));
             listDiv.querySelectorAll('.table-row-favorite-toggle').forEach(starBtn => starBtn.addEventListener('click', handleProxyLogFavoriteToggle));
             listDiv.querySelectorAll('.more-actions').forEach(button => button.addEventListener('click', openMoreActionsDropdown));
         });
-
     } catch (error) {
         listDiv.innerHTML = `<p class="error-message">Error loading proxy logs: ${escapeHtml(error.message)}</p>`;
         console.error('Error fetching proxy logs:', error);
@@ -1106,162 +1144,7 @@ function renderParamUrlPagination(container) {
     if (currentPage < totalPages) container.appendChild(nextButton);
 }
 
-/**
- * Loads the main proxy log view.
- * @param {HTMLElement} mainViewContainer - The main container element for the view.
- */
-export function loadProxyLogView(mainViewContainer, proxyLogParams = null) {
-    viewContentContainer = mainViewContainer;
-    if (!viewContentContainer) {
-        console.error("viewContentContainer not provided to loadProxyLogView!");
-        return;
-    }
-    console.log("[ProxyLogView] loadProxyLogView called with params:", proxyLogParams);
-    if (!apiService || !uiService || !stateService || !tableService) {
-        console.error("ProxyLogView not initialized. Call initProxyLogView with services first.");
-        viewContentContainer.innerHTML = "<p class='error-message'>ProxyLogView module not initialized. Critical services are missing.</p>";
-        return;
-    }
-
-    const appState = stateService.getState();
-    const { currentTargetId, currentTargetName } = appState;
-    // Use passed params for initial render of controls if available, else global state
-    const activeParams = proxyLogParams || appState.paginationState.proxyLog;
-    const { filterFavoritesOnly, filterSearchText, analysis_type } = activeParams;
-    const tableKey = 'proxyLogTable';
-
-    const targetInfo = currentTargetId ? `for Target: ${escapeHtml(currentTargetName)} (ID: ${currentTargetId})` : '(No Target Selected)';
-    viewContentContainer.innerHTML = `
-        <h1>Proxy Log ${targetInfo}</h1>
-
-        <div class="tabs">
-            <button class="tab-button" data-tab="allLogsTab">All Logs</button>
-            <button class="tab-button" data-tab="paramAnalysisTab">Parameter Analysis</button>
-        </div>
-
-        <div id="allLogsTab" class="tab-content">
-            <div style="margin-top:15px; margin-bottom: 15px; display: flex; align-items: center; gap: 20px;">
-                <div class="form-group" style="display: flex; align-items: center; margin-bottom: 0;">
-                    <input type="checkbox" id="filterFavoritesToggle" style="margin-right: 5px;" ${filterFavoritesOnly ? 'checked' : ''}>
-                    <label for="filterFavoritesToggle" style="font-weight: normal;">Favorites Only</label>
-                </div>
-                <div class="form-group" style="display: flex; align-items: center; margin-left: 20px; margin-bottom: 0;">
-                    <input type="checkbox" id="defaultToResponseTabToggle" style="margin-right: 5px;">
-                    <label for="defaultToResponseTabToggle" style="font-weight: normal;">Default to Response Tab in Detail View</label>
-                </div>
-                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
-                    <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
-                </div>
-            </div>
-            <div id="proxyLogTagFilterContainer" style="margin-top: 10px; margin-bottom: 10px;"></div>
-            <div style="margin-bottom: 10px;">
-                <button id="refreshProxyLogBtn" class="secondary small-button" title="Refresh Logs" style="margin-right: 10px;">🔄</button>
-                <button id="saveProxyLogLayoutBtn" class="secondary small-button" style="margin-right: 10px;">Save Column Layout</button>
-                <button id="customizeProxyLogColumnsBtn" class="secondary small-button" style="margin-right: 10px;">Customize Columns</button>
-                <button id="deleteAllTargetLogsBtn" class="secondary small-button" ${!currentTargetId ? 'disabled title="No target selected"' : `title="Delete all logs for ${escapeHtml(currentTargetName)}"`}>
-                    Delete All Logs for Target
-                </button>
-                <span id="proxyLogRefreshStatusMessage" class="message-area" style="margin-left: 10px; display: none;"></span>
-            </div>
-            <div id="proxyLogListContainer">Loading proxy logs...</div>
-            <div id="proxyLogPaginationControlsContainer" class="pagination-controls" style="margin-top: 15px; text-align:center;"></div>
-        </div>
-
-        <div id="paramAnalysisTab" class="tab-content">
-            <h3 style="margin-top:15px;">Logs with URL Parameters</h3>
-            <div style="margin-bottom: 15px;">
-                <button id="runParamAnalysisBtn" class="primary">Run/Refresh Analysis</button>
-            </div>
-            <div id="paramAnalysisContent"><p>Loading parameter analysis...</p></div>
-        </div>
-    `;
-
-    if (!currentTargetId) {
-        const allLogsContent = document.getElementById('allLogsTab');
-        if (allLogsContent) allLogsContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to view its proxy log.</p>';
-
-        const paramAnalysisContent = document.getElementById('paramAnalysisTab');
-        if (paramAnalysisContent) paramAnalysisContent.innerHTML = '<p style="margin-top:15px;">Please set a current target to perform analysis.</p>';
-
-        // Also disable the run button if no target
-        const runBtn = document.getElementById('runParamAnalysisBtn');
-        if (runBtn) runBtn.disabled = true;
-
-        return;
-    }
-
-    // Tab switching logic
-    document.querySelectorAll('.tabs .tab-button').forEach(button => {
-        button.addEventListener('click', (e) => {
-            const tabId = e.currentTarget.dataset.tab;
-            document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            e.currentTarget.classList.add('active');
-            document.getElementById(tabId).classList.add('active');
-
-            // Update hash without triggering full reload if only tab changes
-            const currentHash = window.location.hash.split('?')[0];
-            const currentParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
-            currentParams.set('analysis_type', tabId === 'paramAnalysisTab' ? 'params' : '');
-            window.location.hash = `${currentHash}?${currentParams.toString().replace(/analysis_type=&|&analysis_type=$/, '')}`; // Clean up empty analysis_type
-        });
-    });
-
-    // Initial content load based on analysis_type.
-    // At this point, currentTargetId is guaranteed to be truthy due to the check above.
-    console.log("[ProxyLogView] loadProxyLogView - activeParams for tab decision:", JSON.parse(JSON.stringify(activeParams)));
-
-    // Deactivate all tabs first to ensure a clean state for initial load
-    document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-
-    if (analysis_type === 'params') {
-        console.log("[ProxyLogView] CONDITION MET: analysis_type IS 'params'. Activating 'Parameter Analysis' tab.");
-        document.querySelector('.tab-button[data-tab="paramAnalysisTab"]')?.classList.add('active');
-        document.getElementById('paramAnalysisTab')?.classList.add('active');
-        displayParameterizedURLs(); // Directly call, currentTargetId is confirmed
-    } else {
-        console.log(`[ProxyLogView] CONDITION NOT MET: analysis_type is "${analysis_type}" (type: ${typeof analysis_type}). Activating 'All Logs' tab.`);
-        document.querySelector('.tab-button[data-tab="allLogsTab"]')?.classList.add('active');
-        document.getElementById('allLogsTab')?.classList.add('active');
-        fetchAndDisplayProxyLogs(activeParams); // For "All Logs" tab, currentTargetId is confirmed
-    }
-
-    // Add event listener for the new "Run Parameter Analysis" button
-    const runParamAnalysisBtn = document.getElementById('runParamAnalysisBtn');
-    // currentTargetId is confirmed if we reach here, so no need to check it again for the listener
-    if (runParamAnalysisBtn) {
-        runParamAnalysisBtn.addEventListener('click', () => {
-            triggerAndFetchParamAnalysis(currentTargetId, currentTargetName);
-        });
-    }
-    document.getElementById('filterFavoritesToggle')?.addEventListener('change', handleProxyLogFavoriteFilterChange);
-    document.getElementById('proxyLogSearchInput')?.addEventListener('input', debounce(handleProxyLogSearch, 300));
-    document.getElementById('saveProxyLogLayoutBtn')?.addEventListener('click', () => {
-        prepareAndSaveProxyLogLayout();
-    });
-    const deleteAllBtn = document.getElementById('deleteAllTargetLogsBtn');
-    if (deleteAllBtn) {
-        deleteAllBtn.addEventListener('click', handleDeleteAllTargetLogs);
-    }
-    const refreshBtn = document.getElementById('refreshProxyLogBtn');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', handleRefreshProxyLog); // Listener remains the same
-    }
-    const customizeColsBtn = document.getElementById('customizeProxyLogColumnsBtn');
-    if (customizeColsBtn) {
-        customizeColsBtn.addEventListener('click', openCustomizeColumnsModal);
-    }
-
-    // Listener for the new "Default to Response Tab" toggle
-    const defaultToResponseToggle = document.getElementById('defaultToResponseTabToggle');
-    if (defaultToResponseToggle) {
-        defaultToResponseToggle.checked = localStorage.getItem('proxyLogDefaultToResponseTab') === 'true';
-        defaultToResponseToggle.addEventListener('change', (event) => {
-            localStorage.setItem('proxyLogDefaultToResponseTab', event.target.checked);
-        });
-    }
-}
+// --- JS Analysis Functions ---
 
 async function handleAnalyzeJS(event) {
     const button = event.target;
@@ -1270,49 +1153,36 @@ async function handleAnalyzeJS(event) {
 
     if (!logIdStr || !resultsContentDiv) {
         console.error("AnalyzeJS: Log ID or results container not found.");
-        if (resultsContentDiv) resultsContentDiv.innerHTML = `<p class="error-message">Error: Could not get log ID or results container for analysis.</p>`;
+        if (resultsContentDiv) resultsContentDiv.innerHTML = `<p class="error-message">Error: Could not get log ID or results container for JS analysis.</p>`;
         return;
     }
 
+    // Ensure the "JS Analysis" tab is active
     document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.querySelector('.tab-button[data-tab="jsAnalysisTab"]')?.classList.add('active');
     document.getElementById('jsAnalysisTab')?.classList.add('active');
-    resultsContentDiv.innerHTML = `<p>Analyzing response body for log entry #${logIdStr}...</p>`;
+
+    resultsContentDiv.innerHTML = `<p>Analyzing JavaScript content for log entry #${logIdStr}...</p>`;
 
     try {
-        const responseData = await apiService.analyzeJsLinks(parseInt(logIdStr, 10));
-        resultsContentDiv.innerHTML = ''; // Clear loading message before adding new content
-        let currentJsAnalysisData = [];
+        const analysisResponse = await apiService.analyzeJsLinks(parseInt(logIdStr, 10));
+        resultsContentDiv.innerHTML = ''; // Clear loading message
 
-        if (responseData.message) {
-            const p = document.createElement('p');
-            p.className = 'message-area info-message';
-            p.innerHTML = escapeHtml(responseData.message);
-            resultsContentDiv.appendChild(p); // Append message first
+        const results = analysisResponse.results || {};
+        const message = analysisResponse.message || '';
+
+        // Store results in state cache
+        stateService.updateState({ jsAnalysisDataCache: { [logIdStr]: results } });
+
+        if (Object.keys(results).length > 0) {
+            populateJsAnalysisCategoryFilter(logIdStr);
+            renderJsAnalysisTable(logIdStr);
+        } else {
+            resultsContentDiv.innerHTML = `<p>${escapeHtml(message || 'No interesting items found in the JavaScript content.')}</p>`;
         }
-        if (responseData.results && Object.keys(responseData.results).length > 0) {
-            for (const category in responseData.results) {
-                if (responseData.results[category].length > 0) {
-                    responseData.results[category].forEach(item => currentJsAnalysisData.push({ category, finding: item }));
-                }
-            }
-        }
-        stateService.updateState({ jsAnalysisDataCache: { [logIdStr]: currentJsAnalysisData } });
-
-        // Populate filter and render table
-        populateJsAnalysisCategoryFilter(logIdStr); // Populate dropdown with new categories
-        renderJsAnalysisTable(logIdStr); // This will now use filters from state
-
-        if (currentJsAnalysisData.length === 0 && !responseData.message) {
-             // If no data and no specific message, show a generic "no items" message
-            const noItemsP = document.createElement('p');
-            noItemsP.textContent = "No specific items extracted by the analysis tool.";
-            resultsContentDiv.appendChild(noItemsP);
-        }
-
     } catch (error) {
-        resultsContentDiv.innerHTML = `<p class="error-message">Error analyzing log #${logIdStr}: ${escapeHtml(error.message)}</p>`;
+        resultsContentDiv.innerHTML = `<p class="error-message">Error analyzing JavaScript for log #${logIdStr}: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -1321,138 +1191,96 @@ function populateJsAnalysisCategoryFilter(logIdStr) {
     if (!filterSelect) return;
 
     const appState = stateService.getState();
-    const analysisData = appState.jsAnalysisDataCache[logIdStr];
-    const currentFilterCategory = appState.jsAnalysisFilterCategory;
+    const currentLogJsData = appState.jsAnalysisDataCache[logIdStr];
+    
+    if (!currentLogJsData) return;
 
-    // Clear existing options except "All"
-    while (filterSelect.options.length > 1) {
-        filterSelect.remove(1);
-    }
+    const categories = Object.keys(currentLogJsData).sort();
+    const selectedValue = filterSelect.value;
 
-    if (analysisData && analysisData.length > 0) {
-        const categories = [...new Set(analysisData.map(item => item.category))].sort();
-        categories.forEach(category => {
-            const option = document.createElement('option');
-            option.value = category;
-            option.textContent = escapeHtml(category);
-            filterSelect.appendChild(option);
-        });
-    }
-    filterSelect.value = currentFilterCategory; // Set to current filter from state
+    filterSelect.innerHTML = '<option value="">All</option>'; // Reset options
+    categories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = escapeHtml(category);
+        if (category === selectedValue) {
+            option.selected = true;
+        }
+        filterSelect.appendChild(option);
+    });
 }
-
 
 function renderJsAnalysisTable(logIdStr) {
     const resultsContentDiv = document.getElementById('jsAnalysisResultsContent');
-    const filterSelect = document.getElementById('jsAnalysisCategoryFilter');
-    const searchInput = document.getElementById('jsAnalysisSearchInput');
-    const pathSenderControls = document.getElementById('jsAnalysisPathSenderControls');
-
     if (!resultsContentDiv) return;
 
     const appState = stateService.getState();
-    const currentLogAnalysisData = appState.jsAnalysisDataCache[logIdStr];
-    const { sortBy, sortOrder } = appState.jsAnalysisSortState;
-    const filterCategory = appState.jsAnalysisFilterCategory;
-    const searchText = appState.jsAnalysisSearchText.toLowerCase();
+    const allResults = appState.jsAnalysisDataCache[logIdStr];
+    const categoryFilter = appState.jsAnalysisFilterCategory || '';
+    const searchFilter = (appState.jsAnalysisSearchText || '').toLowerCase();
 
-    // Preserve existing message if any (e.g., from handleAnalyzeJS)
-    let existingMessageHTML = resultsContentDiv.querySelector('.message-area')?.outerHTML || '';
+    if (!allResults || Object.keys(allResults).length === 0) {
+        resultsContentDiv.innerHTML = "<p>No analysis results to display.</p>";
+        return;
+    }
 
-    // Update control values from state
-    if (filterSelect) filterSelect.value = filterCategory;
-    if (searchInput) searchInput.value = appState.jsAnalysisSearchText;
-
-    // Show path sender controls only if "Potential Paths (Regex)" is selected or no category is selected (All)
-    // And only if there's a current target set
-    const currentTargetId = stateService.getState().currentTargetId;
+    const pathCategories = ['Potential Paths (Regex)', 'Angular RouterLinks (Regex)'];
+    const hasPathData = pathCategories.some(cat => allResults[cat] && allResults[cat].length > 0);
+    const pathSenderControls = document.getElementById('jsAnalysisPathSenderControls');
     if (pathSenderControls) {
-         pathSenderControls.style.display = (currentTargetId && (!filterCategory || filterCategory === "Potential Paths (Regex)")) ? 'flex' : 'none';
+        pathSenderControls.style.display = hasPathData ? 'flex' : 'none';
+    }
+    
+    let selectAllCheckboxHTML = '';
+    if (hasPathData) {
+        selectAllCheckboxHTML = `<th style="width: 3%;"><input type="checkbox" id="selectAllJsPathsCheckbox" title="Select/Deselect All Visible Paths"></th>`;
     }
 
+    let tableHTML = `<table><thead><tr>${selectAllCheckboxHTML}<th>Category</th><th>Finding</th></tr></thead><tbody>`;
+    let hasResults = false;
 
-    if (!currentLogAnalysisData) {
-        resultsContentDiv.innerHTML = existingMessageHTML + "<p>No analysis data available for this log entry.</p>";
-        return;
-    }
-
-    let processedData = [...currentLogAnalysisData];
-
-    // Apply category filter
-    if (filterCategory) {
-        processedData = processedData.filter(item => item.category === filterCategory);
-    }
-
-    // Apply search text filter
-    if (searchText) {
-        processedData = processedData.filter(item =>
-            item.category.toLowerCase().includes(searchText) ||
-            item.finding.toLowerCase().includes(searchText)
-        );
-    }
-
-    if (processedData.length === 0) {
-        resultsContentDiv.innerHTML = existingMessageHTML + "<p>No analysis data matches the current filters.</p>";
-        return;
-    }
-
-
-    const sortedData = processedData.sort((a, b) => {
-        const valA = a[sortBy];
-        const valB = b[sortBy];
-        let comparison = 0;
-        if (valA > valB) comparison = 1;
-        else if (valA < valB) comparison = -1;
-        return sortOrder === 'ASC' ? comparison : comparison * -1;
-    });
-
-    let tableHTML = `<table><thead><tr>`;
-    // Add checkbox header if "Potential Paths (Regex)" is visible
-    if (!filterCategory || filterCategory === "Potential Paths (Regex)") {
-        tableHTML += `<th style="width: 30px;"><input type="checkbox" id="selectAllJsPathsCheckbox" title="Select/Deselect All Visible Paths"></th>`;
-    }
-    tableHTML += `<th class="sortable" data-sort-key="category">Category</th>
-                  <th class="sortable" data-sort-key="finding">Finding</th>
-                  </tr></thead><tbody>`;
-
-    sortedData.forEach(item => {
-        tableHTML += `<tr>`;
-        if (!filterCategory || filterCategory === "Potential Paths (Regex)") {
-            // Only add checkbox if the item is actually from the "Potential Paths (Regex)" category
-            const checkboxHTML = item.category === "Potential Paths (Regex)" ? `<input type="checkbox" class="js-path-checkbox" data-path="${escapeHtmlAttribute(item.finding)}">` : '';
-            tableHTML += `<td>${checkboxHTML}</td>`;
+    for (const category in allResults) {
+        if (categoryFilter && category !== categoryFilter) {
+            continue;
         }
-        tableHTML += `<td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.finding)}</td></tr>`;
-    });
+
+        const items = allResults[category];
+        const isPathCategory = pathCategories.includes(category);
+
+        for (const item of items) {
+            if (searchFilter && !item.toLowerCase().includes(searchFilter) && !category.toLowerCase().includes(searchFilter)) {
+                continue;
+            }
+            hasResults = true;
+            
+            let checkboxHTML = '';
+            if (hasPathData) {
+                if (isPathCategory) {
+                    checkboxHTML = `<td><input type="checkbox" class="js-path-checkbox" data-path="${escapeHtmlAttribute(item)}"></td>`;
+                } else {
+                    checkboxHTML = '<td></td>'; // Empty cell for alignment
+                }
+            }
+
+            tableHTML += `<tr>${checkboxHTML}<td>${escapeHtml(category)}</td><td><pre>${escapeHtml(item)}</pre></td></tr>`;
+        }
+    }
     tableHTML += `</tbody></table>`;
 
-    // Prepend existing message, then add table
-    resultsContentDiv.innerHTML = existingMessageHTML + tableHTML;
-
-
-    resultsContentDiv.querySelectorAll('th.sortable').forEach(th => {
-        th.classList.toggle('sorted-asc', sortBy === th.dataset.sortKey && sortOrder === 'ASC');
-        th.classList.toggle('sorted-desc', sortBy === th.dataset.sortKey && sortOrder === 'DESC');
-        th.addEventListener('click', (event) => handleJsAnalysisSort(event, logIdStr));
-    });
-
-    // Add event listener for "Select All" checkbox if it exists
+    if (!hasResults) {
+        resultsContentDiv.innerHTML = '<p>No results match the current filter.</p>';
+    } else {
+        resultsContentDiv.innerHTML = tableHTML;
+    }
+    
     const selectAllCheckbox = document.getElementById('selectAllJsPathsCheckbox');
     if (selectAllCheckbox) {
-        selectAllCheckbox.addEventListener('change', handleSelectAllJsPaths);
+        selectAllCheckbox.addEventListener('change', (event) => {
+            document.querySelectorAll('.js-path-checkbox').forEach(cb => {
+                cb.checked = event.target.checked;
+            });
+        });
     }
-
-}
-
-function handleJsAnalysisSort(event, logIdStr) {
-    const newSortBy = event.target.dataset.sortKey;
-    const appState = stateService.getState();
-    let newSortOrder = 'ASC';
-    if (appState.jsAnalysisSortState.sortBy === newSortBy) {
-        newSortOrder = appState.jsAnalysisSortState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
-    }
-    stateService.updateState({ jsAnalysisSortState: { sortBy: newSortBy, sortOrder: newSortOrder } });
-    renderJsAnalysisTable(logIdStr);
 }
 
 function handleJsAnalysisCategoryFilter(event) {
@@ -1462,56 +1290,101 @@ function handleJsAnalysisCategoryFilter(event) {
     renderJsAnalysisTable(logIdStr);
 }
 
-const handleJsAnalysisSearch = debounce((event) => {
-    const logIdStr = event.target.dataset.logId;
-    const newSearchText = event.target.value;
+function handleJsAnalysisSearch(event) {
+    const inputElement = event.target;
+    const logIdStr = inputElement.dataset.logId;
+    const newSearchText = inputElement.value;
     stateService.updateState({ jsAnalysisSearchText: newSearchText });
     renderJsAnalysisTable(logIdStr);
-}, 300);
-
-function handleSelectAllJsPaths(event) {
-    const isChecked = event.target.checked;
-    document.querySelectorAll('.js-path-checkbox').forEach(checkbox => {
-        checkbox.checked = isChecked;
-    });
-}
-
-
-function convertJsAnalysisToCSV(jsonData) {
-    const headersConfig = [{ key: 'category', label: 'Category' }, { key: 'finding', label: 'Finding' }];
-    const headerRow = headersConfig.map(h => escapeHtml(h.label)).join(',');
-    const dataRows = jsonData.map(item => headersConfig.map(header => escapeHtml(item[header.key])).join(','));
-    return [headerRow].concat(dataRows).join('\n');
 }
 
 function handleExportJsAnalysisToCSV(event) {
-    const logIdStr = event.target.getAttribute('data-log-id');
+    const logIdStr = event.target.dataset.logId;
     const appState = stateService.getState();
-    // Get data based on current filters for export
-    const currentLogAnalysisData = appState.jsAnalysisDataCache[logIdStr] || [];
-    const filterCategory = appState.jsAnalysisFilterCategory;
-    const searchText = appState.jsAnalysisSearchText.toLowerCase();
+    const allResults = appState.jsAnalysisDataCache[logIdStr];
 
-    let dataToExport = [...currentLogAnalysisData];
-    if (filterCategory) {
-        dataToExport = dataToExport.filter(item => item.category === filterCategory);
-    }
-    if (searchText) {
-        dataToExport = dataToExport.filter(item =>
-            item.category.toLowerCase().includes(searchText) ||
-            item.finding.toLowerCase().includes(searchText)
-        );
-    }
-
-    if (!dataToExport || dataToExport.length === 0) {
-        uiService.showModalMessage("No Data", "No JavaScript analysis data available to export with current filters.");
+    if (!allResults || Object.keys(allResults).length === 0) {
+        uiService.showModalMessage("No Data", "No JS analysis data available to export.");
         return;
     }
-    uiService.showModalMessage("Exporting...", "Preparing CSV data...");
-    const csvString = convertJsAnalysisToCSV(dataToExport);
-    downloadCSV(csvString, `js_analysis_log_${logIdStr}.csv`);
-    uiService.hideModal();
+
+    let csvContent = "Category,Finding\n";
+    for (const category in allResults) {
+        const items = allResults[category];
+        for (const item of items) {
+            const escapedCategory = `"${category.replace(/"/g, '""')}"`;
+            const escapedItem = `"${item.replace(/"/g, '""')}"`;
+            csvContent += `${escapedCategory},${escapedItem}\n`;
+        }
+    }
+
+    downloadCSV(csvContent, `js_analysis_log_${logIdStr}.csv`);
 }
+
+async function handleSendSelectedPathsToProxy(event) {
+    const logIdStr = event.target.dataset.logId;
+    const appState = stateService.getState();
+    const currentTargetId = appState.currentTargetId;
+
+    if (!currentTargetId) {
+        uiService.showModalMessage("Error", "No current target is set. Cannot send requests.");
+        return;
+    }
+
+    const prefixInput = document.getElementById('jsAnalysisPathPrefix');
+    const prefix = prefixInput ? prefixInput.value.trim() : '';
+
+    if (!prefix) {
+        uiService.showModalMessage("Error", "URL Prefix is required to send paths.");
+        prefixInput.focus();
+        return;
+    }
+    try {
+        new URL(prefix);
+    } catch (e) {
+        uiService.showModalMessage("Error", "Invalid URL Prefix format.");
+        prefixInput.focus();
+        return;
+    }
+
+    const selectedPathCheckboxes = document.querySelectorAll('.js-path-checkbox:checked');
+    if (selectedPathCheckboxes.length === 0) {
+        uiService.showModalMessage("Info", "No paths selected to send.");
+        return;
+    }
+
+    const urlsToSend = [];
+    selectedPathCheckboxes.forEach(checkbox => {
+        const path = checkbox.dataset.path;
+        if (path === undefined || path === null || path.trim() === "") {
+            return;
+        }
+        let fullUrl = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+        fullUrl += path.startsWith('/') ? path : '/' + path;
+        urlsToSend.push(fullUrl);
+    });
+
+    if (urlsToSend.length === 0) {
+        uiService.showModalMessage("Info", "No valid paths selected to send.");
+        return;
+    }
+
+    uiService.showModalMessage("Sending...", `Sending ${urlsToSend.length} request(s) to the proxy...`, true, 2000);
+
+    try {
+        await apiService.sendPathsToProxy({ target_id: currentTargetId, urls: urlsToSend });
+        uiService.showModalMessage("Success", `${urlsToSend.length} request(s) sent to proxy. Check the Proxy Log for responses.`);
+        selectedPathCheckboxes.forEach(checkbox => checkbox.checked = false);
+        const selectAllCheckbox = document.getElementById('selectAllJsPathsCheckbox');
+        if(selectAllCheckbox) selectAllCheckbox.checked = false;
+    } catch (error) {
+        console.error("Error sending paths to proxy:", error);
+        uiService.showModalMessage("Error", `Failed to send requests: ${escapeHtml(error.message)}`);
+    }
+}
+
+// --- End JS Analysis Functions ---
+
 
 /**
  * Loads the detail view for a specific proxy log entry.
@@ -1810,7 +1683,7 @@ export async function loadProxyLogDetailView(mainViewContainer, logId) {
         document.getElementById('analyzeJsBtn')?.addEventListener('click', handleAnalyzeJS);
         document.getElementById('exportJsAnalysisCsvBtn')?.addEventListener('click', handleExportJsAnalysisToCSV);
         document.getElementById('jsAnalysisCategoryFilter')?.addEventListener('change', handleJsAnalysisCategoryFilter);
-        document.getElementById('jsAnalysisSearchInput')?.addEventListener('input', handleJsAnalysisSearch);
+        document.getElementById('jsAnalysisSearchInput')?.addEventListener('input', debounce(handleJsAnalysisSearch, 300));
         document.getElementById('sendSelectedPathsToProxyBtn')?.addEventListener('click', handleSendSelectedPathsToProxy);
 
 
@@ -2166,76 +2039,6 @@ function handleViewFullContext(event) {
     uiService.showModalMessage("Full Context", contentDiv);
 }
 
-async function handleSendSelectedPathsToProxy(event) {
-    const logIdStr = event.target.dataset.logId;
-    const appState = stateService.getState();
-    const currentTargetId = appState.currentTargetId;
-
-    if (!currentTargetId) {
-        uiService.showModalMessage("Error", "No current target is set. Cannot send requests.");
-        return;
-    }
-
-    const prefixInput = document.getElementById('jsAnalysisPathPrefix');
-    const prefix = prefixInput ? prefixInput.value.trim() : '';
-
-    if (!prefix) {
-        uiService.showModalMessage("Error", "URL Prefix is required to send paths.");
-        prefixInput.focus();
-        return;
-    }
-    // Basic URL validation for prefix
-    try {
-        new URL(prefix);
-    } catch (e) {
-        uiService.showModalMessage("Error", "Invalid URL Prefix format.");
-        prefixInput.focus();
-        return;
-    }
-
-
-    const selectedPathCheckboxes = document.querySelectorAll('.js-path-checkbox:checked');
-    if (selectedPathCheckboxes.length === 0) {
-        uiService.showModalMessage("Info", "No paths selected to send.");
-        return;
-    }
-
-    const urlsToSend = [];
-    console.log("[PathSender] Prefix:", prefix); // DEBUG
-    selectedPathCheckboxes.forEach(checkbox => {
-        const path = checkbox.dataset.path;
-        console.log("[PathSender] Selected checkbox data-path:", path); // DEBUG
-        if (path === undefined || path === null || path.trim() === "") {
-            console.warn("[PathSender] Empty or undefined path found for a selected checkbox. Skipping."); // DEBUG
-            return; // Skip this iteration if path is empty
-        }
-        let fullUrl = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
-        fullUrl += path.startsWith('/') ? path : '/' + path;
-        console.log("[PathSender] Constructed fullUrl:", fullUrl); // DEBUG
-        urlsToSend.push(fullUrl);
-    });
-
-    if (urlsToSend.length === 0) {
-        uiService.showModalMessage("Info", "No valid paths selected to send (all selected paths were empty).");
-        return;
-    }
-
-    uiService.showModalMessage("Sending...", `Sending ${urlsToSend.length} request(s) to the proxy...`, true, 2000);
-
-    try {
-        await apiService.sendPathsToProxy({ target_id: currentTargetId, urls: urlsToSend });
-        uiService.showModalMessage("Success", `${urlsToSend.length} request(s) sent to proxy. Check the Proxy Log for responses.`);
-        // Optionally deselect checkboxes after sending
-        selectedPathCheckboxes.forEach(checkbox => checkbox.checked = false);
-        const selectAllCheckbox = document.getElementById('selectAllJsPathsCheckbox');
-        if(selectAllCheckbox) selectAllCheckbox.checked = false;
-
-    } catch (error) {
-        console.error("Error sending paths to proxy:", error);
-        uiService.showModalMessage("Error", `Failed to send requests: ${escapeHtml(error.message)}`);
-    }
-}
-
 function openCustomizeColumnsModal() {
     const appState = stateService.getState();
     const columnDefinitions = appState.paginationState.proxyLogTableLayout;
@@ -2316,55 +2119,65 @@ async function prepareAndSaveProxyLogLayout() {
     tableService.saveCurrentTableLayout('proxyLogTable', 'proxyLogTableHead', currentPageSize);
 }
 
-function renderTagFilterDropdown(tags) {
+function renderTagFilterDropdown(tagsForFilter) {
     const container = document.getElementById('proxyLogTagFilterContainer');
     if (!container) return;
 
     const appState = stateService.getState();
     const currentSelectedTagIDs = appState.paginationState.proxyLog.filterTagIDs || [];
 
-    if (!tags || tags.length === 0) {
-        container.innerHTML = '<p style="font-style: italic; font-size: 0.9em;">No tags available for filtering in the current log view.</p>';
+    // If there are no tags to show AND no filter is active, we can show a simple message.
+    if ((!tagsForFilter || tagsForFilter.length === 0) && currentSelectedTagIDs.length === 0) {
+        container.innerHTML = '<p style="font-style: italic; font-size: 0.9em;">No tags used on this target.</p>';
         return;
     }
 
-    let selectHTML = `<label for="proxyLogTagFilterSelect" style="margin-right: 5px;">Filter by Tags:</label>
+    let selectHTML = '';
+    if (tagsForFilter && tagsForFilter.length > 0) {
+        selectHTML = `<label for="proxyLogTagFilterSelect" style="margin-right: 5px;">Filter by Tags:</label>
                       <select id="proxyLogTagFilterSelect" multiple style="min-width: 250px; height: auto; max-height: 100px;">`;
+        tagsForFilter.forEach(tag => {
+            const isSelected = currentSelectedTagIDs.includes(String(tag.id));
+            selectHTML += `<option value="${tag.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(tag.name)}</option>`;
+        });
+        selectHTML += `</select>`;
+    }
 
-    tags.forEach(tag => {
-        const isSelected = currentSelectedTagIDs.includes(String(tag.id)); // Ensure comparison with string IDs if needed
-        selectHTML += `<option value="${tag.id}" ${isSelected ? 'selected' : ''} style="color: ${tag.color?.String || 'inherit'};">
-                           ${escapeHtml(tag.name)}
-                       </option>`;
-    });
-    selectHTML += `</select>
-                   <button id="clearTagFilterBtn" class="secondary small-button" style="margin-left: 10px;" title="Clear Tag Filter">Clear</button>`;
+    let clearButtonHTML = '';
+    // Always render the clear button if a filter is active, even if the current view has no tags.
+    if (currentSelectedTagIDs.length > 0) {
+        clearButtonHTML = `<button id="clearTagFilterBtn" class="secondary small-button" style="margin-left: 10px;" title="Clear Tag Filter">Clear</button>`;
+    }
 
-    container.innerHTML = selectHTML;
+    container.innerHTML = `${selectHTML}${clearButtonHTML}`;
 
     const selectElement = document.getElementById('proxyLogTagFilterSelect');
     if (selectElement) {
-        selectElement.addEventListener('change', handleTagFilterChange);
+        selectElement.addEventListener('change', () => handleTagFilterChange(false));
     }
-    const clearButton = document.getElementById('clearTagFilterBtn');
-    if (clearButton) {
-        clearButton.addEventListener('click', () => {
-            if (selectElement) {
-                Array.from(selectElement.options).forEach(option => option.selected = false);
-            }
-            handleTagFilterChange(); // Trigger change with empty selection
-        });
-    }
+    document.getElementById('clearTagFilterBtn')?.addEventListener('click', () => handleTagFilterChange(true));
 }
 
-function handleTagFilterChange() {
+function handleTagFilterChange(isClearing = false) {
     const selectElement = document.getElementById('proxyLogTagFilterSelect');
-    const selectedTagIDs = Array.from(selectElement.selectedOptions).map(option => option.value);
+    let selectedTagIDs = [];
 
-    const appState = stateService.getState();
-    stateService.updateState({ paginationState: { ...appState.paginationState, proxyLog: { ...appState.paginationState.proxyLog, filterTagIDs: selectedTagIDs, currentPage: 1 } } });
-    fetchAndDisplayProxyLogs(stateService.getState().paginationState.proxyLog); // Pass the updated state
+    if (!isClearing && selectElement) {
+        selectedTagIDs = Array.from(selectElement.selectedOptions).map(option => option.value);
+    }
+    // If isClearing is true, selectedTagIDs remains an empty array.
+
+    const queryParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    queryParams.set('page', '1'); // Reset to page 1 on filter change
+
+    if (selectedTagIDs.length > 0) {
+        queryParams.set('filter_tag_ids', selectedTagIDs.join(','));
+    } else {
+        queryParams.delete('filter_tag_ids');
+    }
+    window.location.hash = `#proxy-log?${queryParams.toString()}`;
 }
+
 
 async function fetchAllTagsForDatalist() {
     const datalist = document.getElementById('allTagsDatalist');

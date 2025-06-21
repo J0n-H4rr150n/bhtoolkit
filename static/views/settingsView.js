@@ -51,13 +51,21 @@ export async function loadSettingsView(mainViewContainer) {
     viewContentContainer.innerHTML = `
         <h1>Settings</h1>
         <div class="tabs" style="margin-bottom: 20px;">
-            <button class="tab-button active" data-tab="proxyExclusionsTab">Proxy Exclusions</button>
-            <button class="tab-button" data-tab="tableLayoutsTab">Table Layouts</button>
-            <button class="tab-button" data-tab="uiSettingsTab">UI Settings</button>
-            <button class="tab-button" data-tab="tagsManagementTab">Manage Tags</button>
+            <button class="tab-button active" data-tab="uiSettingsSubTab">UI Settings</button>
+            <button class="tab-button" data-tab="proxyExclusionsSubTab">Proxy Exclusions</button>
+            <button class="tab-button" data-tab="tableLayoutsSubTab">Table Layouts</button>
+            <button class="tab-button" data-tab="vulnerabilityTypesSubTab">Vulnerability Types</button>
+            <button class="tab-button" data-tab="tagsManagementSubTab">Manage Tags</button>
         </div>
 
-        <div id="proxyExclusionsTab" class="tab-content active">
+        <div id="uiSettingsSubTab" class="settings-sub-tab-content active">
+            <h2>UI & Application Settings</h2>
+            <div id="uiSettingsContainer">
+                <p>Loading UI settings...</p>
+            </div>
+        </div>
+        
+        <div id="proxyExclusionsSubTab" class="settings-sub-tab-content">
             <h2>Global Proxy Exclusions</h2>
             <p>Define rules to prevent certain HTTP requests from being saved by the proxy.</p>
             <div id="proxyExclusionsMessage" class="message-area" style="margin-top: 10px;"></div>
@@ -66,7 +74,7 @@ export async function loadSettingsView(mainViewContainer) {
             </div>
         </div>
 
-        <div id="tableLayoutsTab" class="tab-content">
+        <div id="tableLayoutsSubTab" class="settings-sub-tab-content">
             <h2>Table Layouts</h2>
             <p>Manage saved column widths for various tables in the application.</p>
             <div id="tableLayoutsSettingsContainer" style="margin-top:15px;">
@@ -75,14 +83,12 @@ export async function loadSettingsView(mainViewContainer) {
              <div id="tableLayoutsMessage" class="message-area" style="margin-top: 10px;"></div>
         </div>
 
-        <div id="uiSettingsTab" class="tab-content">
-            <h2>UI Settings</h2>
-            <div id="uiSettingsContainer">
-                <p>Loading UI settings...</p>
-            </div>
+        <div id="vulnerabilityTypesSubTab" class="settings-sub-tab-content">
+            <h2>Manage Vulnerability Types</h2>
+            <div id="vulnerabilityTypesContainer" style="margin-top:15px;"></div>
         </div>
 
-        <div id="tagsManagementTab" class="tab-content">
+        <div id="tagsManagementSubTab" class="settings-sub-tab-content">
             <h2>Global Tag Management</h2>
             <p>Create, edit, and delete tags used throughout the application.</p>
             <div id="tagsManagementMessage" class="message-area" style="margin-top: 10px;"></div>
@@ -90,26 +96,58 @@ export async function loadSettingsView(mainViewContainer) {
                 <p>Loading tags...</p>
             </div>
         </div>
-
-        </div>
     `;
 
     console.log('[SettingsView.js] Tabbed HTML structure set for settings page.');
-    await loadAndDisplayUISettings();
-    await loadAndDisplayTableLayoutSettings();
-    await loadAndDisplayProxyExclusionSettings();
-    await loadAndDisplayTagsManagement();
-
-
+    
+    // Initial tab display logic: Ensure only the active tab content is visible
+    // and others are hidden. This makes the functionality independent of CSS display rules
+    // tied to the 'active' class for content panes.
+    document.querySelectorAll('.settings-sub-tab-content').forEach(content => {
+        if (content.classList.contains('active')) {
+            content.style.display = 'block';
+        } else {
+            content.style.display = 'none';
+        }
+    });
     document.querySelectorAll('.tabs .tab-button').forEach(button => {
         button.addEventListener('click', () => {
-            document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            button.classList.add('active');
             const tabId = button.getAttribute('data-tab');
+            document.querySelectorAll('.tabs .tab-button').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.settings-sub-tab-content').forEach(content => content.classList.remove('active'));
+            button.classList.add('active');
             document.getElementById(tabId).classList.add('active');
+            
+            // Explicitly manage display style for tab content
+            document.querySelectorAll('.settings-sub-tab-content').forEach(content => {
+                if (content.id === tabId) {
+                    content.style.display = 'block';
+                } else {
+                    content.style.display = 'none';
+                }
+            });
+            switch (tabId) {
+                case 'uiSettingsSubTab':
+                    loadAndDisplayUISettings();
+                    break;
+                case 'proxyExclusionsSubTab':
+                    loadAndDisplayProxyExclusionSettings();
+                    break;
+                case 'tableLayoutsSubTab':
+                    loadAndDisplayTableLayoutSettings();
+                    break;
+                case 'vulnerabilityTypesSubTab':
+                    loadAndDisplayVulnerabilityTypes();
+                    break;
+                case 'tagsManagementSubTab':
+                    loadAndDisplayTagsManagement();
+                    break;
+            }
         });
     });
+
+    // Load the default active tab's content
+    loadAndDisplayUISettings(); // Default active tab
 }
 
 async function loadAndDisplayUISettings() {
@@ -117,15 +155,12 @@ async function loadAndDisplayUISettings() {
     if (!uiSettingsContainer) return;
 
     try {
-        // We'll assume getAppSettings fetches all relevant settings including missions.
-        // If not, this API call might need to be adjusted or a new one created.
-        const appSettings = await apiService.getAppSettings(); // Changed from getUISettings
-        currentFullAppSettings = appSettings; // Store the fetched settings
-        const uiSpecificSettings = appSettings.ui || {}; // Assuming UI settings are nested under 'ui'
-        const missionSettings = appSettings.missions || {}; // Assuming mission settings are nested under 'missions'
+        const appSettings = await apiService.getAppSettings();
+        currentFullAppSettings = appSettings; 
+        const uiSpecificSettings = appSettings.ui || {}; 
+        const missionSettings = appSettings.missions || {}; 
 
         const proxyLogDefaultSavedValue = localStorage.getItem('proxyLogDefaultToResponseTab');
-        console.log(`[SettingsView] Loaded 'proxyLogDefaultToResponseTab' from localStorage: ${proxyLogDefaultSavedValue}`);
         uiSettingsContainer.innerHTML = `
             <div class="form-group">
                 <label for="showSynackToggle">Show Synack Section in Sidebar:</label>
@@ -158,36 +193,29 @@ async function loadAndDisplayUISettings() {
     } catch (error) {
         console.error("Error loading UI settings:", error);
         uiSettingsContainer.innerHTML = `<p class="error-message">Failed to load UI settings: ${escapeHtml(error.message)}</p>`;
-        currentFullAppSettings = null; // Reset on error
+        currentFullAppSettings = null; 
     }
 }
 
 async function handleSaveUISettings() {
     const showSynackToggle = document.getElementById('showSynackToggle');
     const proxyLogDefaultToggle = document.getElementById('proxyLogDefaultToResponseToggleSettings');
-    const defaultThemeToggle = document.getElementById('defaultThemeToggle'); // Get the new toggle
+    const defaultThemeToggle = document.getElementById('defaultThemeToggle'); 
     const claimMinPayoutInput = document.getElementById('claimMinPayout');
     const claimMaxPayoutInput = document.getElementById('claimMaxPayout');
     const messageArea = document.getElementById('uiSettingsMessage');
 
-    if (!messageArea) return; // Only messageArea is critical for feedback
+    if (!messageArea) return; 
 
     messageArea.textContent = '';
     messageArea.className = 'message-area';
 
-    // Handle proxy log detail default tab setting (localStorage)
     if (proxyLogDefaultToggle) {
-        localStorage.setItem('proxyLogDefaultToResponseTab', proxyLogDefaultToggle.checked); // Save its state
-        console.log(`[SettingsView] Saved 'proxyLogDefaultToResponseTab' to localStorage: ${proxyLogDefaultToggle.checked}`);
-    } else {
-        console.warn("[SettingsView] 'proxyLogDefaultToResponseToggleSettings' element not found during save.");
+        localStorage.setItem('proxyLogDefaultToResponseTab', proxyLogDefaultToggle.checked); 
     }
 
-    // Ensure currentFullAppSettings is loaded, otherwise fetch it.
-    // This is a fallback, ideally it's loaded when the view is displayed.
     if (!currentFullAppSettings) {
         try {
-            console.log("[SettingsView] currentFullAppSettings is null, fetching fresh settings before save.");
             currentFullAppSettings = await apiService.getAppSettings();
         } catch (error) {
             messageArea.textContent = `Error: Could not load current settings to perform save. ${escapeHtml(error.message)}`;
@@ -196,10 +224,8 @@ async function handleSaveUISettings() {
         }
     }
 
-    // Start with the existing full mission settings, or a default structure if none exist
-    // This ensures that fields not present on this specific UI form are preserved.
     const baseMissionSettings = currentFullAppSettings.missions ? { ...currentFullAppSettings.missions } : {
-        enabled: false, // Provide sensible defaults if missions section was missing entirely
+        enabled: false, 
         polling_interval_seconds: 10,
         list_url: "",
         claim_url_pattern: "",
@@ -207,34 +233,28 @@ async function handleSaveUISettings() {
         claim_max_payout: 50.0
     };
 
-    // Construct the payload for all settings
     const settingsToSave = {
         ui: {
             ShowSynackSection: showSynackToggle ? showSynackToggle.checked : (currentFullAppSettings.ui?.ShowSynackSection || false),
             DefaultTheme: defaultThemeToggle ? (defaultThemeToggle.checked ? 'dark' : 'light') : (currentFullAppSettings.ui?.DefaultTheme || 'light')
         },
         missions: {
-            ...baseMissionSettings, // Spread the existing/default mission settings
+            ...baseMissionSettings, 
             ClaimMinPayout: parseFloat(claimMinPayoutInput.value) || 0,
             ClaimMaxPayout: parseFloat(claimMaxPayoutInput.value) || 0
         }
     };
 
     try {
-        // Assuming saveAppSettings can save the broader settings structure.
-        await apiService.saveAppSettings(settingsToSave); // Assuming it resolves on success or throws on error
-
-        // After successful save, update currentFullAppSettings with the saved data
-        // This makes the local cache consistent with what was just sent.
+        await apiService.saveAppSettings(settingsToSave); 
         currentFullAppSettings.ui = settingsToSave.ui;
         currentFullAppSettings.missions = settingsToSave.missions;
 
              messageArea.textContent = 'UI settings saved successfully! Refresh may be needed for sidebar changes.';
              messageArea.classList.add('success-message');
              uiService.showModalMessage('Settings Saved', 'UI settings have been saved. A page refresh might be required to see all changes (like sidebar visibility).');
-             // Call the applyUiSettings function passed from app.js
             if (localApplyUiSettingsFunc) {
-                localApplyUiSettingsFunc(settingsToSave.ui); // Pass only the UI part to the existing function
+                localApplyUiSettingsFunc(settingsToSave.ui); 
             }
     } catch (error) {
         console.error("Error saving UI settings:", error);
@@ -249,7 +269,7 @@ async function loadAndDisplayTableLayoutSettings() {
     if (!container) return;
 
     try {
-        const layouts = await apiService.getTableLayouts(); // Assuming this fetches all layouts
+        const layouts = await apiService.getTableLayouts(); 
         let html = `<p>Current table layouts are managed by saving them on their respective pages (e.g., Proxy Log, Checklist).</p>`;
         
         if (Object.keys(layouts).length > 0) {
@@ -285,8 +305,6 @@ async function handleResetAllTableLayouts() {
         "Are you sure you want to reset ALL saved table column layouts to their defaults? This action cannot be undone.",
         async () => {
             try {
-                // Assuming apiService will have a method like `resetAllTableLayouts`
-                // This would call a new backend endpoint, e.g., POST /api/settings/table-column-widths/reset
                 const response = await fetch(`${apiService.API_BASE || '/api'}/settings/table-column-widths/reset`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -296,9 +314,7 @@ async function handleResetAllTableLayouts() {
                     messageArea.textContent = 'All table layouts have been reset successfully.';
                     messageArea.classList.add('success-message');
                     uiService.showModalMessage('Layouts Reset', 'All table layouts have been reset. Refresh pages to see changes.');
-                    // Reload this section to reflect the change
                     await loadAndDisplayTableLayoutSettings();
-                    // Also update the global state if your stateService holds these
                     if (stateService && typeof stateService.updateState === 'function') {
                         stateService.updateState({ globalTableLayouts: {} });
                     }
@@ -352,7 +368,7 @@ function renderProxyExclusionUI(container) {
                 </thead>
                 <tbody>
         `;
-        currentProxyExclusionRules.forEach(rule => { // Changed rulesHTML to tableHTML
+        currentProxyExclusionRules.forEach(rule => { 
             tableHTML += `
                 <tr data-rule-id="${escapeHtmlAttribute(rule.id)}">
                     <td><input type="checkbox" class="proxy-exclusion-enable" ${rule.is_enabled ? 'checked' : ''}></td>
@@ -363,12 +379,11 @@ function renderProxyExclusionUI(container) {
                 </tr>
             `;
         });
-        tableHTML += '</tbody></table>';
+        tableHTML += `</tbody></table>`;
     }
 
     const saveButtonHTML = `<button id="saveProxyExclusionsBtn" class="primary" style="margin-top: 10px; margin-bottom: 15px;">Save All Proxy Exclusions</button>`;
 
-    // Form for adding new rules remains at the top
     container.innerHTML = `
         <form id="addProxyExclusionForm" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
             <h4>Add New Exclusion Rule</h4>
@@ -423,18 +438,18 @@ function handleAddProxyExclusionRule(event) {
     }
 
     const newRule = {
-        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Simple client-side ID
+        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
         rule_type: ruleType,
         pattern: pattern,
         description: description,
         is_enabled: isEnabled
     };
     currentProxyExclusionRules.push(newRule);
-    form.reset(); // Reset form fields
-    document.getElementById('proxyExclusionIsEnabled').checked = true; // Reset checkbox to default
+    form.reset(); 
+    document.getElementById('proxyExclusionIsEnabled').checked = true; 
     messageArea.textContent = 'Rule added locally. Click "Save All" to persist changes.';
     messageArea.className = 'message-area info-message';
-    renderProxyExclusionUI(); // Re-render the list
+    renderProxyExclusionUI(); 
 }
 
 function handleDeleteProxyExclusionRule(event) {
@@ -453,7 +468,6 @@ function handleToggleProxyExclusionEnable(event) {
     }
     document.getElementById('proxyExclusionsMessage').textContent = 'Rule status changed locally. Click "Save All" to persist changes.';
     document.getElementById('proxyExclusionsMessage').className = 'message-area info-message';
-    // No need to re-render fully, but "Save All" button should be prominent
 }
 
 async function handleSaveAllProxyExclusions() {
@@ -462,21 +476,13 @@ async function handleSaveAllProxyExclusions() {
     messageArea.className = 'message-area';
 
     try {
-        // Filter out temporary client-side IDs if backend generates its own on creation
-        // For simplicity now, we send them as is; backend can re-assign IDs if needed.
         const rulesToSave = currentProxyExclusionRules.map(rule => {
-            // If your backend re-assigns IDs and doesn't want temp IDs:
-            // if (rule.id.startsWith('temp-')) {
-            //     const { id, ...rest } = rule; // Exclude client-side temp ID
-            //     return rest;
-            // }
             return rule;
         });
 
         await apiService.setProxyExclusionRules(rulesToSave);
         messageArea.textContent = 'Proxy exclusion rules saved successfully!';
         messageArea.classList.add('success-message');
-        // Fetch again to get server-assigned IDs if any and re-render
         await loadAndDisplayProxyExclusionSettings();
     } catch (error) {
         console.error("Error saving proxy exclusion rules:", error);
@@ -501,7 +507,7 @@ async function loadAndDisplayTagsManagement() {
                 </div>
                 <div class="form-group">
                     <label for="newGlobalTagColor">Color:</label>
-                    <input type="color" id="newGlobalTagColor" name="color" value="#6c757d"> <!-- Default to a neutral color -->
+                    <input type="color" id="newGlobalTagColor" name="color" value="#6c757d"> 
                 </div>
                 <button type="submit" class="primary">Add Tag</button>
             </form>
@@ -550,7 +556,6 @@ async function fetchAndRenderGlobalTags() {
             tableHTML += `</tbody></table>`;
             listContainer.innerHTML = tableHTML;
 
-            // Attach event listeners for edit/delete after rendering
             listContainer.querySelectorAll('.edit-global-tag').forEach(btn => btn.addEventListener('click', handleEditGlobalTagClick));
             listContainer.querySelectorAll('.delete-global-tag').forEach(btn => btn.addEventListener('click', handleDeleteGlobalTagClick));
         } else {
@@ -580,8 +585,8 @@ async function handleAddGlobalTag(event) {
         messageArea.textContent = `Tag "${escapeHtml(tagName)}" added successfully.`;
         messageArea.className = 'message-area success-message';
         form.reset();
-        document.getElementById('newGlobalTagColor').value = '#6c757d'; // Reset color picker to default
-        await fetchAndRenderGlobalTags(); // Refresh list
+        document.getElementById('newGlobalTagColor').value = '#6c757d'; 
+        await fetchAndRenderGlobalTags(); 
     } catch (error) {
         console.error("Error adding global tag:", error);
         messageArea.textContent = `Error adding tag: ${escapeHtml(error.message)}`;
@@ -593,7 +598,6 @@ function handleEditGlobalTagClick(event) {
     const tagId = event.target.closest('button').dataset.tagId;
     const row = event.target.closest('tr');
     if (!row.classList.contains('editing-tag')) {
-        // If another row is being edited, cancel that first
         const currentlyEditingRow = document.querySelector('tr.editing-tag');
         if (currentlyEditingRow && currentlyEditingRow !== row) {
             cancelTagEdit(currentlyEditingRow.dataset.tagId);
@@ -641,12 +645,12 @@ async function saveTagEdit(tagId) {
         await apiService.updateTag(tagId, { name: newName, color: newColor });
         messageArea.textContent = `Tag ID ${tagId} updated successfully.`;
         messageArea.className = 'message-area success-message';
-        await fetchAndRenderGlobalTags(); // Refresh the list to show updated values and restore row
+        await fetchAndRenderGlobalTags(); 
     } catch (error) {
         console.error(`Error updating tag ${tagId}:`, error);
         messageArea.textContent = `Error updating tag: ${escapeHtml(error.message)}`;
         messageArea.className = 'message-area error-message';
-        cancelTagEdit(tagId); // For now, cancel edit on error
+        cancelTagEdit(tagId); 
     }
 }
 
@@ -655,7 +659,7 @@ function cancelTagEdit(tagId) {
     if (!row || !row.classList.contains('editing-tag')) return;
 
     row.classList.remove('editing-tag');
-    fetchAndRenderGlobalTags(); // Re-fetch the whole list to restore the row
+    fetchAndRenderGlobalTags(); 
 }
 
 async function handleDeleteGlobalTagClick(event) {
@@ -672,11 +676,209 @@ async function handleDeleteGlobalTagClick(event) {
                 await apiService.deleteTag(tagId);
                 messageArea.textContent = `Tag "${escapeHtml(tagName)}" deleted successfully.`;
                 messageArea.className = 'message-area success-message';
-                await fetchAndRenderGlobalTags(); // Refresh list
+                await fetchAndRenderGlobalTags(); 
             } catch (error) {
                 console.error(`Error deleting tag ${tagId}:`, error);
                 messageArea.textContent = `Error deleting tag: ${escapeHtml(error.message)}`;
                 messageArea.className = 'message-area error-message';
+            }
+        }
+    );
+}
+
+// --- Vulnerability Types Management ---
+
+async function loadAndDisplayVulnerabilityTypes() {
+    const container = document.getElementById('vulnerabilityTypesContainer');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div id="addVulnerabilityTypeFormContainer" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px;">
+            <h4>Add New Vulnerability Type</h4>
+            <form id="addVulnerabilityTypeForm" class="inline-form">
+                <div class="form-group">
+                    <label for="newVulnerabilityTypeName">Name:</label>
+                    <input type="text" id="newVulnerabilityTypeName" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="newVulnerabilityTypeDescription">Description:</label>
+                    <input type="text" id="newVulnerabilityTypeDescription" name="description">
+                </div>
+                <button type="submit" class="primary">Add Type</button>
+            </form>
+            <div id="addVulnerabilityTypeMessage" class="message-area" style="margin-top: 10px;"></div>
+        </div>
+        <h4>Existing Vulnerability Types</h4>
+        <div id="existingVulnerabilityTypesListContainer">
+            <p>Loading vulnerability types...</p>
+        </div>
+    `;
+
+    document.getElementById('addVulnerabilityTypeForm')?.addEventListener('submit', handleAddVulnerabilityType);
+    await fetchAndRenderVulnerabilityTypes();
+}
+
+async function fetchAndRenderVulnerabilityTypes() {
+    const listContainer = document.getElementById('existingVulnerabilityTypesListContainer');
+    if (!listContainer) return;
+
+    try {
+        const types = await apiService.getAllVulnerabilityTypes();
+        if (types && types.length > 0) {
+            let tableHTML = `<table class="settings-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+            types.forEach(type => {
+                tableHTML += `
+                    <tr data-type-id="${type.id}">
+                        <td>${type.id}</td>
+                        <td class="vuln-type-name" data-current-name="${escapeHtmlAttribute(type.name)}">${escapeHtml(type.name)}</td>
+                        <td class="vuln-type-description" data-current-description="${escapeHtmlAttribute(type.description?.String || '')}">${escapeHtml(type.description?.String || '')}</td>
+                        <td>
+                            <button class="action-button edit-vuln-type" data-type-id="${type.id}" title="Edit Type">✏️</button>
+                            <button class="action-button delete-vuln-type" data-type-id="${type.id}" title="Delete Type">🗑️</button>
+                        </td>
+                    </tr>`;
+            });
+            tableHTML += `</tbody></table>`;
+            listContainer.innerHTML = tableHTML;
+
+            listContainer.querySelectorAll('.edit-vuln-type').forEach(btn => btn.addEventListener('click', handleEditVulnerabilityTypeClick));
+            listContainer.querySelectorAll('.delete-vuln-type').forEach(btn => btn.addEventListener('click', handleDeleteVulnerabilityTypeClick));
+        } else {
+            listContainer.innerHTML = '<p>No vulnerability types defined yet.</p>';
+        }
+    } catch (error) {
+        console.error("Error fetching vulnerability types:", error);
+        listContainer.innerHTML = `<p class="error-message">Error loading vulnerability types: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function handleAddVulnerabilityType(event) {
+    event.preventDefault();
+    const form = event.target;
+    const name = form.elements.name.value.trim();
+    const description = form.elements.description.value.trim();
+    const messageArea = document.getElementById('addVulnerabilityTypeMessage');
+
+    if (!name) {
+        messageArea.textContent = 'Vulnerability type name cannot be empty.';
+        messageArea.className = 'message-area error-message';
+        return;
+    }
+
+    try {
+        await apiService.createVulnerabilityType({ name, description: description || null });
+        messageArea.textContent = `Vulnerability type "${escapeHtml(name)}" added successfully.`;
+        messageArea.className = 'message-area success-message';
+        form.reset();
+        await fetchAndRenderVulnerabilityTypes();
+    } catch (error) {
+        messageArea.textContent = `Error adding type: ${escapeHtml(error.message)}`;
+        messageArea.className = 'message-area error-message';
+    }
+}
+
+function handleEditVulnerabilityTypeClick(event) {
+    const typeId = event.target.closest('button').dataset.typeId;
+    const row = event.target.closest('tr');
+    if (!row || row.classList.contains('editing-vuln-type')) return;
+
+    // Cancel any other active edit in this table
+    const currentlyEditingRow = document.querySelector('tr.editing-vuln-type');
+    if (currentlyEditingRow && currentlyEditingRow !== row) {
+        cancelVulnerabilityTypeEdit();
+    }
+
+    row.classList.add('editing-vuln-type');
+    const nameCell = row.querySelector('.vuln-type-name');
+    const descriptionCell = row.querySelector('.vuln-type-description');
+    const actionsCell = row.querySelector('td:last-child');
+
+    const currentName = nameCell.dataset.currentName;
+    const currentDescription = descriptionCell.dataset.currentDescription;
+
+    nameCell.innerHTML = `<input type="text" class="edit-vuln-type-name-input" value="${escapeHtmlAttribute(currentName)}" style="width: 95%;">`;
+    descriptionCell.innerHTML = `<input type="text" class="edit-vuln-type-description-input" value="${escapeHtmlAttribute(currentDescription)}" style="width: 95%;">`;
+    actionsCell.innerHTML = `
+        <button class="action-button save-vuln-type-edit" data-type-id="${typeId}" title="Save Changes">✔️</button>
+        <button class="action-button cancel-vuln-type-edit" data-type-id="${typeId}" title="Cancel Edit">❌</button>
+    `;
+
+    actionsCell.querySelector('.save-vuln-type-edit').addEventListener('click', () => saveVulnerabilityTypeEdit(typeId));
+    actionsCell.querySelector('.cancel-vuln-type-edit').addEventListener('click', () => cancelVulnerabilityTypeEdit());
+    nameCell.querySelector('input').focus();
+}
+
+async function saveVulnerabilityTypeEdit(typeId) {
+    const row = document.querySelector(`tr[data-type-id="${typeId}"]`);
+    if (!row) return;
+
+    const nameInput = row.querySelector('.edit-vuln-type-name-input');
+    const descriptionInput = row.querySelector('.edit-vuln-type-description-input');
+    const messageArea = document.getElementById('addVulnerabilityTypeMessage');
+
+    const newName = nameInput.value.trim();
+    const newDescription = descriptionInput.value.trim();
+
+    if (!newName) {
+        messageArea.textContent = 'Vulnerability type name cannot be empty.';
+        messageArea.className = 'message-area error-message';
+        return;
+    }
+
+    try {
+        await apiService.updateVulnerabilityType(typeId, { name: newName, description: newDescription });
+        messageArea.textContent = `Vulnerability type ID ${typeId} updated successfully.`;
+        messageArea.className = 'message-area success-message';
+        await fetchAndRenderVulnerabilityTypes(); // Refresh the list to show updated data and remove edit fields
+    } catch (error) {
+        console.error(`Error updating vulnerability type ${typeId}:`, error);
+        messageArea.textContent = `Error updating type: ${escapeHtml(error.message)}`;
+        messageArea.className = 'message-area error-message';
+        cancelVulnerabilityTypeEdit(); // Revert on error
+    }
+}
+
+function cancelVulnerabilityTypeEdit() {
+    // The simplest way to cancel is to just re-render the whole list.
+    // This ensures data consistency and removes the edit-mode row.
+    fetchAndRenderVulnerabilityTypes();
+}
+
+async function handleDeleteVulnerabilityTypeClick(event) {
+    const typeId = event.target.closest('button').dataset.typeId;
+    const row = event.target.closest('tr');
+    const typeName = row.querySelector('.vuln-type-name')?.dataset.currentName || `ID ${typeId}`;
+    const messageArea = document.getElementById('addVulnerabilityTypeMessage'); // Reuse message area
+
+    uiService.showModalConfirm(
+        "Confirm Delete",
+        `Are you sure you want to delete vulnerability type "${escapeHtml(typeName)}"? This might affect existing findings.`,
+        async () => {
+            try {
+                await apiService.deleteVulnerabilityType(typeId);
+                if(messageArea) {
+                    messageArea.textContent = `Vulnerability type "${escapeHtml(typeName)}" deleted.`;
+                    messageArea.className = 'message-area success-message';
+                }
+                await fetchAndRenderVulnerabilityTypes();
+            } catch (error) {
+                if(messageArea) {
+                    messageArea.textContent = `Error deleting type: ${escapeHtml(error.message)}`;
+                    messageArea.className = 'message-area error-message';
+                }
+                 // If the error indicates it's in use, show a more specific message
+                if (error.message && error.message.includes("FOREIGN KEY constraint failed")) {
+                    uiService.showModalMessage("Deletion Failed", `Cannot delete type "${escapeHtml(typeName)}" as it is currently associated with one or more findings.`);
+                }
             }
         }
     );

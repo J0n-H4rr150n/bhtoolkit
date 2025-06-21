@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"toolkit/database"
 	"toolkit/logger"
 	"toolkit/models"
@@ -12,9 +13,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// VulnerabilityTypeRequest defines the expected JSON payload for creating or updating a vulnerability type.
+type VulnerabilityTypeRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // CreateTargetFindingHandler handles POST requests to create a new finding for a target.
 func CreateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
-	var findingReq models.TargetFinding // Use TargetFinding directly, ID will be ignored by DB on insert
+	var findingReq models.TargetFinding
 	if err := json.NewDecoder(r.Body).Decode(&findingReq); err != nil {
 		logger.Error("CreateTargetFindingHandler: Error decoding request body: %v", err)
 		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
@@ -33,6 +40,8 @@ func CreateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The findingReq already includes all new fields like Summary, StepsToReproduce, etc.
+	// The database.CreateTargetFinding function is expected to handle these.
 	id, err := database.CreateTargetFinding(findingReq)
 	if err != nil {
 		logger.Error("CreateTargetFindingHandler: Error creating finding for target %d: %v", findingReq.TargetID, err)
@@ -43,10 +52,8 @@ func CreateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 	createdFinding, err := database.GetTargetFindingByID(id)
 	if err != nil {
 		logger.Error("CreateTargetFindingHandler: Error fetching newly created finding %d: %v", id, err)
-		// The finding was created, so return 201 with the ID.
-		// Provide a clear message about the situation.
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated) // Respond with 201 Created
+		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "target_id": findingReq.TargetID, "message": "Finding created successfully. However, there was an error retrieving the full details of the created finding."})
 		return
 	}
@@ -66,6 +73,7 @@ func GetTargetFindingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// database.GetTargetFindingsByTargetID is expected to return all fields, including new ones.
 	findings, err := database.GetTargetFindingsByTargetID(targetID)
 	if err != nil {
 		logger.Error("GetTargetFindingsHandler: Error fetching findings for target %d: %v", targetID, err)
@@ -73,7 +81,7 @@ func GetTargetFindingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if findings == nil { // Ensure we return an empty array, not null
+	if findings == nil {
 		findings = []models.TargetFinding{}
 	}
 
@@ -91,6 +99,7 @@ func GetFindingByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// database.GetTargetFindingByID is expected to return all fields.
 	finding, err := database.GetTargetFindingByID(findingID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -130,7 +139,6 @@ func UpdateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch existing to get target_id and ensure it exists
 	existingFinding, err := database.GetTargetFindingByID(findingID)
 	if err != nil {
 		logger.Error("UpdateTargetFindingHandler: Finding %d not found: %v", findingID, err)
@@ -139,8 +147,10 @@ func UpdateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	findingUpdateReq.ID = findingID
-	findingUpdateReq.TargetID = existingFinding.TargetID // Preserve original target_id
+	findingUpdateReq.TargetID = existingFinding.TargetID
+	findingUpdateReq.DiscoveredAt = existingFinding.DiscoveredAt // Preserve original discovery date
 
+	// database.UpdateTargetFinding is expected to handle all new fields in findingUpdateReq.
 	if err := database.UpdateTargetFinding(findingUpdateReq); err != nil {
 		logger.Error("UpdateTargetFindingHandler: Error updating finding %d: %v", findingID, err)
 		http.Error(w, "Failed to update finding", http.StatusInternalServerError)
@@ -150,8 +160,6 @@ func UpdateTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 	updatedFinding, err := database.GetTargetFindingByID(findingID)
 	if err != nil {
 		logger.Error("UpdateTargetFindingHandler: Error fetching updated finding %d: %v", findingID, err)
-		// The finding was updated, so return 200.
-		// Provide a clear message.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{"id": findingID, "target_id": existingFinding.TargetID, "message": "Finding updated successfully. However, there was an error retrieving the full details of the updated finding."})
@@ -172,17 +180,6 @@ func DeleteTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// To ensure integrity, we might want to pass target_id from context if available,
-	// or fetch the finding first to get its target_id.
-	// For simplicity here, we assume the frontend will only allow deleting findings
-	// for the currently viewed/active target. The DB function can take target_id.
-	// This requires knowing the target_id. Let's assume it's passed or fetched.
-	// For now, we'll make the DB function require it.
-	// We need a way to get target_id here. If it's part of a nested route like /targets/{target_id}/findings/{finding_id}
-	// then we can get target_id from chi.URLParam(r, "target_id")
-	// If not, we might need to fetch the finding first to get its target_id.
-
-	// Let's assume the route will be /api/findings/{finding_id} and we need to fetch target_id
 	finding, err := database.GetTargetFindingByID(findingID)
 	if err != nil {
 		logger.Error("DeleteTargetFindingHandler: Finding %d not found for deletion: %v", findingID, err)
@@ -198,3 +195,164 @@ func DeleteTargetFindingHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// --- VulnerabilityType Handlers ---
+
+// CreateVulnerabilityTypeHandler handles POST requests to create a new vulnerability type.
+func CreateVulnerabilityTypeHandler(w http.ResponseWriter, r *http.Request) {
+	var req VulnerabilityTypeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("CreateVulnerabilityTypeHandler: Error decoding request body: %v", err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if strings.TrimSpace(req.Name) == "" {
+		logger.Error("CreateVulnerabilityTypeHandler: Vulnerability type name cannot be empty")
+		http.Error(w, "Vulnerability type name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	vt := models.VulnerabilityType{
+		Name:        req.Name,
+		Description: models.NullString(req.Description),
+	}
+
+	id, err := database.CreateVulnerabilityType(vt)
+	if err != nil {
+		logger.Error("CreateVulnerabilityTypeHandler: Error creating vulnerability type: %v", err)
+		// Check for unique constraint violation specifically if your DB layer returns a recognizable error
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			http.Error(w, "Vulnerability type with this name already exists", http.StatusConflict)
+		} else {
+			http.Error(w, "Failed to create vulnerability type", http.StatusInternalServerError)
+		}
+		return
+	}
+	vt.ID = id
+	// Re-fetch to get DB-generated timestamps
+	createdVt, fetchErr := database.GetVulnerabilityTypeByID(id) // Assumes GetVulnerabilityTypeByID exists
+	if fetchErr != nil {
+		logger.Error("CreateVulnerabilityTypeHandler: Error fetching newly created vulnerability type %d: %v", id, fetchErr)
+		// Fallback to returning the input with ID
+		vt.CreatedAt = time.Now()
+		vt.UpdatedAt = time.Now()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(vt)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(createdVt)
+}
+
+// GetAllVulnerabilityTypesHandler handles GET requests to list all vulnerability types.
+func GetAllVulnerabilityTypesHandler(w http.ResponseWriter, r *http.Request) {
+	types, err := database.GetAllVulnerabilityTypes()
+	if err != nil {
+		logger.Error("GetAllVulnerabilityTypesHandler: Error fetching vulnerability types: %v", err)
+		http.Error(w, "Failed to retrieve vulnerability types", http.StatusInternalServerError)
+		return
+	}
+	if types == nil {
+		types = []models.VulnerabilityType{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(types)
+}
+
+// UpdateVulnerabilityTypeHandler handles PUT requests to update an existing vulnerability type.
+func UpdateVulnerabilityTypeHandler(w http.ResponseWriter, r *http.Request) {
+	vtIDStr := chi.URLParam(r, "vulnerability_type_id")
+	vtID, err := strconv.ParseInt(vtIDStr, 10, 64)
+	if err != nil {
+		logger.Error("UpdateVulnerabilityTypeHandler: Invalid vulnerability_type_id format: %s", vtIDStr)
+		http.Error(w, "Invalid vulnerability type ID format", http.StatusBadRequest)
+		return
+	}
+
+	var req VulnerabilityTypeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("UpdateVulnerabilityTypeHandler: Error decoding request body for ID %d: %v", vtID, err)
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Vulnerability type name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	vtUpdate := models.VulnerabilityType{
+		ID:          vtID,
+		Name:        req.Name,
+		Description: models.NullString(req.Description),
+	}
+
+	if err := database.UpdateVulnerabilityType(vtUpdate); err != nil {
+		logger.Error("UpdateVulnerabilityTypeHandler: Error updating vulnerability type %d: %v", vtID, err)
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			http.Error(w, "Vulnerability type with this name already exists", http.StatusConflict)
+		} else if strings.Contains(err.Error(), "not found") { // Assuming DB layer might return this
+			http.Error(w, "Vulnerability type not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to update vulnerability type", http.StatusInternalServerError)
+		}
+		return
+	}
+	// Re-fetch to get updated timestamps
+	updatedVt, fetchErr := database.GetVulnerabilityTypeByID(vtID)
+	if fetchErr != nil {
+		logger.Error("UpdateVulnerabilityTypeHandler: Error fetching updated vulnerability type %d: %v", vtID, fetchErr)
+		// Fallback
+		vtUpdate.UpdatedAt = time.Now()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(vtUpdate)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedVt)
+}
+
+// DeleteVulnerabilityTypeHandler handles DELETE requests to delete a vulnerability type.
+func DeleteVulnerabilityTypeHandler(w http.ResponseWriter, r *http.Request) {
+	vtIDStr := chi.URLParam(r, "vulnerability_type_id")
+	vtID, err := strconv.ParseInt(vtIDStr, 10, 64)
+	if err != nil {
+		logger.Error("DeleteVulnerabilityTypeHandler: Invalid vulnerability_type_id format: %s", vtIDStr)
+		http.Error(w, "Invalid vulnerability type ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Optional: Check if the type exists before attempting delete, to return 404 if not found.
+	// _, fetchErr := database.GetVulnerabilityTypeByID(vtID)
+	// if fetchErr != nil {
+	// 	http.Error(w, "Vulnerability type not found", http.StatusNotFound)
+	// 	return
+	// }
+
+	if err := database.DeleteVulnerabilityType(vtID); err != nil {
+		logger.Error("DeleteVulnerabilityTypeHandler: Error deleting vulnerability type %d: %v", vtID, err)
+		// Check for foreign key constraint violation if your DB layer returns a recognizable error
+		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			http.Error(w, "Cannot delete vulnerability type: it is currently associated with one or more findings.", http.StatusConflict)
+		} else {
+			http.Error(w, "Failed to delete vulnerability type", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetVulnerabilityTypeByID is a helper, not directly a handler, but used by handlers.
+// It's good practice to have such helpers if they are complex or reused.
+// For now, database.GetVulnerabilityTypeByID is simple enough.
+// If needed, it would look like:
+// func GetVulnerabilityTypeByID(id int64) (models.VulnerabilityType, error) {
+//    return database.GetVulnerabilityTypeByID(id)
+// }

@@ -619,11 +619,11 @@ async function handleViewChecklistItemDetails(event) {
             <p><strong>ID:</strong> ${itemId}</p>
             <p><strong>Status:</strong> ${isCompleted ? 'Completed' : 'Incomplete'}</p>
             <p><strong>Item Text:</strong></p>
-            <pre style="white-space: pre-wrap; word-wrap: break-word; background-color: #f0f0f0; padding: 8px; border-radius: 4px; border: 1px solid #e0e0e0;">${escapeHtml(itemText)}</pre>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; padding: 8px; border-radius: 4px; border: 1px solid #e0e0e0;">${escapeHtml(itemText)}</pre>
             <p><strong>Command Text:</strong></p>
-            <pre style="white-space: pre-wrap; word-wrap: break-word; background-color: #f0f0f0; padding: 8px; border-radius: 4px; border: 1px solid #e0e0e0;">${commandText ? escapeHtml(commandText) : '(None)'}</pre>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; padding: 8px; border-radius: 4px; border: 1px solid #e0e0e0;">${commandText ? escapeHtml(commandText) : '(None)'}</pre>
             <p><strong>Notes:</strong></p>
-            <pre style="white-space: pre-wrap; word-wrap: break-word; background-color: #f0f0f0; padding: 10px; border-radius: 4px; border: 1px solid #e0e0e0; max-height: 400px; overflow-y: auto;">${fullNotes ? escapeHtml(fullNotes) : '(None)'}</pre>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; padding: 10px; border-radius: 4px; border: 1px solid #e0e0e0; max-height: 400px; overflow-y: auto;">${fullNotes ? escapeHtml(fullNotes) : '(None)'}</pre>
         </div>
     `;
 
