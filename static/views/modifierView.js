@@ -11,6 +11,21 @@ let viewContentContainer;
 // Module-level state for the "Add no-cache header" toggle
 let autoAddNoCacheHeader = localStorage.getItem('modifierAddNoCacheHeader') === 'true';
 
+// Helper to decode Base64Url
+const decodeBase64Url = (input) => {
+    input = input.replace(/-/g, '+').replace(/_/g, '/');
+    while (input.length % 4) {
+        input += '=';
+    }
+    return atob(input);
+};
+
+// Helper to encode Base64Url
+const encodeBase64Url = (input) => {
+    let base64 = btoa(input);
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+};
+
 export function initModifierView(services) {
     apiService = services.apiService;
     uiService = services.uiService;
@@ -18,7 +33,47 @@ export function initModifierView(services) {
     tableService = services.tableService; // Assign if used
     console.log("[ModifierView] Initialized.");
 }
+
+async function handleResetRequest() {
+    const modHeadersEl = document.getElementById('modHeaders'); // The textarea for headers
+    const modBodyEl = document.getElementById('modBody');       // The textarea for the body
+
+    const appState = stateService.getState();
+    const currentTask = appState.currentModifierTask;
+
+    if (!currentTask) {
+        uiService.showModalMessage("Error", "No task is currently loaded to reset.");
+        return;
+    }
+
+    console.log("ModifierView: handleResetRequest called for task ID:", currentTask.id);
+
+    if (modHeadersEl) { // Reset Headers
+        let headersToDisplay = '(No Headers)';
+        // The backend sends sql.NullString, which becomes { String: "...", Valid: true } or { Valid: false }
+        const originalHeaders = currentTask.original_request_headers;
+        if (originalHeaders && originalHeaders.Valid && originalHeaders.String) {
+            try {
+                const headersObj = JSON.parse(originalHeaders.String);
+                headersToDisplay = localFormatHeaders(headersObj);
+            } catch (e) {
+                console.warn("ModifierView: Could not parse original_request_headers JSON for reset:", e);
+                headersToDisplay = escapeHtml(originalHeaders.String); // Fallback
+            }
+        }
+        modHeadersEl.value = headersToDisplay;
+    }
+    if (modBodyEl) { // Reset Body
+        const originalBody = currentTask.original_request_body;
+        // Body is base64 encoded string
+        modBodyEl.value = (originalBody && originalBody.Valid && originalBody.String) ? atob(originalBody.String) : '';
+    }
+
+    uiService.showModalMessage("Request Reset", "The request fields have been reverted to their original state.", true, 1500);
+}
+
 // Helper function to format headers for display in a textarea
+// This function expects a JavaScript object, not a JSON string.
 function localFormatHeaders(headersObj) {
     if (!headersObj || Object.keys(headersObj).length === 0) return '(No Headers)';
     return Object.entries(headersObj)
@@ -254,6 +309,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
 
     try {
         const task = await apiService.getModifierTaskDetails(taskId);
+        
         stateService.updateState({ currentModifierTask: task }); // Store in state
 
         // --- Prepare Request Part ---
@@ -362,11 +418,15 @@ async function loadModifierTaskIntoWorkspace(taskId) {
             <div class="modifier-tabs">
                 <button class="modifier-tab-button ${!activateResponseTab ? 'active' : ''}" data-tab-id="modifierRequestTab">Request</button>
                 <button class="modifier-tab-button ${activateResponseTab ? 'active' : ''}" data-tab-id="modifierResponseTab">Response</button>
+                <button class="modifier-tab-button" data-tab-id="modifierEncoderDecoderTab">Encoder/Decoder</button>
             </div>
 
             <div id="modifierRequestTab" class="modifier-tab-content ${!activateResponseTab ? 'active' : ''}">
                 <div class="request-details">
                     <div class="modifier-section request-section">
+                        <div style="text-align: right; margin-bottom: 10px;">
+                            <button id="resetRequestBtn" class="secondary small-button">Reset Request</button>
+                        </div>
                         <div class="form-group">
                             <label for="modMethod">Method:</label>
                             <input type="text" id="modMethod" class="modifier-input" value="${escapeHtmlAttribute(task.base_request_method)}">
@@ -409,10 +469,49 @@ async function loadModifierTaskIntoWorkspace(taskId) {
                     </div>
                 </div>
             </div>
+
+            <div id="modifierEncoderDecoderTab" class="modifier-tab-content">
+                <div class="encoder-decoder-container">
+                    <div class="encoder-decoder-controls-top-row" style="display: flex; gap: 20px; align-items: flex-end; margin-bottom: 10px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="encoderDecoderDecodeSelect">Decode As:</label>
+                            <select id="encoderDecoderDecodeSelect" class="modifier-select">
+                                <option value="">None</option>
+                                <option value="base64">Base64</option>
+                                <option value="jwt">JWT</option>
+                                <option value="url">URL</option>
+                                <option value="html">HTML Entities</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="encoderDecoderEncodeSelect">Encode As:</label>
+                            <select id="encoderDecoderEncodeSelect" class="modifier-select">
+                                <option value="">None</option>
+                                <option value="base64">Base64</option>
+                                <option value="jwt">JWT</option>
+                                <option value="url">URL</option>
+                                <option value="html">HTML Entities</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="encoderDecoderInput">Input:</label>
+                        <textarea id="encoderDecoderInput" class="modifier-textarea" rows="10" placeholder="Paste text here..."></textarea>
+                    </div>
+                    <div style="text-align: center; margin: 10px 0;">
+                        <button id="copyOutputToInputBtn" class="secondary small-button" title="Copy Output to Input">⬆️ Copy Output to Input</button>
+                    </div>
+                    <div class="form-group">
+                        <label for="encoderDecoderOutput">Output:</label>
+                        <textarea id="encoderDecoderOutput" class="modifier-textarea" rows="10" readonly></textarea>
+                    </div>
+                </div>
+            </div>
         `;
 
         // --- Add Event Listeners ---
         document.getElementById('sendModifiedRequestBtn')?.addEventListener('click', () => handleSendModifiedRequest(task.id));
+        document.getElementById('resetRequestBtn')?.addEventListener('click', handleResetRequest);
         document.getElementById('editModifierTaskNameBtn')?.addEventListener('click', () => toggleTaskNameEdit(true, task.id, task.name));
         document.getElementById('saveModifierTaskNameBtn')?.addEventListener('click', () => handleSaveTaskName(task.id));
         document.getElementById('cancelModifierTaskNameBtn')?.addEventListener('click', () => toggleTaskNameEdit(false, task.id, task.name));
@@ -429,8 +528,9 @@ async function loadModifierTaskIntoWorkspace(taskId) {
                 localStorage.setItem('modifierAddNoCacheHeader', autoAddNoCacheHeader);
             });
         }
-        
-        // Adjust height for response body if it was populated
+
+        setupEncoderDecoderListeners();
+
         const responseBodyTextarea = document.getElementById('modResponseBody');
         autoAdjustTextareaHeight(responseBodyTextarea);
 
@@ -767,6 +867,131 @@ async function handleDeleteModifierTask(taskId, taskName) {
             }
         }
     );
+}
+
+function setupEncoderDecoderListeners() {
+    const inputEl = document.getElementById('encoderDecoderInput');
+    const decodeSelectEl = document.getElementById('encoderDecoderDecodeSelect');
+    const encodeSelectEl = document.getElementById('encoderDecoderEncodeSelect');
+    const outputEl = document.getElementById('encoderDecoderOutput');
+
+    if (!inputEl || !decodeSelectEl || !encodeSelectEl || !outputEl) {
+        console.warn("[ModifierView] Encoder/Decoder elements not found. Skipping setup.");
+        return;
+    }
+
+    const performConversion = () => {
+        const inputText = inputEl.value;
+        const decodeType = decodeSelectEl.value;
+        const encodeType = encodeSelectEl.value;
+        let processedText = inputText;
+
+        // Perform decoding first
+        if (decodeType) {
+            try {
+                switch (decodeType) {
+                    case 'base64':
+                        processedText = atob(processedText);
+                        break;
+                    case 'url':
+                        processedText = decodeURIComponent(processedText);
+                        break;
+                    case 'html':
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = processedText;
+                        processedText = tempDiv.textContent || tempDiv.innerText || '';
+                        break;
+                    case 'jwt':
+                        try {
+                            const parts = processedText.split('.');
+                            if (parts.length !== 3) {
+                                throw new Error("Invalid JWT format: expected 3 parts separated by '.'");
+                            }
+                            const decodeBase64Url = (input) => {
+                                // Replace characters that are not part of standard Base64 for Base64Url
+                                input = input.replace(/-/g, '+').replace(/_/g, '/');
+                                // Pad with '=' to make it a valid Base64 string
+                                while (input.length % 4) {
+                                    input += '=';
+                                }
+                                return atob(input);
+                            };
+                            const header = JSON.stringify(JSON.parse(decodeBase64Url(parts[0])), null, 2);
+                            const payload = JSON.stringify(JSON.parse(decodeBase64Url(parts[1])), null, 2);
+                            processedText = `Header:\n${header}\n\nPayload:\n${payload}\n\nSignature: ${parts[2]}`;
+                        } catch (e) {
+                            outputEl.value = `Error decoding JWT: ${e.message}`;
+                            return;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            } catch (e) {
+                outputEl.value = `Error decoding ${decodeType}: ${e.message}`;
+                return;
+            }
+        }
+
+        // Then perform encoding
+        if (encodeType) {
+            try {
+                switch (encodeType) {
+                    case 'base64':
+                        processedText = btoa(processedText);
+                        break;
+                    case 'url':
+                        processedText = encodeURIComponent(processedText);
+                        break;
+                    case 'html':
+                        processedText = processedText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                        break;
+                    case 'jwt':
+                        const jwtRegex = /Header:\s*(\{[\s\S]*?\})\s*Payload:\s*(\{[\s\S]*?\})\s*Signature:\s*([\s\S]*)/i;
+                        const match = processedText.match(jwtRegex);
+
+                        if (match) {
+                            const headerJson = JSON.stringify(JSON.parse(match[1]));
+                            const payloadJson = JSON.stringify(JSON.parse(match[2]));
+                            const signature = match[3].trim();
+                            processedText = `${encodeBase64Url(headerJson)}.${encodeBase64Url(payloadJson)}.${signature}`;
+                        } else {
+                            // Fallback: assume input is just the payload JSON
+                            const payloadJson = JSON.stringify(JSON.parse(processedText));
+                            const defaultHeader = JSON.stringify({ alg: "HS256", typ: "JWT" });
+                            processedText = `${encodeBase64Url(defaultHeader)}.${encodeBase64Url(payloadJson)}.`;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            } catch (e) {
+                outputEl.value = `Error encoding ${encodeType}: ${e.message}. For JWT, ensure input is valid JSON (for payload) or in the 'Header:{} Payload:{} Signature:...' format.`;
+                return;
+            }
+        }
+
+        outputEl.value = processedText;
+    };
+
+    inputEl.addEventListener('input', performConversion);
+    decodeSelectEl.addEventListener('change', () => {
+        encodeSelectEl.value = '';
+        performConversion();
+    });
+    encodeSelectEl.addEventListener('change', () => {
+        decodeSelectEl.value = '';
+        performConversion();
+    });
+
+        const copyOutputToInputBtn = document.getElementById('copyOutputToInputBtn');
+        if (copyOutputToInputBtn) {
+            copyOutputToInputBtn.addEventListener('click', (event) => {
+                event.preventDefault(); // Prevent form submission if button is inside a form
+                inputEl.value = ''; // Clear input
+                inputEl.value = outputEl.value; // Copy output to input
+            });
+        }
 }
 
 async function handleDeleteAllModifierTasksForTarget() {

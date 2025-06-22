@@ -60,7 +60,7 @@ func InitDB(dataSourceName string) error {
 		version, dirty, vErr := m.Version()
 		if vErr != nil {
 			logger.Error("Failed to apply migrations and could not determine migration version: %v. Original migration error: %v", vErr, err)
-			return fmt.Errorf("failed to apply migrations: %w (version check failed: %v)", err, vErr)
+			return fmt.Errorf("failed to apply migrations: %w (version check failed: %v)", vErr, vErr)
 		}
 		if dirty {
 			logger.Error("Database is in a dirty state. The last attempted migration was version %d. Please check the migration file for this version for errors.", version)
@@ -864,7 +864,7 @@ func CopyAllTemplateItemsToTarget(templateID int64, targetID int64) (int64, erro
 			return itemsCopiedCount, fmt.Errorf("scanning template item: %w", errScan)
 		}
 
-		result, errExec := stmt.Exec(targetID, itemText, itemCommandText, notes, false)
+		result, errExec := stmt.Exec(targetID, itemText, itemCommandText, notes, false) // Always insert as not completed
 		if errExec != nil {
 			// Don't close stmt here, it's deferred for the whole function
 			return itemsCopiedCount, fmt.Errorf("executing add checklist item statement for target %d (tx): %w", targetID, errExec)

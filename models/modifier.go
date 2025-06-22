@@ -14,6 +14,10 @@ type ModifierTask struct {
 	BaseRequestURL           string         `json:"base_request_url"`
 	BaseRequestHeaders       sql.NullString `json:"base_request_headers,omitempty"` // JSON string of headers
 	BaseRequestBody          sql.NullString `json:"base_request_body,omitempty"`    // Base64 encoded body string
+	OriginalRequestHeaders   sql.NullString `json:"original_request_headers,omitempty"`
+	OriginalRequestBody      sql.NullString `json:"original_request_body,omitempty"`
+	OriginalResponseHeaders  sql.NullString `json:"original_response_headers,omitempty"`
+	OriginalResponseBody     sql.NullString `json:"original_response_body,omitempty"`
 	LastExecutedLogID        sql.NullInt64  `json:"last_executed_log_id,omitempty"`
 	SourceLogID              sql.NullInt64  `json:"source_log_id,omitempty"`       // Original http_traffic_log.id
 	SourceParameterizedURLID sql.NullInt64  `json:"source_param_url_id,omitempty"` // Original parameterized_urls.id

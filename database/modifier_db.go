@@ -35,6 +35,7 @@ func DeleteModifierTasksByTargetID(targetID int64) (int64, error) {
 func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.ModifierTask, error) {
 	var task models.ModifierTask
 	var sourceName string
+	var originalReqHeaders, originalReqBody, originalResHeaders, originalResBody sql.NullString
 
 	tx, err := DB.Begin()
 	if err != nil {
@@ -45,10 +46,10 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 	if req.HTTPTrafficLogID != 0 {
 		var log models.HTTPTrafficLog
 		// Fetch necessary details from http_traffic_log
-		// Ensure request_headers and request_body are fetched correctly
-		err := tx.QueryRow(`SELECT target_id, request_method, request_url, request_headers, request_body 
+		// Fetch request and response data
+		err := tx.QueryRow(`SELECT target_id, request_method, request_url, request_headers, request_body, response_headers, response_body
 							FROM http_traffic_log WHERE id = ?`, req.HTTPTrafficLogID).Scan(
-			&log.TargetID, &log.RequestMethod, &log.RequestURL, &log.RequestHeaders, &log.RequestBody,
+			&log.TargetID, &log.RequestMethod, &log.RequestURL, &log.RequestHeaders, &log.RequestBody, &log.ResponseHeaders, &log.ResponseBody,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("fetching http_traffic_log %d: %w", req.HTTPTrafficLogID, err)
@@ -59,6 +60,11 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 		} else {
 			task.TargetID = sql.NullInt64{Valid: false}
 		}
+		// Set original request/response data from the source log
+		originalReqHeaders = log.RequestHeaders
+		originalReqBody = models.NullString(string(log.RequestBody))
+		originalResHeaders = log.ResponseHeaders
+		originalResBody = models.NullString(string(log.ResponseBody))
 		task.BaseRequestMethod = log.RequestMethod.String
 		task.BaseRequestURL = log.RequestURL.String
 		task.BaseRequestHeaders = log.RequestHeaders
@@ -80,12 +86,17 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 		task.BaseRequestMethod = pURL.RequestMethod.String
 		task.BaseRequestURL = pURL.ExampleFullURL.String // Use example_full_url as the base
 		// For parameterized URLs, headers and body might need to be fetched from the example log if available
+		// If no example log, original fields will remain null.
 		if pURL.HTTPTrafficLogID.Valid {
-			var logHeaders, logBody sql.NullString
-			errLog := tx.QueryRow(`SELECT request_headers, request_body FROM http_traffic_log WHERE id = ?`, pURL.HTTPTrafficLogID.Int64).Scan(&logHeaders, &logBody)
+			var logHeaders, logBody, logResHeaders, logResBody sql.NullString
+			errLog := tx.QueryRow(`SELECT request_headers, request_body, response_headers, response_body FROM http_traffic_log WHERE id = ?`, pURL.HTTPTrafficLogID.Int64).Scan(&logHeaders, &logBody, &logResHeaders, &logResBody)
 			if errLog == nil {
+				originalReqHeaders = logHeaders
+				originalReqBody = logBody
 				task.BaseRequestHeaders = logHeaders
 				task.BaseRequestBody = logBody
+				originalResHeaders = logResHeaders
+				originalResBody = logResBody
 			} else if errLog != sql.ErrNoRows {
 				logger.Warn("CreateModifierTaskFromSource: Could not fetch headers/body from example log %d for PURL %d: %v", pURL.HTTPTrafficLogID.Int64, req.ParameterizedURLID, errLog)
 			}
@@ -113,14 +124,14 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 	task.DisplayOrder = int(maxOrder.Int64) + 1
 
 	stmt, err := tx.Prepare(`INSERT INTO modifier_tasks 
-		(target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, source_log_id, source_param_url_id, display_order, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+		(target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, original_request_headers, original_request_body, original_response_headers, original_response_body, source_log_id, source_param_url_id, display_order, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 	if err != nil {
 		return nil, fmt.Errorf("preparing insert statement: %w", err)
 	}
 	defer stmt.Close()
 
-	res, err := stmt.Exec(task.TargetID, task.Name, task.BaseRequestMethod, task.BaseRequestURL, task.BaseRequestHeaders, task.BaseRequestBody, task.SourceLogID, task.SourceParameterizedURLID, task.DisplayOrder)
+	res, err := stmt.Exec(task.TargetID, task.Name, task.BaseRequestMethod, task.BaseRequestURL, task.BaseRequestHeaders, task.BaseRequestBody, originalReqHeaders, originalReqBody, originalResHeaders, originalResBody, task.SourceLogID, task.SourceParameterizedURLID, task.DisplayOrder)
 	if err != nil {
 		return nil, fmt.Errorf("executing insert: %w", err)
 	}
@@ -140,7 +151,7 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 // GetModifierTasks retrieves all modifier tasks, optionally filtered by target_id.
 func GetModifierTasks(targetID int64) ([]models.ModifierTask, error) {
 	var tasks []models.ModifierTask
-	query := `SELECT id, target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, last_executed_log_id, source_log_id, source_param_url_id, display_order, created_at, updated_at 
+	query := `SELECT id, target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, original_request_headers, original_request_body, original_response_headers, original_response_body, last_executed_log_id, source_log_id, source_param_url_id, display_order, created_at, updated_at 
 			  FROM modifier_tasks`
 	args := []interface{}{}
 	if targetID != 0 {
@@ -155,8 +166,8 @@ func GetModifierTasks(targetID int64) ([]models.ModifierTask, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var t models.ModifierTask
-		if err := rows.Scan(&t.ID, &t.TargetID, &t.Name, &t.BaseRequestMethod, &t.BaseRequestURL, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.LastExecutedLogID, &t.SourceLogID, &t.SourceParameterizedURLID, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		var t models.ModifierTask // Ensure all new fields are scanned
+		if err := rows.Scan(&t.ID, &t.TargetID, &t.Name, &t.BaseRequestMethod, &t.BaseRequestURL, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.OriginalRequestHeaders, &t.OriginalRequestBody, &t.OriginalResponseHeaders, &t.OriginalResponseBody, &t.LastExecutedLogID, &t.SourceLogID, &t.SourceParameterizedURLID, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning modifier task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -167,9 +178,9 @@ func GetModifierTasks(targetID int64) ([]models.ModifierTask, error) {
 // GetModifierTaskByID retrieves a single modifier task by its ID.
 func GetModifierTaskByID(taskID int64) (*models.ModifierTask, error) {
 	var t models.ModifierTask
-	err := DB.QueryRow(`SELECT id, target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, last_executed_log_id, source_log_id, source_param_url_id, display_order, created_at, updated_at 
-					   FROM modifier_tasks WHERE id = ?`, taskID).Scan(
-		&t.ID, &t.TargetID, &t.Name, &t.BaseRequestMethod, &t.BaseRequestURL, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.LastExecutedLogID, &t.SourceLogID, &t.SourceParameterizedURLID, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt,
+	err := DB.QueryRow(`SELECT id, target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, original_request_headers, original_request_body, original_response_headers, original_response_body, last_executed_log_id, source_log_id, source_param_url_id, display_order, created_at, updated_at 
+					   FROM modifier_tasks WHERE id = ?`, taskID).Scan( // Ensure all new fields are selected
+		&t.ID, &t.TargetID, &t.Name, &t.BaseRequestMethod, &t.BaseRequestURL, &t.BaseRequestHeaders, &t.BaseRequestBody, &t.OriginalRequestHeaders, &t.OriginalRequestBody, &t.OriginalResponseHeaders, &t.OriginalResponseBody, &t.LastExecutedLogID, &t.SourceLogID, &t.SourceParameterizedURLID, &t.DisplayOrder, &t.CreatedAt, &t.UpdatedAt, // Ensure all new fields are scanned
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -248,14 +259,14 @@ func CloneModifierTaskDB(originalTaskID int64) (*models.ModifierTask, error) {
 	clonedTask.DisplayOrder = int(maxOrder.Int64) + 1
 
 	stmt, err := DB.Prepare(`INSERT INTO modifier_tasks 
-		(target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, source_log_id, source_param_url_id, display_order, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+		(target_id, name, base_request_method, base_request_url, base_request_headers, base_request_body, original_request_headers, original_request_body, original_response_headers, original_response_body, source_log_id, source_param_url_id, display_order, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`) // Add new columns to INSERT
 	if err != nil {
 		return nil, fmt.Errorf("preparing insert for clone: %w", err)
 	}
 	defer stmt.Close()
 
-	res, err := stmt.Exec(clonedTask.TargetID, clonedTask.Name, clonedTask.BaseRequestMethod, clonedTask.BaseRequestURL, clonedTask.BaseRequestHeaders, clonedTask.BaseRequestBody, clonedTask.SourceLogID, clonedTask.SourceParameterizedURLID, clonedTask.DisplayOrder)
+	res, err := stmt.Exec(clonedTask.TargetID, clonedTask.Name, clonedTask.BaseRequestMethod, clonedTask.BaseRequestURL, clonedTask.BaseRequestHeaders, clonedTask.BaseRequestBody, clonedTask.OriginalRequestHeaders, clonedTask.OriginalRequestBody, clonedTask.OriginalResponseHeaders, clonedTask.OriginalResponseBody, clonedTask.SourceLogID, clonedTask.SourceParameterizedURLID, clonedTask.DisplayOrder) // Pass original fields
 	if err != nil {
 		return nil, fmt.Errorf("executing insert for clone: %w", err)
 	}
