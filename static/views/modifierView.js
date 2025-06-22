@@ -398,8 +398,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
         }
 
         // --- Construct and Set Workspace HTML ---
-        workspaceDiv.innerHTML = `
-            <div class="modifier-task-header">
+        workspaceDiv.innerHTML = `            <div class="modifier-task-header">
                 <h2 id="modifierTaskNameDisplay" data-task-id="${task.id}">${escapeHtml(task.name || `Task ${task.id}`)}</h2>
                 <div id="modifierTaskNameEditControls" style="display: inline-block; margin-left: 10px;">
                     <button id="editModifierTaskNameBtn" class="action-button inline-edit-button" title="Edit Task Name" style="margin-right: 5px;">✏️</button>
@@ -455,16 +454,22 @@ async function loadModifierTaskIntoWorkspace(taskId) {
             <div id="modifierResponseTab" class="modifier-tab-content ${activateResponseTab ? 'active' : ''}">
                 <div class="response-section">
                     <h3>Response:</h3>
-                    <div class="form-group" style="margin-bottom: 10px;">
+                    <div class="form-group">
                         <label for="modResponseStatus">Status:</label>
                         <input type="text" id="modResponseStatus" class="modifier-input" readonly placeholder="e.g., 200 OK" value="${escapeHtmlAttribute(initialResponseStatus)}">
                     </div>
                     <div class="form-group">
-                        <label for="modResponseHeaders">Response Headers:</label>
+                        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                            <label for="modResponseHeaders">Response Headers:</label>
+                            <span id="modResponseHeadersLength" class="length-display"></span>
+                        </div>
                         <textarea id="modResponseHeaders" class="modifier-textarea" rows="12" readonly placeholder="Response headers will appear here...">${initialResponseHeaders}</textarea>
                     </div>
                     <div class="form-group">
-                        <label for="modResponseBody">Response Body:</label>
+                        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                            <label for="modResponseBody">Response Body:</label>
+                            <span id="modResponseBodyLength" class="length-display"></span>
+                        </div>
                         <textarea id="modResponseBody" class="modifier-textarea" rows="10" readonly placeholder="Response body will appear here...">${initialResponseBody}</textarea>
                     </div>
                 </div>
@@ -507,7 +512,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
                     </div>
                 </div>
             </div>
-        `;
+`;
 
         // --- Add Event Listeners ---
         document.getElementById('sendModifiedRequestBtn')?.addEventListener('click', () => handleSendModifiedRequest(task.id));
@@ -530,6 +535,20 @@ async function loadModifierTaskIntoWorkspace(taskId) {
         }
 
         setupEncoderDecoderListeners();
+
+        const clearAllButton = document.getElementById('clearEncoderDecoderAllBtn');
+        if (clearAllButton) {
+            clearAllButton.addEventListener('click', handleClearEncoderDecoderAll);
+        }
+        // Initial population of lengths for the response tab
+        const modResponseHeadersLengthEl = document.getElementById('modResponseHeadersLength');
+        const modResponseBodyLengthEl = document.getElementById('modResponseBodyLength');
+        if (modResponseHeadersLengthEl) {
+            modResponseHeadersLengthEl.textContent = `Length: ${initialResponseHeaders.length} chars`;
+        }
+        if (modResponseBodyLengthEl) {
+            modResponseBodyLengthEl.textContent = `Length: ${initialResponseBody.length} chars`;
+        }
 
         const responseBodyTextarea = document.getElementById('modResponseBody');
         autoAdjustTextareaHeight(responseBodyTextarea);
@@ -867,6 +886,18 @@ async function handleDeleteModifierTask(taskId, taskName) {
             }
         }
     );
+}
+
+function handleClearEncoderDecoderAll() {
+    const inputEl = document.getElementById('encoderDecoderInput');
+    const outputEl = document.getElementById('encoderDecoderOutput');
+
+    if (inputEl) {
+        inputEl.value = '';
+    }
+    if (outputEl) {
+        outputEl.value = '';
+    }
 }
 
 function setupEncoderDecoderListeners() {
