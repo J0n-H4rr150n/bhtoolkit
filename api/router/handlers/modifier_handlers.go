@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 	"toolkit/config" // Added for accessing app configuration
+	"toolkit/core"
 	"toolkit/database"
 	"toolkit/logger"
 	"toolkit/models"
@@ -269,23 +270,37 @@ func ExecuteModifiedRequestHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Configure an HTTP client (e.g., to skip TLS verification for testing)
-	// Use a configuration setting for InsecureSkipVerify.
-	// Assume config.GetAppConfig() exists and returns your application's configuration.
-	// You'll need to add ModifierSkipTLSVerify to your config struct.
-	skipTLSVerify := config.AppConfig.Proxy.ModifierSkipTLSVerify
-	if skipTLSVerify {
-		logger.Warn("ExecuteModifiedRequestHandler: TLS certificate verification is DISABLED for outgoing modified requests.")
-	}
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify},
-	}
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   30 * time.Second, // Set a reasonable timeout
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse // Do not follow redirects automatically
-		},
+	var client *http.Client
+	sendThroughProxy := r.Header.Get("X-Modifier-Send-Through-Proxy") == "true"
+
+	if sendThroughProxy {
+		logger.Info("ExecuteModifiedRequestHandler: Sending request through proxy: %s", core.GetProxyAddress())
+		proxyURL, _ := url.Parse("http://" + core.GetProxyAddress()) // Proxy is HTTP
+		tr := &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: core.GetProxyClientTLSConfig(), // Use the TLS config that trusts our CA
+		}
+		client = &http.Client{
+			Transport:     tr,
+			Timeout:       30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
+		}
+	} else {
+		// Existing direct connection client logic
+		skipTLSVerify := config.AppConfig.Proxy.ModifierSkipTLSVerify
+		if skipTLSVerify {
+			logger.Warn("ExecuteModifiedRequestHandler: TLS certificate verification is DISABLED for outgoing modified requests.")
+		}
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify},
+		}
+		client = &http.Client{
+			Transport: tr,
+			Timeout:   30 * time.Second, // Set a reasonable timeout
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse // Do not follow redirects automatically
+			},
+		}
 	}
 
 	startTime := time.Now()

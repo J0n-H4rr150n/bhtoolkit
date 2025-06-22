@@ -717,13 +717,18 @@ export async function getModifierTaskDetails(taskId) {
 /**
  * Executes a modified request via the backend.
  * @param {Object} requestData - The modified request details.
- *                               Expected: { taskId (optional), method, url, headers (string), body (string) }
+ *                               Expected: { taskId (optional), method, url, headers (string), body (string), customHeaders (Object, optional) }
  * @returns {Promise<Object>} - A promise that resolves with the response from the executed request.
  */
 export async function executeModifiedRequest(requestData) {
+    const headers = { 'Content-Type': 'application/json' };
+    // Add any custom headers passed in requestData
+    if (requestData.customHeaders) {
+        Object.assign(headers, requestData.customHeaders);
+    }
     const response = await fetch(`${API_BASE}/modifier/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers,
         body: JSON.stringify(requestData),
     });
     return handleResponse(response);

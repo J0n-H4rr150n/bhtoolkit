@@ -62,9 +62,9 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 		}
 		// Set original request/response data from the source log
 		originalReqHeaders = log.RequestHeaders
-		originalReqBody = models.NullString(string(log.RequestBody))
+		originalReqBody = models.NullString(models.Base64Encode(log.RequestBody)) // Base64 encode []byte
 		originalResHeaders = log.ResponseHeaders
-		originalResBody = models.NullString(string(log.ResponseBody))
+		originalResBody = models.NullString(models.Base64Encode(log.ResponseBody)) // Base64 encode []byte
 		task.BaseRequestMethod = log.RequestMethod.String
 		task.BaseRequestURL = log.RequestURL.String
 		task.BaseRequestHeaders = log.RequestHeaders
@@ -88,15 +88,17 @@ func CreateModifierTaskFromSource(req models.AddModifierTaskRequest) (*models.Mo
 		// For parameterized URLs, headers and body might need to be fetched from the example log if available
 		// If no example log, original fields will remain null.
 		if pURL.HTTPTrafficLogID.Valid {
-			var logHeaders, logBody, logResHeaders, logResBody sql.NullString
-			errLog := tx.QueryRow(`SELECT request_headers, request_body, response_headers, response_body FROM http_traffic_log WHERE id = ?`, pURL.HTTPTrafficLogID.Int64).Scan(&logHeaders, &logBody, &logResHeaders, &logResBody)
+			var logBodyBytes []byte                      // Correct type for BLOB
+			var logResBodyBytes []byte                   // Correct type for BLOB
+			var logHeaders, logResHeaders sql.NullString // Only need NullString for headers
+			errLog := tx.QueryRow(`SELECT request_headers, request_body, response_headers, response_body FROM http_traffic_log WHERE id = ?`, pURL.HTTPTrafficLogID.Int64).Scan(&logHeaders, &logBodyBytes, &logResHeaders, &logResBodyBytes)
 			if errLog == nil {
-				originalReqHeaders = logHeaders
-				originalReqBody = logBody
+				originalReqHeaders = logHeaders                                        // Already JSON string, no change needed
+				originalReqBody = models.NullString(models.Base64Encode(logBodyBytes)) // Base64 encode []byte
 				task.BaseRequestHeaders = logHeaders
-				task.BaseRequestBody = logBody
+				task.BaseRequestBody = models.NullString(models.Base64Encode(logBodyBytes)) // Base64 encode []byte
 				originalResHeaders = logResHeaders
-				originalResBody = logResBody
+				originalResBody = models.NullString(models.Base64Encode(logResBodyBytes)) // Base64 encode []byte
 			} else if errLog != sql.ErrNoRows {
 				logger.Warn("CreateModifierTaskFromSource: Could not fetch headers/body from example log %d for PURL %d: %v", pURL.HTTPTrafficLogID.Int64, req.ParameterizedURLID, errLog)
 			}

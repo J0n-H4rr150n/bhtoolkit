@@ -9,7 +9,167 @@ let tableService; // If needed for tables within modifier
 let viewContentContainer;
 
 // Module-level state for the "Add no-cache header" toggle
+// Module-level state for the "Send through Proxy" toggle
 let autoAddNoCacheHeader = localStorage.getItem('modifierAddNoCacheHeader') === 'true';
+
+// --- Diffing Functions ---
+function renderDiffContent() {
+    const diffContentEl = document.getElementById('diffContent');
+    if (!diffContentEl) return;
+
+    const appState = stateService.getState();
+    const currentTask = appState.currentModifierTask;
+
+    if (!currentTask) {
+        diffContentEl.innerHTML = '<p>No task loaded to compare.</p>';
+        return;
+    }
+
+    // --- Request Diff ---
+    let originalReqHeaders = currentTask.original_request_headers?.String || '';
+    let originalReqBody = (currentTask.original_request_body?.String && currentTask.original_request_body.Valid) ? atob(currentTask.original_request_body.String) : '';
+    let originalReqMethod = currentTask.base_request_method; // Method is part of the base request
+    let originalReqUrl = currentTask.base_request_url; // URL is part of the base request
+
+    let currentReqHeaders = document.getElementById('modHeaders')?.value || '';
+    let currentReqBody = document.getElementById('modBody')?.value || '';
+    let currentReqMethod = document.getElementById('modMethod')?.value || '';
+    let currentReqUrl = document.getElementById('modURL')?.value || '';
+
+    let requestDiffHtml = '<h3>Request Diff:</h3>';
+    requestDiffHtml += '<div class="diff-section">';
+
+    // Method Diff
+    if (originalReqMethod !== currentReqMethod) {
+        requestDiffHtml += `<p><span class="diff-removed">Method: ${escapeHtml(originalReqMethod)}</span></p>`;
+        requestDiffHtml += `<p><span class="diff-added">Method: ${escapeHtml(currentReqMethod)}</span></p>`;
+    } else {
+        requestDiffHtml += `<p>Method: ${escapeHtml(originalReqMethod)} (No Change)</p>`;
+    }
+
+    // URL Diff
+    if (originalReqUrl !== currentReqUrl) {
+        requestDiffHtml += `<p><span class="diff-removed">URL: ${escapeHtml(originalReqUrl)}</span></p>`;
+        requestDiffHtml += `<p><span class="diff-added">URL: ${escapeHtml(currentReqUrl)}</span></p>`;
+    } else {
+        requestDiffHtml += `<p>URL: ${escapeHtml(originalReqUrl)} (No Change)</p>`;
+    }
+
+    // Headers Diff
+    requestDiffHtml += '<h4>Headers:</h4>';
+    requestDiffHtml += generateTextDiff(originalReqHeaders, currentReqHeaders);
+
+    // Body Diff
+    requestDiffHtml += '<h4>Body:</h4>';
+    requestDiffHtml += generateTextDiff(originalReqBody, currentReqBody);
+
+    requestDiffHtml += '</div>';
+
+    // --- Response Diff ---
+    let originalResHeaders = currentTask.original_response_headers?.String || '';
+    let originalResBody = (currentTask.original_response_body?.String && currentTask.original_response_body.Valid) ? atob(currentTask.original_response_body.String) : '';
+
+    let currentResHeaders = document.getElementById('modResponseHeaders')?.value || '';
+    let currentResBody = document.getElementById('modResponseBody')?.value || '';
+    let currentResStatus = document.getElementById('modResponseStatus')?.value || '';
+
+    let responseDiffHtml = '<h3>Response Diff (Original vs. Last Executed):</h3>';
+    responseDiffHtml += '<div class="diff-section">';
+
+    // Status (only display current, as original status is not explicitly stored for diffing)
+    responseDiffHtml += `<p>Last Executed Status: ${escapeHtml(currentResStatus)}</p>`;
+
+    // Headers Diff
+    responseDiffHtml += '<h4>Headers:</h4>';
+    responseDiffHtml += generateTextDiff(originalResHeaders, currentResHeaders);
+
+    // Body Diff
+    responseDiffHtml += '<h4>Body:</h4>';
+    responseDiffHtml += generateTextDiff(originalResBody, currentResBody);
+
+    responseDiffHtml += '</div>';
+
+    diffContentEl.innerHTML = requestDiffHtml + responseDiffHtml;
+}
+
+// Simple line-by-line text diffing function
+function generateTextDiff(originalText, currentText) {
+    // Normalize line endings to LF for consistent splitting
+    originalText = originalText.replace(/\r\n/g, '\n');
+    currentText = currentText.replace(/\r\n/g, '\n');
+
+    const originalLines = originalText.split('\n');
+    const currentLines = currentText.split('\n');
+
+    let diffHtml = '<pre class="diff-output">';
+
+    // Simple diff: iterate through lines and mark as added/removed/changed
+    // This is a basic diff and won't handle complex changes (e.g., reordering)
+    const maxLength = Math.max(originalLines.length, currentLines.length);
+    for (let i = 0; i < maxLength; i++) {
+        const originalLine = originalLines[i] !== undefined ? originalLines[i] : '';
+        const currentLine = currentLines[i] !== undefined ? currentLines[i] : '';
+
+        if (originalLine === currentLine) {
+            diffHtml += `<span>${escapeHtml(originalLine)}</span>\n`;
+        } else {
+            if (originalLine !== '') {
+                diffHtml += `<span class="diff-removed">- ${escapeHtml(originalLine)}</span>\n`;
+            }
+            if (currentLine !== '') {
+                diffHtml += `<span class="diff-added">+ ${escapeHtml(currentLine)}</span>\n`;
+            }
+        }
+    }
+    diffHtml += '</pre>';
+    return diffHtml;
+}
+
+// Basic CSS for diff output (you might want to put this in your main CSS file)
+const diffCss = `
+.diff-output {
+    white-space: pre-wrap;
+    word-break: break-all;
+    background-color: #f8f8f8;
+    border: 1px solid #ddd;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 0.9em;
+    max-height: 400px;
+    overflow-y: auto;
+}
+.diff-output span {
+    display: block; /* Each line on its own block */
+}
+.diff-removed {
+    background-color: #ffeef0;
+    color: #a00;
+}
+.diff-added {
+    background-color: #e6ffed;
+    color: #0a0;
+}
+body.dark-mode .diff-output {
+    background-color: #2c3a47;
+    border-color: #444;
+}
+body.dark-mode .diff-removed {
+    background-color: #4a2c2c;
+    color: #ff6666;
+}
+body.dark-mode .diff-added {
+    background-color: #2c4a2c;
+    color: #66ff66;
+}
+`;
+
+// Inject CSS if not already present (only once)
+if (!document.getElementById('diff-styles')) {
+    const styleSheet = document.createElement('style');
+    styleSheet.id = 'diff-styles';
+    styleSheet.textContent = diffCss;
+    document.head.appendChild(styleSheet);
+}
 
 // Helper to decode Base64Url
 const decodeBase64Url = (input) => {
@@ -417,6 +577,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
             <div class="modifier-tabs">
                 <button class="modifier-tab-button ${!activateResponseTab ? 'active' : ''}" data-tab-id="modifierRequestTab">Request</button>
                 <button class="modifier-tab-button ${activateResponseTab ? 'active' : ''}" data-tab-id="modifierResponseTab">Response</button>
+                <button class="modifier-tab-button" data-tab-id="modifierDiffTab">Diff</button>
                 <button class="modifier-tab-button" data-tab-id="modifierEncoderDecoderTab">Encoder/Decoder</button>
             </div>
 
@@ -446,6 +607,10 @@ async function loadModifierTaskIntoWorkspace(taskId) {
                             <input type="checkbox" id="modAddNoCacheHeaderToggle" style="margin-right: 8px;" ${autoAddNoCacheHeader ? 'checked' : ''}>
                             <label for="modAddNoCacheHeaderToggle" style="font-weight:normal;">Ensure "Cache-Control: no-cache" header is sent</label>
                         </div>
+                        <div class="form-group" style="display: flex; align-items: center; margin-bottom: 10px; margin-top: 10px;">
+                            <input type="checkbox" id="modSendThroughProxyToggle" style="margin-right: 8px;" ${localStorage.getItem('modifierSendThroughProxy') === 'true' ? 'checked' : ''}>
+                            <label for="modSendThroughProxyToggle" style="font-weight:normal;">Send through Proxy (log traffic)</label>
+                        </div>
                         <button id="sendModifiedRequestBtn" class="primary" style="margin-top: 5px;">Send Request</button>
                     </div>
                 </div>
@@ -473,6 +638,11 @@ async function loadModifierTaskIntoWorkspace(taskId) {
                         <textarea id="modResponseBody" class="modifier-textarea" rows="10" readonly placeholder="Response body will appear here...">${initialResponseBody}</textarea>
                     </div>
                 </div>
+            </div>
+
+            <div id="modifierDiffTab" class="modifier-tab-content">
+                <h2>Request/Response Diff</h2>
+                <div id="diffContent">Select a task to see diffs.</div>
             </div>
 
             <div id="modifierEncoderDecoderTab" class="modifier-tab-content">
@@ -534,6 +704,14 @@ async function loadModifierTaskIntoWorkspace(taskId) {
             });
         }
 
+        const sendThroughProxyToggleElement = document.getElementById('modSendThroughProxyToggle');
+        if (sendThroughProxyToggleElement) {
+            sendThroughProxyToggleElement.addEventListener('change', (event) => {
+                localStorage.setItem('modifierSendThroughProxy', event.target.checked);
+            });
+        }
+
+
         setupEncoderDecoderListeners();
 
         const clearAllButton = document.getElementById('clearEncoderDecoderAllBtn');
@@ -557,6 +735,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
         if (activateResponseTab) {
             setActiveModifierTab('modifierResponseTab');
         } else {
+            // If no response, default to request tab, but also load diff content
             setActiveModifierTab('modifierRequestTab'); // Default to request tab
         }
 
@@ -564,6 +743,7 @@ async function loadModifierTaskIntoWorkspace(taskId) {
     } catch (error) {
         console.error(`Error loading modifier task ${taskId} into workspace:`, error);
         workspaceDiv.innerHTML = `<p class="error-message">Error loading task details: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('diffContent').innerHTML = `<p class="error-message">Error loading diff data: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -579,6 +759,7 @@ function setActiveModifierTab(tabIdToActivate) {
     // Activate the selected tab button and content
     document.querySelector(`.modifier-tab-button[data-tab-id="${tabIdToActivate}"]`)?.classList.add('active');
     document.getElementById(tabIdToActivate)?.classList.add('active');
+    if (tabIdToActivate === 'modifierDiffTab') { renderDiffContent(); }
 }
 
 function setupModifierLayoutControls() {
@@ -649,6 +830,7 @@ async function handleSendModifiedRequest(taskId) {
     const url = document.getElementById('modURL').value;
     let headersStringForSending = document.getElementById('modHeaders').value; 
     const body = document.getElementById('modBody').value; 
+    const sendThroughProxy = localStorage.getItem('modifierSendThroughProxy') === 'true';
     const requestStatusMessageEl = document.getElementById('modifierRequestStatusMessage');
     const sendButton = document.getElementById('sendModifiedRequestBtn');
 
@@ -705,7 +887,10 @@ async function handleSendModifiedRequest(taskId) {
             method: method,
             url: url,
             headers: headersStringForSending, 
-            body: body        
+            body: body,
+            customHeaders: { // Pass custom headers to apiService.executeModifiedRequest
+                'X-Modifier-Send-Through-Proxy': sendThroughProxy ? 'true' : 'false'
+            }
         });
 
         if (responseData.error) { // Check for backend-reported error

@@ -37,6 +37,7 @@ import (
 var (
 	caCert                *x509.Certificate
 	caKey                 *rsa.PrivateKey
+	goproxyTLSConfig      *tls.Config // Exported for use by other modules
 	sessionIsHTTPS        = make(map[int64]bool)
 	muSession             sync.Mutex
 	parsedSynackTargetURL *url.URL
@@ -51,6 +52,17 @@ var (
 	globalMissionService *SynackMissionService // To make mission service available to proxy handlers
 	analyticsFetchTicker *time.Ticker
 )
+
+// GetProxyClientTLSConfig returns a *tls.Config that trusts the proxy's CA.
+// This is used by clients (like the modifier) that want to send traffic through this proxy.
+func GetProxyClientTLSConfig() *tls.Config {
+	return goproxyTLSConfig
+}
+
+// GetProxyAddress returns the proxy's listening address (e.g., "127.0.0.1:8777").
+func GetProxyAddress() string {
+	return fmt.Sprintf("127.0.0.1:%s", config.AppConfig.Proxy.Port)
+}
 
 // proxyRequestContextData holds data passed between request and response handlers via ctx.UserData
 type proxyRequestContextData struct {
@@ -98,6 +110,11 @@ func min(a, b int) int {
 func setGoproxyCA(loadedGoproxyCa *tls.Certificate) {
 	if loadedGoproxyCa == nil {
 		logger.Fatal("setGoproxyCA called with nil certificate")
+	}
+	// Store the TLS config for external use (e.g., by modifier)
+	goproxyTLSConfig = &tls.Config{
+		RootCAs:    x509.NewCertPool(),
+		MinVersion: tls.VersionTLS12, // Enforce TLS 1.2 or higher
 	}
 	goproxy.GoproxyCa = *loadedGoproxyCa
 	logger.ProxyInfo("goproxy CA configured (Simplified Mode - Direct Action Construction).")
@@ -450,6 +467,7 @@ func StartMitmProxy(ctx context.Context, port string, cliTargetID int64, caCertP
 		PrivateKey:  caKey,
 		Leaf:        caCert,
 	})
+	goproxyTLSConfig.RootCAs.AddCert(caCert) // Add the CA cert to the pool for the client TLS config
 
 	scopeMu.Lock()
 	if cliTargetID != 0 {
