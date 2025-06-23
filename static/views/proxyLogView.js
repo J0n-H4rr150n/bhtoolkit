@@ -172,12 +172,14 @@ function handleProxyLogFilterChange(event) {
     let finalMethod = pState.filterMethod;
     let finalStatus = pState.filterStatus;
     let finalContentType = pState.filterContentType;
+    let finalDomain = pState.filterDomain;
 
     if (filterKey === 'method') finalMethod = newFilterValue;
     else if (filterKey === 'status') finalStatus = newFilterValue;
     else if (filterKey === 'type') finalContentType = newFilterValue;
+    else if (filterKey === 'domain') finalDomain = newFilterValue;
 
-    const queryParams = new URLSearchParams({
+    const queryParams = new URLSearchParams({ // Rebuild all query params to ensure consistency
         page: '1',
         sort_by: pState.sortBy,
         sort_order: pState.sortOrder,
@@ -185,8 +187,9 @@ function handleProxyLogFilterChange(event) {
         method: finalMethod,
         status: finalStatus,
         type: finalContentType,
-        search: pState.filterSearchText,
-        filter_tag_ids: pState.filterTagIDs.length > 0 ? pState.filterTagIDs.join(',') : '' // Preserve existing tag filter
+        search: pState.filterSearchText, // Preserve search text
+        filter_tag_ids: pState.filterTagIDs.length > 0 ? pState.filterTagIDs.join(',') : '', // Preserve existing tag filter
+        domain: finalDomain // Add the new domain filter
     });
     console.log('[ProxyLogView] New Hash Query Params:', queryParams.toString());
     window.location.hash = `#proxy-log?${queryParams.toString()}`;
@@ -207,7 +210,7 @@ function handleProxyLogSort(event) {
     if (currentProxyLogState.sortBy === newSortBy) {
         newSortOrder = currentProxyLogState.sortOrder === 'ASC' ? 'DESC' : 'ASC';
     }
-    window.location.hash = `#proxy-log?page=1&sort_by=${newSortBy}&sort_order=${newSortOrder}&favorites_only=${currentProxyLogState.filterFavoritesOnly}&method=${encodeURIComponent(currentProxyLogState.filterMethod)}&status=${encodeURIComponent(currentProxyLogState.filterStatus)}&type=${encodeURIComponent(currentProxyLogState.filterContentType)}&search=${encodeURIComponent(currentProxyLogState.filterSearchText)}`;
+    window.location.hash = `#proxy-log?page=1&sort_by=${newSortBy}&sort_order=${newSortOrder}&favorites_only=${currentProxyLogState.filterFavoritesOnly}&method=${encodeURIComponent(currentProxyLogState.filterMethod)}&status=${encodeURIComponent(currentProxyLogState.filterStatus)}&type=${encodeURIComponent(currentProxyLogState.filterContentType)}&search=${encodeURIComponent(currentProxyLogState.filterSearchText)}&domain=${encodeURIComponent(currentProxyLogState.filterDomain)}`;
 }
 
 function renderProxyLogPagination(container) {
@@ -304,6 +307,33 @@ function handleViewLogDetail(event) {
     }
 }
 
+async function fetchAndPopulateDomainFilterDropdown(targetId) {
+    const domainFilterSelect = document.getElementById('proxyLogDomainFilter');
+    if (!domainFilterSelect) return;
+
+    domainFilterSelect.innerHTML = '<option value="">All Domains</option>'; // Default option
+    domainFilterSelect.disabled = true;
+
+    if (!targetId) return;
+
+    try {
+        // Assuming a new API endpoint to get distinct domains from logs for a target
+        const distinctDomains = await apiService.getDistinctDomainsForTargetLogs(targetId);
+        distinctDomains.forEach(domain => {
+            const option = document.createElement('option');
+            option.value = domain;
+            option.textContent = escapeHtml(domain);
+            domainFilterSelect.appendChild(option);
+        });
+        domainFilterSelect.disabled = false;
+        domainFilterSelect.value = stateService.getState().paginationState.proxyLog.filterDomain || ''; // Set current filter
+    } catch (error) {
+        console.error("Error fetching distinct domains for filter:", error);
+        domainFilterSelect.innerHTML = '<option value="">Error loading domains</option>';
+        domainFilterSelect.disabled = true;
+    }
+}
+
 /**
  * Renders the static shell of the proxy log view.
  * This function is called by the router before fetchAndDisplayProxyLogs.
@@ -349,6 +379,12 @@ export async function loadProxyLogView(mainViewContainer, proxyLogParams = null)
                 </div>
                 <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
                     <input type="search" id="proxyLogSearchInput" placeholder="Search URL, Headers, Body..." value="${escapeHtmlAttribute(filterSearchText)}" style="width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #bdc3c7;">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="proxyLogDomainFilter" style="margin-right: 5px;">Domain:</label>
+                    <select id="proxyLogDomainFilter" data-filter-key="domain" style="min-width: 150px;">
+                        <option value="">All Domains</option>
+                    </select>
                 </div>
             </div>
             <div id="proxyLogControlsRow" style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;">
@@ -413,6 +449,12 @@ export async function loadProxyLogView(mainViewContainer, proxyLogParams = null)
         defaultToResponseToggle.addEventListener('change', (event) => {
             localStorage.setItem('proxyLogDefaultToResponseTab', event.target.checked);
         });
+
+        // Add listener for the new domain filter dropdown
+        document.getElementById('proxyLogDomainFilter')?.addEventListener('change', (event) => handleProxyLogFilterChange(event, currentTargetId));
+
+        // Fetch and populate the domain filter dropdown
+        fetchAndPopulateDomainFilterDropdown(currentTargetId);
     }
 }
 
@@ -467,11 +509,12 @@ export async function fetchAndDisplayProxyLogs(passedParams = null) {
         let apiResponse = { logs: [], distinct_values: {}, page: 1, limit: 0, total_pages: 0, total_records: 0 };
         if (analysis_type !== 'params') {
             const paramsForAPI = {
-                target_id: currentTargetId,
-                page: currentPage, limit: limit, sort_by: sortBy, sort_order: sortOrder,
-                favorites_only: filterFavoritesOnly, method: filterMethod, status: filterStatus,
-                type: filterContentType, search: filterSearchText,
-                filter_tag_ids: filterTagIDs && filterTagIDs.length > 0 ? filterTagIDs.join(',') : ''
+                target_id: currentTargetId, page: currentPage, limit: limit,
+                sort_by: sortBy, sort_order: sortOrder, favorites_only: filterFavoritesOnly,
+                method: filterMethod, status: filterStatus, type: filterContentType,
+                search: filterSearchText,
+                filter_tag_ids: filterTagIDs && filterTagIDs.length > 0 ? filterTagIDs.join(',') : '',
+                domain: validatedParams.filterDomain // Add the new domain filter
             };
             apiResponse = await apiService.getProxyLog(paramsForAPI);
         }

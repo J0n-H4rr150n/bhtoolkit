@@ -13,6 +13,7 @@ type ProxyLogFilters struct {
 	FilterContentType   string `json:"type,omitempty"`
 	FilterSearchText    string `json:"search,omitempty"`
 	AnalysisType        string `json:"analysis_type,omitempty"` // For specific analyses like "params"
+	FilterDomain        string `json:"domain,omitempty"`
 }
 
 // ParameterizedURLFilters defines parameters for filtering parameterized URL queries.

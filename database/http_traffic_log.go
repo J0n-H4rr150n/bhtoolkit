@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,7 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 	fromAndJoinBase := "FROM http_traffic_log htl LEFT JOIN pages p ON htl.page_sitemap_id = p.id"
 	whereClauses := []string{"htl.target_id = ?"} // Explicitly use htl.target_id
 	args := []interface{}{filters.TargetID}
+	countArgs := []interface{}{filters.TargetID} // Initialize countArgs here
 
 	if filters.FilterFavoritesOnly {
 		whereClauses = append(whereClauses, "is_favorite = TRUE")
@@ -43,6 +46,24 @@ func GetHTTPTrafficLogEntries(filters models.ProxyLogFilters) ([]models.HTTPTraf
 	if filters.FilterContentType != "" {
 		whereClauses = append(whereClauses, "LOWER(response_content_type) LIKE LOWER(?)")
 		args = append(args, "%"+filters.FilterContentType+"%")
+	}
+	logger.Debug("GetHTTPTrafficLogEntries: FilterDomain received: '%s'", filters.FilterDomain)
+	// Filter by domain (hostname part of the URL)
+	if filters.FilterDomain != "" {
+		// This pattern attempts to match the exact domain name as the hostname.
+		// It covers:
+		// - http://domain.com
+		// - https://domain.com
+		// - http://domain.com/path
+		// - https://domain.com?query
+		// - http://domain.com:port
+		// - https://domain.com:port
+		whereClauses = append(whereClauses, `(
+            request_url LIKE 'http://' || ? || '%' OR
+            request_url LIKE 'https://' || ? || '%'
+        )`)
+		args = append(args, filters.FilterDomain, filters.FilterDomain)
+		countArgs = append(countArgs, filters.FilterDomain, filters.FilterDomain)
 	}
 	if filters.FilterSearchText != "" {
 		// Expand search to include headers and bodies.
@@ -221,4 +242,56 @@ func LogExecutedModifierRequest(logEntry *models.HTTPTrafficLog) (int64, error) 
 		return 0, err
 	}
 	return result.LastInsertId()
+}
+
+// GetDistinctDomainsFromLogs retrieves a list of distinct hostnames (domains)
+// from the http_traffic_log for a given target.
+func GetDistinctDomainsFromLogs(targetID int64) ([]string, error) {
+	logger.Debug("GetDistinctDomainsFromLogs: Called for targetID: %d", targetID)
+	if DB == nil {
+		logger.Error("GetDistinctDomainsFromLogs: Database connection is not initialized.")
+		return nil, fmt.Errorf("database connection is not initialized")
+	}
+
+	query := `
+		SELECT DISTINCT request_url
+		FROM http_traffic_log
+		WHERE target_id = ? AND request_url IS NOT NULL AND request_url != ''
+	`
+	rows, err := DB.Query(query, targetID)
+	if err != nil {
+		logger.Error("GetDistinctDomainsFromLogs: Error querying distinct URLs for target %d: %v", targetID, err)
+		return nil, fmt.Errorf("querying distinct URLs failed: %w", err)
+	}
+	defer rows.Close()
+
+	domainMap := make(map[string]struct{}) // Use a map to ensure uniqueness
+	processedURLsCount := 0
+	parsedHostnamesCount := 0
+
+	for rows.Next() {
+		processedURLsCount++
+		var rawURL string
+		if err := rows.Scan(&rawURL); err != nil {
+			logger.Error("GetDistinctDomainsFromLogs: Error scanning raw URL: %v", err)
+			continue
+		}
+		logger.Debug("GetDistinctDomainsFromLogs: Processing raw URL: '%s'", rawURL)
+		if u, err := url.Parse(rawURL); err == nil && u.Hostname() != "" {
+			parsedHostnamesCount++
+			domainMap[u.Hostname()] = struct{}{}
+			logger.Debug("GetDistinctDomainsFromLogs: Extracted hostname: '%s'", u.Hostname())
+		} else {
+			logger.Debug("GetDistinctDomainsFromLogs: Failed to parse URL '%s' or extract hostname. Error: %v, Hostname: '%s'", rawURL, err, u.Hostname())
+		}
+	}
+
+	domains := make([]string, 0, len(domainMap))
+	for domain := range domainMap {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains) // Sort the domains alphabetically
+
+	logger.Debug("GetDistinctDomainsFromLogs: Finished processing for targetID %d. Total distinct URLs processed: %d. Total hostnames extracted: %d. Final distinct domains: %d.", targetID, processedURLsCount, parsedHostnamesCount, len(domains))
+	return domains, nil
 }

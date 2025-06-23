@@ -224,6 +224,7 @@ async function loadView(viewId, params = {}) {
                 filterStatus: params.status || '', // Use parsed 'status' from hash
                 filterContentType: params.type || '', // Use parsed 'type' from hash
                 filterSearchText: params.search || '', 
+                filterDomain: params.domain || '', // Add domain filter
                 showIncompleteOnly: params.show_incomplete_only === 'true', // Add this for checklist
                 filterTagIDs: params.filterTagIDs || [], // Add this for tags
                 analysis_type: params.analysis_type || null // Ensure analysis_type is carried over
@@ -234,6 +235,7 @@ async function loadView(viewId, params = {}) {
                  newPaginationState.proxyLog.filterStatus = '';
                  newPaginationState.proxyLog.filterContentType = '';
                  newPaginationState.proxyLog.filterSearchText = '';
+                 newPaginationState.proxyLog.filterDomain = '';
                  newPaginationState.proxyLog.filterFavoritesOnly = false;
                  // newPaginationState.proxyLog.showIncompleteOnly = true; // Reset for proxy log if needed, or handle separately
                  newPaginationState.proxyLog.analysis_type = null; // Reset analysis_type if no query params
@@ -386,6 +388,8 @@ function handleHashChange() {
                     params.show_incomplete_only = value; 
                 } else if (key === 'filter_tag_ids') {
                     params.filterTagIDs = value ? value.split(',') : [];
+                } else if (key === 'domain') {
+                    params.domain = value;
                 } else {
                     params[key] = value; // Catch-all for any other parameters
                     // Specifically capture 'tab' if it's not handled above

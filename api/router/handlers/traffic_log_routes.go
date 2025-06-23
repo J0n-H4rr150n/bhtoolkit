@@ -11,6 +11,7 @@ import (
 
 func RegisterTrafficLogRoutes(r chi.Router) {
 	r.Get("/traffic-log", GetTrafficLogHandler)
+	r.Get("/traffic-log/distinct-domains", GetDistinctDomainsForTargetLogsHandler)
 
 	// Routes for specific log entries: /traffic-log/entry/{logID}
 	r.Route("/traffic-log/entry/{logID}", func(subRouter chi.Router) {

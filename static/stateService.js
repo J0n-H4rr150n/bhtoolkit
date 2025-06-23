@@ -30,7 +30,7 @@ let state = {
             currentPage: 1, limit: 15, // This 'limit' will be the runtime page size
             totalPages: 1, totalRecords: 0,
             sortBy: 'id', sortOrder: 'DESC', filterFavoritesOnly: false,
-            filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: '',
+            filterMethod: '', filterStatus: '', filterContentType: '', filterSearchText: '', filterDomain: '', // Added filterDomain
             analysis_type: null, // Added to proxyLog pagination state
             filterTagIDs: [] // New: For storing selected tag IDs for filtering
         },

@@ -33,6 +33,7 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	filterContentType := r.URL.Query().Get("type")
 	filterSearchText := r.URL.Query().Get("search")
 	filterTagIDsStr := r.URL.Query().Get("filter_tag_ids") // New: Filter by tag IDs
+	filterDomain := r.URL.Query().Get("domain")
 
 	if targetIDStr == "" {
 		logger.Error("GetTrafficLogHandler: target_id query parameter is required")
@@ -104,6 +105,27 @@ func GetTrafficLogHandler(w http.ResponseWriter, r *http.Request) {
 	if filterContentType != "" {
 		whereClauses = append(whereClauses, "LOWER(htl.response_content_type) LIKE LOWER(?)") // Alias added
 		queryArgs = append(queryArgs, "%"+filterContentType+"%")
+	}
+
+	if filterDomain != "" {
+		// This pattern is more robust than a simple LIKE %domain%
+		// It ensures we match the hostname part of the URL.
+		domainClause := `(
+            htl.request_url LIKE 'http://' || ? || '/%' OR
+            htl.request_url LIKE 'https://' || ? || '/%' OR
+            htl.request_url = 'http://' || ? OR
+            htl.request_url = 'https://' || ? OR
+            htl.request_url LIKE 'http://' || ? || ':%' OR
+            htl.request_url LIKE 'https://' || ? || ':%'
+        )`
+		whereClauses = append(whereClauses, domainClause)
+		queryArgs = append(queryArgs, filterDomain, filterDomain, filterDomain, filterDomain, filterDomain, filterDomain)
+
+		// Also add to distinct clauses to filter the dropdowns correctly
+		// Note: No 'htl.' alias needed here as it's a single table query for distinct values
+		distinctDomainClause := `(request_url LIKE 'http://' || ? || '/%' OR request_url LIKE 'https://' || ? || '/%' OR request_url = 'http://' || ? OR request_url = 'https://' || ? OR request_url LIKE 'http://' || ? || ':%' OR request_url LIKE 'https://' || ? || ':%')`
+		distinctWhereClauses = append(distinctWhereClauses, distinctDomainClause)
+		distinctQueryArgs = append(distinctQueryArgs, filterDomain, filterDomain, filterDomain, filterDomain, filterDomain, filterDomain)
 	}
 
 	if filterSearchText != "" {
@@ -716,4 +738,30 @@ func AnalyzeCommentsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(findings) // Send back the array of CommentFinding
+}
+
+// GetDistinctDomainsForTargetLogsHandler handles requests to get a list of distinct domains
+// from the http_traffic_log for a given target.
+func GetDistinctDomainsForTargetLogsHandler(w http.ResponseWriter, r *http.Request) {
+	logger.Debug("GetDistinctDomainsForTargetLogsHandler: Called.")
+	targetIDStr := r.URL.Query().Get("target_id")
+	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
+	if err != nil || targetID == 0 {
+		logger.Error("GetDistinctDomainsForTargetLogsHandler: Invalid or missing target_id: %v", err)
+		http.Error(w, "Invalid or missing target_id", http.StatusBadRequest)
+		return
+	}
+
+	domains, err := database.GetDistinctDomainsFromLogs(targetID)
+	if err != nil {
+		logger.Error("GetDistinctDomainsForTargetLogsHandler: Error fetching distinct domains for target %d: %v", targetID, err)
+		http.Error(w, "Failed to retrieve distinct domains", http.StatusInternalServerError)
+		return
+	}
+
+	if domains == nil {
+		domains = []string{} // Ensure an empty array is returned instead of null
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(domains)
 }

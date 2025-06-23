@@ -413,6 +413,16 @@ export async function getProxyLog(params) {
 }
 
 /**
+ * Fetches a list of distinct domains from proxy logs for a given target.
+ * @param {number|string} targetId - The ID of the target.
+ * @returns {Promise<Array<string>>} - A promise that resolves with an array of distinct domain strings.
+ */
+export async function getDistinctDomainsForTargetLogs(targetId) {
+    const response = await fetch(`${API_BASE}/traffic-log/distinct-domains?target_id=${targetId}`);
+    return handleResponse(response);
+}
+
+/**
  * Marks a proxy log entry as favorite or not.
  * @param {number|string} logId - The ID of the log entry.
  * @param {boolean} isFavorite - True to mark as favorite, false otherwise.
@@ -893,18 +903,6 @@ export async function deleteModifierTask(taskId) {
         method: 'DELETE',
     });
     return handleResponse(response); // Expects 200 OK or 204 No Content on success
-}
-
-/**
- * Deletes all modifier tasks for a specific target.
- * @param {number|string} targetId - The ID of the target.
- * @returns {Promise<Object>} - A promise that resolves with the backend's response.
- */
-export async function deleteModifierTasksForTarget(targetId) {
-    const response = await fetch(`${API_BASE}/modifier/tasks/target/${targetId}`, {
-        method: 'DELETE',
-    });
-    return handleResponse(response);
 }
 
 /**
